@@ -50,7 +50,7 @@ docker run \
       },
       "jobs": [
         {
-          "script": "dump_azstorage",
+          "type": "azstorage",
           "id": "azdump1",
           "crontab": "*/5 * * * *",
           "debug": false,
@@ -63,7 +63,7 @@ docker run \
           ]
         },
         {
-          "script": "dump_pgsql",
+          "type": "pgsql",
           "id": "pgdump1",
           "crontab": "* * * * *",
           "debug": false,
