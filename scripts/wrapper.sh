@@ -10,7 +10,6 @@ LOGFILE="/tmp/vnclouddump-${RANDOM}.log"
 MAIL="mutt"
 
 CONFIGFILE="/config/config.json"
-#CONFIGFILE="${HOME}/Projects/Vendanor/VnCloudDump/config/config.json"
 
 VERSION=$(head -n 1 /VERSION)
 
@@ -72,7 +71,7 @@ function exit_clean() {
     rm -f "${LOCKFILE}"
   fi
 
-  exit 0
+  # Don't exit here - let the trap return naturally to preserve exit code
 
 }
 

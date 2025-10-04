@@ -6,7 +6,6 @@
 
 
 CONFIGFILE="/config/config.json"
-#CONFIGFILE="${HOME}/Projects/Vendanor/VnCloudDump/config/config.json"
 
 JOBID="${1}"
 
@@ -45,7 +44,7 @@ print "Vendanor AzDump ($0)"
 
 # Check commands
 
-cmds="which sed date touch mkdir cp rm azcopy"
+cmds="which sed date touch mkdir cp rm jq azcopy"
 cmds_missing=
 for cmd in ${cmds}
 do
@@ -114,6 +113,8 @@ fi
 
 
 # Backup each blob storage
+
+result=0
 
 bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
 if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
