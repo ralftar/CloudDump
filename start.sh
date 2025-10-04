@@ -807,8 +807,6 @@ declare -A last_run_times
 
 while true; do
   
-  current_minute=$(date '+%Y-%m-%d %H:%M')
-  
   # Check each job
   for ((i = 0; i < jobs; i++)); do
     
