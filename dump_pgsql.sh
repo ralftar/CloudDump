@@ -2,20 +2,69 @@
 
 # Vendanor PgDump Script
 # This script runs pg_dump for a single database
-# Usage: dump_pgsql.sh <host> <port> <user> <pass> <database> <backuppath> <filenamedate> <compress> <tables_included> <tables_excluded>
+# Usage:
+#   dump_pgsql.sh [-h host] [-p port] [-U user] [-P password] [-d database]
+#                 [-b backuppath] [-f filename_date] [-z compress]
+#                 [-i tables_included] [-x tables_excluded]
+#
+# Example:
+#   dump_pgsql.sh -d mydb -U postgres -P secret -b /backups -z true
 
+# ----------------------------
+# Default values
+# ----------------------------
+PGHOST=""
+PGPORT="5432"
+PGUSERNAME="postgres"
+PGPASSWORD=""
+DATABASE=""
+BACKUPPATH=""
+FILENAMEDATE="false"
+COMPRESS="true"
+TABLES_INCLUDED=""
+TABLES_EXCLUDED=""
 
-# Parameters
-PGHOST="${1}"
-PGPORT="${2}"
-PGUSERNAME="${3}"
-PGPASSWORD="${4}"
-DATABASE="${5}"
-BACKUPPATH="${6}"
-FILENAMEDATE="${7}"
-COMPRESS="${8}"
-TABLES_INCLUDED="${9}"
-TABLES_EXCLUDED="${10}"
+# ----------------------------
+# Parse command-line arguments
+# ----------------------------
+while getopts "h:p:U:P:d:b:f:z:i:x:" opt; do
+  case ${opt} in
+    h )
+      PGHOST="${OPTARG}"
+      ;;
+    p )
+      PGPORT="${OPTARG}"
+      ;;
+    U )
+      PGUSERNAME="${OPTARG}"
+      ;;
+    P )
+      PGPASSWORD="${OPTARG}"
+      ;;
+    d )
+      DATABASE="${OPTARG}"
+      ;;
+    b )
+      BACKUPPATH="${OPTARG}"
+      ;;
+    f )
+      FILENAMEDATE="${OPTARG}"
+      ;;
+    z )
+      COMPRESS="${OPTARG}"
+      ;;
+    i )
+      TABLES_INCLUDED="${OPTARG}"
+      ;;
+    x )
+      TABLES_EXCLUDED="${OPTARG}"
+      ;;
+    \? )
+      echo "Invalid option: -${OPTARG}" >&2
+      exit 1
+      ;;
+  esac
+done
 
 
 # Functions
@@ -76,39 +125,37 @@ fi
 # Check parameters
 
 if [ "${PGHOST}" = "" ]; then
-  error "Missing host parameter."
+  error "Missing host parameter (-h)."
   exit 1
 fi
 
-if [ "${PGPORT}" = "" ]; then
-  PGPORT="5432"
-fi
-
 if [ "${PGUSERNAME}" = "" ]; then
-  error "Missing user parameter."
+  error "Missing user parameter (-U)."
   exit 1
 fi
 
 if [ "${PGPASSWORD}" = "" ]; then
-  error "Missing pass parameter."
+  error "Missing password parameter (-P)."
   exit 1
 fi
 
 if [ "${DATABASE}" = "" ]; then
-  error "Missing database parameter."
+  error "Missing database parameter (-d)."
   exit 1
 fi
 
 if [ "${BACKUPPATH}" = "" ]; then
-  error "Missing backuppath parameter."
+  error "Missing backuppath parameter (-b)."
   exit 1
 fi
 
-if [ "${FILENAMEDATE}" = "" ]; then
+# Ensure filenamedate is boolean
+if [ "${FILENAMEDATE}" != "true" ] && [ "${FILENAMEDATE}" != "false" ]; then
   FILENAMEDATE="false"
 fi
 
-if [ "${COMPRESS}" = "" ]; then
+# Ensure compress is boolean
+if [ "${COMPRESS}" != "true" ] && [ "${COMPRESS}" != "false" ]; then
   COMPRESS="false"
 fi
 
