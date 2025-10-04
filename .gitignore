@@ -1,2 +1,5 @@
 /config
-/test
+/test/*.json
+/test/*.log
+/test/*.tar
+/test/*.tar.bz2

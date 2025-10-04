@@ -396,6 +396,9 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
         continue
       fi
       
+      # Validate tables and build params only for existing tables
+      tables_included_validated=""
+      tables_included_params=""
       for table_include in ${tables_included//,/ }
       do
         table_include=$(echo "${table_include}" | xargs)
@@ -410,13 +413,27 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
           fi
         done
         if [ "${found}" = "0" ]; then
-          error "Included table '${table_include}' does not exist in database '${database}' on ${PGHOST}."
+          error "Included table '${table_include}' does not exist in database '${database}' on ${PGHOST}. Skipping this table."
           result=1
+        else
+          # Only add existing tables to params
+          if [ "${tables_included_validated}" = "" ]; then
+            tables_included_validated="$table_include"
+            tables_included_params="--table=$table_include"
+          else
+            tables_included_validated="${tables_included_validated}, ${table_include}"
+            tables_included_params="${tables_included_params} --table=${table_include}"
+          fi
         fi
       done
       
-      if ! [ "${result}" = "" ]; then
-        continue
+      # Update the display with validated tables
+      if [ "${tables_included_validated}" = "" ]; then
+        print "WARNING: None of the specified tables exist in ${database}. Backup will include all tables."
+        tables_included=""
+        tables_included_params=""
+      else
+        tables_included="${tables_included_validated}"
       fi
     fi
 
