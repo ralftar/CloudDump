@@ -129,7 +129,8 @@ send_job_email() {
   
   attachments="${attachments} --"
   
-  local message="CloudDump ${HOST}
+  local message
+  message="CloudDump ${HOST}
 
 JOB REPORT (${result_text})
 
@@ -617,11 +618,16 @@ log "Startup email sent."
 # Helper function to check if cron pattern matches current time
 check_cron_match() {
   local cron_pattern="$1"
-  local current_min=$(date '+%-M')
-  local current_hour=$(date '+%-H')
-  local current_day=$(date '+%-d')
-  local current_month=$(date '+%-m')
-  local current_dow=$(date '+%u')  # 1-7, Monday is 1
+  local current_min
+  local current_hour
+  local current_day
+  local current_month
+  local current_dow
+  current_min=$(date '+%-M')
+  current_hour=$(date '+%-H')
+  current_day=$(date '+%-d')
+  current_month=$(date '+%-m')
+  current_dow=$(date '+%u')  # 1-7, Monday is 1
   
   # Convert Sunday from 7 to 0 for cron compatibility
   if [ "${current_dow}" = "7" ]; then
@@ -643,7 +649,8 @@ check_cron_match() {
     
     # Handle step values (e.g., */5)
     if echo "${field}" | grep -q '^\*/[0-9]\+$'; then
-      local step=$(echo "${field}" | sed 's|^\*/||')
+      local step
+      step=$(echo "${field}" | sed 's|^\*/||')
       if [ $((value % step)) -eq 0 ]; then
         return 0
       fi
@@ -652,8 +659,10 @@ check_cron_match() {
     
     # Handle ranges (e.g., 1-5)
     if echo "${field}" | grep -q '^[0-9]\+-[0-9]\+$'; then
-      local start=$(echo "${field}" | cut -d'-' -f1)
-      local end=$(echo "${field}" | cut -d'-' -f2)
+      local start
+      local end
+      start=$(echo "${field}" | cut -d'-' -f1)
+      end=$(echo "${field}" | cut -d'-' -f2)
       if [ "${value}" -ge "${start}" ] && [ "${value}" -le "${end}" ]; then
         return 0
       fi
@@ -699,7 +708,6 @@ declare -A last_run_times
 
 while true; do
   
-  current_timestamp=$(date +%s)
   current_minute=$(date '+%Y-%m-%d %H:%M')
   
   # Check each job
