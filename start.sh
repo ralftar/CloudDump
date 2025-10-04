@@ -688,23 +688,24 @@ fi
 log "Startup email sent."
 
 
-# Helper function to check if cron pattern matches current time
-check_cron_match() {
+# Helper function to check if a timestamp matches a cron pattern
+check_cron_match_timestamp() {
   local cron_pattern="$1"
-  local current_min
-  local current_hour
-  local current_day
-  local current_month
-  local current_dow
-  current_min=$(date '+%-M')
-  current_hour=$(date '+%-H')
-  current_day=$(date '+%-d')
-  current_month=$(date '+%-m')
-  current_dow=$(date '+%u')  # 1-7, Monday is 1
+  local timestamp="$2"
+  local check_min
+  local check_hour
+  local check_day
+  local check_month
+  local check_dow
+  check_min=$(date -d "@${timestamp}" '+%-M')
+  check_hour=$(date -d "@${timestamp}" '+%-H')
+  check_day=$(date -d "@${timestamp}" '+%-d')
+  check_month=$(date -d "@${timestamp}" '+%-m')
+  check_dow=$(date -d "@${timestamp}" '+%u')  # 1-7, Monday is 1
   
   # Convert Sunday from 7 to 0 for cron compatibility
-  if [ "${current_dow}" = "7" ]; then
-    current_dow="0"
+  if [ "${check_dow}" = "7" ]; then
+    check_dow="0"
   fi
   
   # Parse cron pattern (minute hour day month dow)
@@ -761,13 +762,47 @@ check_cron_match() {
     return 1
   }
   
-  if check_field "${cron_min}" "${current_min}" && \
-     check_field "${cron_hour}" "${current_hour}" && \
-     check_field "${cron_day}" "${current_day}" && \
-     check_field "${cron_month}" "${current_month}" && \
-     check_field "${cron_dow}" "${current_dow}"; then
+  if check_field "${cron_min}" "${check_min}" && \
+     check_field "${cron_hour}" "${check_hour}" && \
+     check_field "${cron_day}" "${check_day}" && \
+     check_field "${cron_month}" "${check_month}" && \
+     check_field "${cron_dow}" "${check_dow}"; then
     return 0
   fi
+  
+  return 1
+}
+
+# Helper function to check if job should run by looking backward in time
+# Returns 0 (true) if the cron pattern matched at any point since last run
+should_job_run() {
+  local cron_pattern="$1"
+  local last_run_timestamp="$2"
+  local current_timestamp
+  current_timestamp=$(date +%s)
+  
+  # If never run before, check if current time matches
+  if [ "${last_run_timestamp}" = "0" ]; then
+    check_cron_match_timestamp "${cron_pattern}" "${current_timestamp}"
+    return $?
+  fi
+  
+  # Round last_run_timestamp and current_timestamp to the start of their respective minutes
+  local last_run_minute_start
+  local current_minute_start
+  last_run_minute_start=$(date -d "@${last_run_timestamp}" '+%Y-%m-%d %H:%M:00')
+  last_run_minute_start=$(date -d "${last_run_minute_start}" +%s)
+  current_minute_start=$(date -d "$(date -d "@${current_timestamp}" '+%Y-%m-%d %H:%M:00')" +%s)
+  
+  # Check each minute from the minute after last run to current minute
+  local check_timestamp=$((last_run_minute_start + 60))
+  
+  while [ ${check_timestamp} -le ${current_minute_start} ]; do
+    if check_cron_match_timestamp "${cron_pattern}" "${check_timestamp}"; then
+      return 0
+    fi
+    check_timestamp=$((check_timestamp + 60))
+  done
   
   return 1
 }
@@ -808,16 +843,10 @@ while true; do
       last_run_times[${jobid}]="0"
     fi
     
-    # Check if cron pattern matches current time
-    if check_cron_match "${crontab}"; then
+    # Check if job should run by looking backward from last run time
+    if should_job_run "${crontab}" "${last_run_times[${jobid}]}"; then
       
-      # Get last run minute for this job
-      last_run_minute=$(date -d "@${last_run_times[${jobid}]}" '+%Y-%m-%d %H:%M' 2>/dev/null)
-      
-      # Only run if we haven't run this job in the current minute
-      if [ "${last_run_minute}" != "${current_minute}" ]; then
-        
-        log "Running job ${jobid} (type: ${type})"
+      log "Running job ${jobid} (type: ${type})"
         
         # Create log file
         RANDOM=$$
@@ -996,10 +1025,6 @@ while true; do
         # Update last run time for this job
         last_run_times[${jobid}]=$(date +%s)
         
-      else
-        log "Skipping job ${jobid} - already ran in current minute"
-      fi
-      
     fi
     
   done
