@@ -10,7 +10,6 @@ LOGFILE="/tmp/vnclouddump-${RANDOM}.log"
 MAIL="mutt"
 
 CONFIGFILE="/config/config.json"
-#CONFIGFILE="${HOME}/Projects/Vendanor/VnCloudDump/config/config.json"
 
 VERSION=$(head -n 1 /VERSION)
 

@@ -6,7 +6,6 @@
 
 
 CONFIGFILE="/config/config.json"
-#CONFIGFILE="${HOME}/Projects/Vendanor/VnCloudDump/config/config.json"
 
 JOBID="${1}"
 

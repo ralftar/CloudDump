@@ -248,9 +248,6 @@ ${mount_summary}"
 fi
 
 
-#tail -f /var/log/postfix.log
-
-
 # Read and validate jobs configuration
 
 jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
