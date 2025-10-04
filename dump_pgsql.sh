@@ -139,11 +139,6 @@ if [ "${PGPASSWORD}" = "" ]; then
   exit 1
 fi
 
-if [ "${DATABASE}" = "" ]; then
-  error "Missing database parameter (-d)."
-  exit 1
-fi
-
 if [ "${BACKUPPATH}" = "" ]; then
   error "Missing backuppath parameter (-b)."
   exit 1
