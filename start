@@ -693,6 +693,7 @@ check_cron_match() {
 log "Starting main loop..."
 
 # Track last run time for each job (initialize to 0)
+# This associative array stores timestamps to prevent duplicate runs within the same minute
 declare -A last_run_times
 
 while true; do
@@ -701,6 +702,8 @@ while true; do
   current_minute=$(date '+%Y-%m-%d %H:%M')
   
   # Check each job
+  # Note: The loop doesn't need to wake up at exactly :00 seconds.
+  # It checks if the current minute matches cron patterns, regardless of the exact second.
   for ((i = 0; i < jobs; i++)); do
     
     jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
@@ -729,9 +732,11 @@ while true; do
     if check_cron_match "${crontab}"; then
       
       # Get last run minute for this job
+      # We compare at minute precision to avoid running the same job twice in one minute
       last_run_minute=$(date -d "@${last_run_times[${jobid}]}" '+%Y-%m-%d %H:%M' 2>/dev/null)
       
       # Only run if we haven't run this job in the current minute
+      # This deduplication mechanism ensures jobs run once per matching schedule
       if [ "${last_run_minute}" != "${current_minute}" ]; then
         
         log "Running job ${jobid} (script: ${script})"
@@ -800,6 +805,7 @@ while true; do
         fi
         
         # Update last run time for this job
+        # Store current timestamp to prevent duplicate runs in the same minute
         last_run_times[${jobid}]=$(date +%s)
         
       else
@@ -811,6 +817,9 @@ while true; do
   done
   
   # Sleep until the next minute boundary
+  # This is an optimization - we don't need exact timing, but sleeping to the next minute
+  # reduces unnecessary wake-ups. Even if we wake at :03 seconds, we'll correctly 
+  # check if the current minute matches any cron patterns.
   current_second=$(date '+%-S')
   sleep_seconds=$((60 - current_second))
   # Ensure we always sleep at least 1 second
