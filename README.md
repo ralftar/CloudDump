@@ -32,10 +32,6 @@ To give mount permissions, add capabilities DAC_READ_SEARCH and SYS_ADMIN. Examp
 
 ### config.json example
 
-For a comprehensive configuration example with both Azure blob storage and PostgreSQL backups, see [config.example.json](config.example.json).
-
-Basic example:
-
     {
       "settings": {
         "HOST": "host.domain.dom",
@@ -102,49 +98,6 @@ Basic example:
       ]
     }
        
-## Configuration
-
-### PostgreSQL Backup Configuration
-
-The PostgreSQL backup configuration (`pgdump.sh`) supports flexible database and table filtering.
-
-> **Note**: If you're upgrading from a previous version, see [MIGRATION.md](MIGRATION.md) for migration instructions.
-
-#### Database Selection
-
-- **Specific databases**: List databases in the `databases` array. Only these databases will be backed up. The `databases_excluded` setting is ignored when `databases` is not empty.
-  ```json
-  "databases": [
-    {
-      "mydb": {
-        "tables_included": [],
-        "tables_excluded": ["table1", "table2"]
-      }
-    },
-    {
-      "anotherdb": {
-        "tables_included": ["important_table"],
-        "tables_excluded": []
-      }
-    }
-  ],
-  "databases_excluded": []
-  ```
-
-- **All databases with exclusions**: If `databases` array is empty, all databases will be backed up except those in `databases_excluded`:
-  ```json
-  "databases": [],
-  "databases_excluded": ["azure_sys", "azure_maintenance", "template0"]
-  ```
-
-#### Table Filtering (per database)
-
-For each database, you can optionally specify:
-- `tables_included`: If specified, only these tables will be backed up (mutually exclusive with `tables_excluded`)
-- `tables_excluded`: Tables to exclude from the backup
-
-**Note**: `tables_included` and `tables_excluded` should not be used together. If `tables_included` is specified, only those tables will be backed up. If `tables_excluded` is specified, all tables except those will be backed up.
-
 ## Architecture
 
 CloudDump runs as a single-process Docker container with a main loop that:
