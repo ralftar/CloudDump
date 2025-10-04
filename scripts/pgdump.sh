@@ -188,7 +188,8 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
   filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
   compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
 
-  databases_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_included")
+  # Get list of databases with explicit configuration
+  databases_configured=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
   databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
 
   print "Listing databases for ${PGHOST}..."
@@ -214,52 +215,70 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
   fi
 
   print "All databases: ${databases_all}"
-  print "Included databases: ${databases_included}"
+  print "Configured databases: ${databases_configured}"
   print "Excluded databases: ${databases_excluded}"
 
-  for database in ${databases_all}
-  do
-
-    database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
-
-    if ! [ "${databases_excluded}" = "" ]; then
-      exclude=0
-      for database_exclude in ${databases_excluded}
+  # Determine which databases to backup
+  # If databases are explicitly configured, use only those
+  # Otherwise, use all databases (excluding those in databases_excluded)
+  if ! [ "${databases_configured}" = "" ]; then
+    # Use only explicitly configured databases
+    for database in ${databases_configured}
+    do
+      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
+      
+      # Check if database exists
+      found=0
+      for database_available in ${databases_all}
       do
-        database_exclude_lc=$(echo "${database_exclude}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_exclude_lc}" = "${database_lc}" ]; then
-          exclude=1
+        database_available_lc=$(echo "${database_available}" | tr '[:upper:]' '[:lower:]')
+        if [ "${database_available_lc}" = "${database_lc}" ]; then
+          found=1
+          break
         fi
       done
-      if [ "${exclude}" = "1" ]; then
+      
+      if [ "${found}" = "0" ]; then
+        error "Configured database '${database}' does not exist on ${PGHOST}."
+        result=1
         continue
       fi
-    fi
-
-    include=0
-    if [ "${databases_included}" = "" ]; then
-      include=1
-    else
-      for database_include in ${databases_included}
-      do
-        database_include_lc=$(echo "${database_include}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_include_lc}" = "${database_lc}" ]; then
-          include=1
+      
+      if [ "${databases_backup}" = "" ]; then
+        databases_backup="${database}"
+      else
+        databases_backup="${databases_backup} ${database}"
+      fi
+    done
+  else
+    # Use all databases, excluding those in databases_excluded
+    for database in ${databases_all}
+    do
+      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
+      
+      # Check if database is excluded
+      if ! [ "${databases_excluded}" = "" ]; then
+        exclude=0
+        for database_exclude in ${databases_excluded}
+        do
+          database_exclude_lc=$(echo "${database_exclude}" | tr '[:upper:]' '[:lower:]')
+          if [ "${database_exclude_lc}" = "${database_lc}" ]; then
+            exclude=1
+            break
+          fi
+        done
+        if [ "${exclude}" = "1" ]; then
+          continue
         fi
-      done
-    fi
-
-    if ! [ "${include}" = "1" ]; then
-      continue
-    fi
-
-    if [ "${databases_backup}" = "" ]; then
-      databases_backup="${database}"
-    else
-      databases_backup="${databases_backup} ${database}"
-    fi
-
-  done
+      fi
+      
+      if [ "${databases_backup}" = "" ]; then
+        databases_backup="${database}"
+      else
+        databases_backup="${databases_backup} ${database}"
+      fi
+    done
+  fi
 
   if [ "${databases_backup}" = "" ]; then
     error "Missing databases to backup for ${PGHOST}."
@@ -267,30 +286,6 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
   fi
 
   print "Databases to backup: ${databases_backup}"
-
-  # Validate that all included databases exist
-  if ! [ "${databases_included}" = "" ]; then
-    for database_include in ${databases_included}
-    do
-      database_include_lc=$(echo "${database_include}" | tr '[:upper:]' '[:lower:]')
-      found=0
-      for database_backup in ${databases_backup}
-      do
-        database_backup_lc=$(echo "${database_backup}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_backup_lc}" = "${database_include_lc}" ]; then
-          found=1
-          break
-        fi
-      done
-      if [ "${found}" = "0" ]; then
-        error "Included database '${database_include}' does not exist on ${PGHOST}."
-        result=1
-      fi
-    done
-    if ! [ "${result}" = "" ]; then
-      continue
-    fi
-  fi
 
   # Create backup path
 
@@ -387,6 +382,18 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
 
     print "Running pg_dump of ${database} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
 
+    # Fetch list of all tables if we need to validate includes or excludes
+    tables_all=""
+    if ! [ "${tables_included}" = "" ] || ! [ "${tables_excluded}" = "" ]; then
+      print "Fetching table list for ${database}..."
+      tables_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>&1 | sed 's/^ *//g' | sed 's/ *$//g' | grep -v '^$' | sed -z 's/\n/ /g;s/ $/\n/')
+      if [ $? -ne 0 ]; then
+        error "Failed to list tables for ${database} on ${PGHOST}."
+        result=1
+        continue
+      fi
+    fi
+
     if [ "${tables_included}" = "" ]; then
       print "All tables for ${database} included"
     else
@@ -394,13 +401,10 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
       
       # Validate that all included tables exist
       print "Validating included tables for ${database}..."
-      tables_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>&1 | sed 's/^ *//g' | sed 's/ *$//g' | grep -v '^$' | sed -z 's/\n/ /g;s/ $/\n/')
-      if [ $? -ne 0 ]; then
-        error "Failed to list tables for ${database} on ${PGHOST}."
-        result=1
-        continue
-      fi
       
+      # Validate tables and build params only for existing tables
+      tables_included_validated=""
+      tables_included_params=""
       for table_include in ${tables_included//,/ }
       do
         table_include=$(echo "${table_include}" | xargs)
@@ -415,17 +419,52 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
           fi
         done
         if [ "${found}" = "0" ]; then
-          error "Included table '${table_include}' does not exist in database '${database}' on ${PGHOST}."
+          error "Included table '${table_include}' does not exist in database '${database}' on ${PGHOST}. Skipping this table."
           result=1
+        else
+          # Only add existing tables to params
+          if [ "${tables_included_validated}" = "" ]; then
+            tables_included_validated="$table_include"
+            tables_included_params="--table=$table_include"
+          else
+            tables_included_validated="${tables_included_validated}, ${table_include}"
+            tables_included_params="${tables_included_params} --table=${table_include}"
+          fi
         fi
       done
       
-      if ! [ "${result}" = "" ]; then
+      # If none of the specified tables exist, skip this database
+      if [ "${tables_included_validated}" = "" ]; then
+        error "None of the specified tables exist in ${database} on ${PGHOST}. Skipping database backup."
+        result=1
         continue
       fi
+      
+      tables_included="${tables_included_validated}"
     fi
 
+    # Validate excluded tables (warnings only, don't fail)
     if ! [ "${tables_excluded}" = "" ]; then
+      print "Validating excluded tables for ${database}..."
+      
+      for table_exclude in ${tables_excluded//,/ }
+      do
+        table_exclude=$(echo "${table_exclude}" | xargs)
+        table_exclude_lc=$(echo "${table_exclude}" | tr '[:upper:]' '[:lower:]')
+        found=0
+        for table_available in ${tables_all}
+        do
+          table_available_lc=$(echo "${table_available}" | tr '[:upper:]' '[:lower:]')
+          if [ "${table_available_lc}" = "${table_exclude_lc}" ]; then
+            found=1
+            break
+          fi
+        done
+        if [ "${found}" = "0" ]; then
+          print "WARNING: Excluded table '${table_exclude}' does not exist in database '${database}' on ${PGHOST}."
+        fi
+      done
+      
       print "Tables excluded for ${database}: ${tables_excluded}"
     fi
 

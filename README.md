@@ -84,12 +84,7 @@ docker run \
                   }
                 }
               ],
-              "databases_included": [],
-              "databases_excluded": [
-                "azure_sys",
-                "azure_maintenance",
-                "template0"
-              ],
+              "databases_excluded": [],
               "backuppath": "/pgdump",
               "filenamedate": true,
               "compress": true
