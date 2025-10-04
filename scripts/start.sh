@@ -47,7 +47,7 @@ log "Vendanor CloudDump v${VERSION} Start ($0)"
 
 # Check commands
 
-cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh sshfs mount.cifs"
+cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh sshfs smbnetfs"
 cmds_missing=
 for cmd in ${cmds}
 do
@@ -185,16 +185,47 @@ ${mount_summary}"
     fi
     echo "${path}" | grep '^\/\/' >/dev/null 2>&1
     if [ $? -eq 0 ]; then # SMB
+      # Extract host and share from path (//host/share)
+      smb_host=$(echo "${path}" | sed 's|^//\([^/]*\)/.*|\1|')
+      smb_share=$(echo "${path}" | sed 's|^//[^/]*/\(.*\)|\1|')
+      
+      # Create config and credential files in memory
+      mkdir -p /dev/shm || exit 1
+      
+      smbnetfs_config="/dev/shm/smbnetfs_${i}.conf"
+      smbcredentials="/dev/shm/.smbcredentials_${i}"
+      
+      # Set up credentials if username is provided
       if [ ! "${username}" = "" ]; then
-        if [ "${password}" = "" ] ; then
-          mount_cifs_opt="-o username=${username},sec=ntlmv2"
+        echo "auth ${smbcredentials}" > "${smbnetfs_config}" || exit 1
+        if [ "${password}" = "" ]; then
+          echo -e "${username}\n" > "${smbcredentials}" || exit 1
         else
-          mount_cifs_opt="-o username=${username},password=${password},sec=ntlmv2"
+          echo -e "${username}\n${password}" > "${smbcredentials}" || exit 1
         fi
+        chmod 600 "${smbcredentials}" || exit 1
+      else
+        # Guest access
+        echo "auth ${smbcredentials}" > "${smbnetfs_config}" || exit 1
+        echo -e "guest\n" > "${smbcredentials}" || exit 1
+        chmod 600 "${smbcredentials}" || exit 1
       fi
-      log "Mounting ${path} to ${mountpoint} using mount.cifs."
-      mkdir -p "${mountpoint}" || exit 1
-      mount.cifs "${path}" ${mount_cifs_opt} "${mountpoint}" || exit 1
+      
+      log "Mounting ${path} to ${mountpoint} using smbnetfs."
+      
+      # Create a base mount point for smbnetfs
+      smbnetfs_root="/tmp/smbnetfs_${i}"
+      mkdir -p "${smbnetfs_root}" || exit 1
+      
+      # Mount using smbnetfs to the root directory
+      smbnetfs "${smbnetfs_root}" -o config="${smbnetfs_config}",allow_other || exit 1
+      
+      # Wait a moment for the mount to be ready
+      sleep 2
+      
+      # Create a symlink to the actual share path
+      ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}" || exit 1
+      
       continue
     fi
     error "Invalid path ${path} for mountpoint ${mountpoint}."
