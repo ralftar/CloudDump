@@ -26,7 +26,7 @@ jobs:
           
           has_issues=0
           # Run shellcheck on each script and capture output
-          for script in start.sh dump_azstorage dump_pgsql; do
+          for script in *.sh; do
             echo "### \`$script\`" >> shellcheck-results.txt
             output=$(shellcheck -s bash --exclude=SC2181,SC2230,SC2086,SC2001,SC2317 "$script" 2>&1)
             if [ $? -eq 0 ]; then
@@ -59,9 +59,32 @@ jobs:
               results = '## ShellCheck Results\n\nFailed to read results file.';
             }
             
-            github.rest.issues.createComment({
+            // Find existing shellcheck comment
+            const comments = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: results
             });
+            
+            const botComment = comments.data.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('## ShellCheck Results')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: results
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: results
+              });
+            }

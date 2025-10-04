@@ -1,6 +1,6 @@
 # Vendanor CloudDump 📥 [![Publish Status](https://github.com/vendanor/CloudDump/workflows/Publish/badge.svg)](https://github.com/vendanor/CloudDump/actions)
 
-CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages and PostgreSQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
+CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages, S3 buckets (including MinIO), and PostgreSQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
 
 While CloudDump can be a useful component of a disaster recovery or backup regime (e.g. from cloud to on premises), it should not be used as a standalone backup tool, as it offers limited or no backup history, retention policies, and archival features. The tool is designed to create a current-state backup, which can then be fed into other tools for fully featured file-level backups.
 
@@ -50,7 +50,7 @@ docker run \
       },
       "jobs": [
         {
-          "script": "dump_azstorage",
+          "type": "azstorage",
           "id": "azdump1",
           "crontab": "*/5 * * * *",
           "debug": false,
@@ -63,7 +63,24 @@ docker run \
           ]
         },
         {
-          "script": "dump_pgsql",
+          "type": "s3bucket",
+          "id": "s3dump1",
+          "crontab": "0 2 * * *",
+          "debug": false,
+          "buckets": [
+            {
+              "source": "s3://my-bucket/path",
+              "destination": "/s3dump/s3dump1",
+              "delete_destination": false,
+              "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+              "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+              "aws_region": "us-east-1",
+              "endpoint_url": ""
+            }
+          ]
+        },
+        {
+          "type": "pgsql",
           "id": "pgdump1",
           "crontab": "* * * * *",
           "debug": false,
@@ -94,6 +111,28 @@ docker run \
       ]
     }
        
+### MinIO Configuration Example
+
+For MinIO or other S3-compatible storage, use the `endpoint_url` parameter:
+
+    {
+      "type": "s3bucket",
+      "id": "miniodump1",
+      "crontab": "0 3 * * *",
+      "debug": false,
+      "buckets": [
+        {
+          "source": "s3://my-bucket/path",
+          "destination": "/s3dump/miniodump1",
+          "delete_destination": false,
+          "aws_access_key_id": "minioadmin",
+          "aws_secret_access_key": "minioadmin",
+          "aws_region": "us-east-1",
+          "endpoint_url": "https://minio.example.com:9000"
+        }
+      ]
+    }
+
 ## Architecture
 
 CloudDump runs as a single-process Docker container with a main loop that:
