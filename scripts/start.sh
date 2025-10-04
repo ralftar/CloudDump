@@ -36,11 +36,266 @@ error() {
 
 }
 
+json_array_to_strlist() {
+
+  local i
+  local output
+  count=$(jq -r "${1} | length" "${CONFIGFILE}")
+  for ((i = 0; i < count; i++)); do
+    local value
+    value=$(jq -r "${1}[${i}]" "${CONFIGFILE}" | sed 's/^null$//g')
+    if [ $? -ne 0 ] || [ "$value" = "" ] ; then
+      continue
+    fi
+    if [ "${output}" = "" ]; then
+      output="${value}"
+    else
+      output="${output} ${value}"
+    fi
+  done
+
+  echo "${output}"
+
+}
 
 # Signal handler for graceful shutdown
 shutdown_handler() {
   log "Received shutdown signal, exiting gracefully..."
   exit 0
+}
+
+# Function to send email with job results
+send_job_email() {
+  local jobid="$1"
+  local script="$2"
+  local result="$3"
+  local time_start="$4"
+  local time_end="$5"
+  local time_start_timestamp="$6"
+  local logfile="$7"
+  local configuration="$8"
+  
+  local result_text
+  if [ ${result} -eq 0 ]; then
+    result_text="Success"
+  else
+    result_text="Failure"
+  fi
+  
+  local scriptfilename
+  echo "${script}" | grep '\/' >/dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    scriptfilename=$(echo "${script}" | sed 's/.*\///g')
+  else
+    scriptfilename="${script}"
+  fi
+  
+  log "Sending e-mail to ${MAILTO} from ${MAILFROM} for job ${jobid}."
+  
+  # Check mail command type
+  local mailattachopt
+  if [ "${MAIL}" = "mail" ]; then
+    "${MAIL}" -V >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      "${MAIL}" -V | grep "^mail (GNU Mailutils)" >/dev/null 2>&1
+      if [ $? -eq 0 ]; then
+        mailattachopt="-A"
+      else
+        mailattachopt="-a"
+      fi
+    else
+      mailattachopt="-A"
+    fi
+  elif [ "${MAIL}" = "mutt" ]; then
+    mailattachopt="-a"
+  else
+    log "Unknown mail command: ${MAIL}"
+    return 1
+  fi
+  
+  local attachments="${mailattachopt} ${logfile}"
+  
+  # Check for azcopy log files
+  if [ -f "${logfile}" ]; then
+    azcopy_logfiles=$(grep '^Log file is located at: .*\.log$' ${logfile} | sed -e 's/Log file is located at: \(.*\)/\1/' | sed 's/\r$//' | tr '\n' ' ' | sed 's/ $//g')
+    if ! [ "${azcopy_logfiles}" = "" ]; then
+      for azcopy_logfile in ${azcopy_logfiles}; do
+        if [ ! "${azcopy_logfile}" = "" ] && [ -f "${azcopy_logfile}" ]; then
+          attachments="${attachments} ${mailattachopt} ${azcopy_logfile}"
+        fi
+      done
+    fi
+  fi
+  
+  attachments="${attachments} --"
+  
+  local message="CloudDump ${HOST}
+
+JOB REPORT (${result_text})
+
+Script: ${scriptfilename}
+ID: ${jobid}
+Started: ${time_start_timestamp}
+Completed: $(timestamp)
+Time elapsed: $(((time_end - time_start)/60)) minutes $(((time_end - time_start)%60)) seconds
+
+CONFIGURATION
+
+${configuration}
+
+For more information consult the attached logs.
+
+Vendanor CloudDump v${VERSION}
+"
+  
+  if [ "${MAIL}" = "mutt" ]; then
+    echo "${message}" | EMAIL="${MAILFROM} <${MAILFROM}>" ${MAIL} -s "[${result_text}] CloudDump ${HOST}: ${jobid}" ${attachments} "${MAILTO}"
+  else
+    echo "${message}" | ${MAIL} -r "${MAILFROM} <${MAILFROM}>" -s "[${result_text}] CloudDump ${HOST}: ${jobid}" ${attachments} "${MAILTO}"
+  fi
+}
+
+# Function to get job configuration for email
+get_job_configuration() {
+  local jobid="$1"
+  local script="$2"
+  
+  # Find the job index for this job ID
+  jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
+  if [ "${jobs}" = "" ] || [ -z "${jobs}" ] || ! [ "${jobs}" -eq "${jobs}" ] 2>/dev/null; then
+    echo ""
+    return 1
+  fi
+
+  job_idx=
+  for ((i = 0; i < jobs; i++)); do
+    jobid_current=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
+    if [ $? -ne 0 ] || [ "${jobid_current}" = "" ]; then
+      continue
+    fi
+    if [ "${jobid_current}" = "${jobid}" ]; then
+      job_idx="${i}"
+      break
+    fi
+  done
+
+  if [ "${job_idx}" = "" ]; then
+    echo ""
+    return 1
+  fi
+
+  crontab=$(jq -r ".jobs[${job_idx}].crontab" "${CONFIGFILE}")
+  debug=$(jq -r ".jobs[${job_idx}].debug" "${CONFIGFILE}")
+  
+  local configuration=""
+
+  if [ "${script}" = "azdump.sh" ]; then
+
+    bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
+    if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
+      bs_count=0
+    fi
+
+    local blobstorages=""
+    for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
+
+      source=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+      destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+      delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+
+      if [ "${delete_destination}" = "" ]; then
+        delete_destination="false"
+      fi
+
+      source_stripped=$(echo "${source}" | cut -d '?' -f 1)
+
+      blobstorage="Source: ${source_stripped}
+Destination: ${destination}   
+Delete destination: ${delete_destination}   "
+
+      if [ "${blobstorages}" = "" ]; then
+        blobstorages="${blobstorage}"
+      else
+        blobstorages="${blobstorages}
+${blobstorage}"
+      fi
+
+    done
+
+    configuration="Schedule: ${crontab}
+Debug: ${debug}
+${blobstorages}"
+
+  elif [ "${script}" = "pgdump.sh" ]; then
+
+    server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
+    if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
+      server_count=0
+    fi
+
+    local entry_servers=""
+    for ((server_idx = 0; server_idx < server_count; server_idx++)); do
+
+      PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
+      PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
+      PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
+      backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
+      filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
+      compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
+
+      databases=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
+      databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
+
+      local database_configuration=""
+      local databases_configuration=""
+
+      for database in ${databases}
+      do
+        tables_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_included")
+        tables_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_excluded")
+        database_configuration="Database: ${database}
+Tables included: ${tables_included}
+Tables excluded: ${tables_excluded}"
+        if [ "${databases_configuration}" = "" ]; then
+          databases_configuration="${database_configuration}"
+        else
+          databases_configuration="${databases_configuration}
+${database_configuration}"
+        fi
+
+      done
+
+      entry_server="Postgres server: ${PGHOST}
+Postgres port: ${PGPORT}
+Postgres username: ${PGUSERNAME}
+Backup path: ${backuppath}
+Filename date: ${filenamedate}
+Compress: ${compress}
+Configured databases: ${databases}
+Excluded databases: ${databases_excluded}"
+
+      if [ ! "${databases_configuration}" = "" ]; then
+      entry_server="${entry_server}
+Database configuration:
+${databases_configuration}"
+      fi
+
+      if [ "${entry_servers}" = "" ]; then
+        entry_servers="${entry_server}"
+      else
+        entry_servers="${entry_servers}
+${entry_server}"
+      fi
+
+    done
+
+    configuration="Schedule: ${crontab}
+Debug: ${debug}
+${entry_servers}"
+
+  fi
+  
+  echo "${configuration}"
 }
 
 
@@ -57,7 +312,7 @@ trap 'shutdown_handler' SIGTERM SIGINT
 
 # Check commands
 
-cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh sshfs smbnetfs"
+cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh sshfs smbnetfs lockfile"
 cmds_missing=
 for cmd in ${cmds}
 do
@@ -481,18 +736,67 @@ while true; do
         
         log "Running job ${jobid} (script: ${script})"
         
-        # Run the wrapper script with the job
-        if [ "${DEBUG}" = "true" ]; then
-          /bin/bash -x /usr/local/bin/wrapper.sh "${script}" "${jobid}" "${jobdebug}"
+        # Get script path
+        echo "${script}" | grep '^\/' >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+          scriptfile="${script}"
+          scriptfilename=$(echo "${script}" | sed 's/.*\///g')
         else
-          /bin/bash /usr/local/bin/wrapper.sh "${script}" "${jobid}" "${jobdebug}"
+          scriptfile=$(which "${script}" 2>/dev/null)
+          if [ "${scriptfile}" = "" ]; then
+            scriptfile="/usr/local/bin/${script}"
+          fi
+          scriptfilename="${script}"
         fi
         
-        result=$?
-        if [ ${result} -eq 0 ]; then
-          log "Job ${jobid} completed successfully"
+        # Create lockfile
+        LOCKFILE="/tmp/LOCKFILE_${scriptfilename}_${jobid}"
+        LOCKFILE=$(echo "${LOCKFILE}" | sed 's/\.//g')
+        
+        # Check if already running
+        lockfile -r 0 "${LOCKFILE}" >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+          log "Job ${jobid} already running, skipping."
         else
-          log "Job ${jobid} completed with errors (exit code: ${result})"
+          # Create log file
+          RANDOM=$$
+          LOGFILE="/tmp/vnclouddump-${jobid}-${RANDOM}.log"
+          
+          time_start=$(date +%s)
+          time_start_timestamp=$(timestamp)
+          
+          log "Job ${jobid} starting at ${time_start_timestamp}" >> "${LOGFILE}"
+          
+          # Run the script directly
+          if [ "${jobdebug}" = "true" ]; then
+            /bin/bash -x "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
+            result=$?
+          else
+            /bin/bash "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
+            result=$?
+          fi
+          
+          time_end=$(date +%s)
+          
+          log "Job ${jobid} finished at $(timestamp)" >> "${LOGFILE}"
+          
+          if [ ${result} -eq 0 ]; then
+            log "Job ${jobid} completed successfully"
+          else
+            log "Job ${jobid} completed with errors (exit code: ${result})"
+          fi
+          
+          # Get configuration for email
+          configuration=$(get_job_configuration "${jobid}" "${script}")
+          
+          # Send email report
+          send_job_email "${jobid}" "${script}" "${result}" "${time_start}" "${time_end}" "${time_start_timestamp}" "${LOGFILE}" "${configuration}"
+          
+          # Clean up log file
+          rm -f "${LOGFILE}"
+          
+          # Remove lockfile
+          rm -f "${LOCKFILE}"
         fi
         
         # Update last run time for this job
