@@ -188,7 +188,8 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
   filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
   compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
 
-  databases_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_included")
+  # Get list of databases with explicit configuration
+  databases_configured=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
   databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
 
   print "Listing databases for ${PGHOST}..."
@@ -214,52 +215,70 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
   fi
 
   print "All databases: ${databases_all}"
-  print "Included databases: ${databases_included}"
+  print "Configured databases: ${databases_configured}"
   print "Excluded databases: ${databases_excluded}"
 
-  for database in ${databases_all}
-  do
-
-    database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
-
-    if ! [ "${databases_excluded}" = "" ]; then
-      exclude=0
-      for database_exclude in ${databases_excluded}
+  # Determine which databases to backup
+  # If databases are explicitly configured, use only those
+  # Otherwise, use all databases (excluding those in databases_excluded)
+  if ! [ "${databases_configured}" = "" ]; then
+    # Use only explicitly configured databases
+    for database in ${databases_configured}
+    do
+      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
+      
+      # Check if database exists
+      found=0
+      for database_available in ${databases_all}
       do
-        database_exclude_lc=$(echo "${database_exclude}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_exclude_lc}" = "${database_lc}" ]; then
-          exclude=1
+        database_available_lc=$(echo "${database_available}" | tr '[:upper:]' '[:lower:]')
+        if [ "${database_available_lc}" = "${database_lc}" ]; then
+          found=1
+          break
         fi
       done
-      if [ "${exclude}" = "1" ]; then
+      
+      if [ "${found}" = "0" ]; then
+        error "Configured database '${database}' does not exist on ${PGHOST}."
+        result=1
         continue
       fi
-    fi
-
-    include=0
-    if [ "${databases_included}" = "" ]; then
-      include=1
-    else
-      for database_include in ${databases_included}
-      do
-        database_include_lc=$(echo "${database_include}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_include_lc}" = "${database_lc}" ]; then
-          include=1
+      
+      if [ "${databases_backup}" = "" ]; then
+        databases_backup="${database}"
+      else
+        databases_backup="${databases_backup} ${database}"
+      fi
+    done
+  else
+    # Use all databases, excluding those in databases_excluded
+    for database in ${databases_all}
+    do
+      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
+      
+      # Check if database is excluded
+      if ! [ "${databases_excluded}" = "" ]; then
+        exclude=0
+        for database_exclude in ${databases_excluded}
+        do
+          database_exclude_lc=$(echo "${database_exclude}" | tr '[:upper:]' '[:lower:]')
+          if [ "${database_exclude_lc}" = "${database_lc}" ]; then
+            exclude=1
+            break
+          fi
+        done
+        if [ "${exclude}" = "1" ]; then
+          continue
         fi
-      done
-    fi
-
-    if ! [ "${include}" = "1" ]; then
-      continue
-    fi
-
-    if [ "${databases_backup}" = "" ]; then
-      databases_backup="${database}"
-    else
-      databases_backup="${databases_backup} ${database}"
-    fi
-
-  done
+      fi
+      
+      if [ "${databases_backup}" = "" ]; then
+        databases_backup="${database}"
+      else
+        databases_backup="${databases_backup} ${database}"
+      fi
+    done
+  fi
 
   if [ "${databases_backup}" = "" ]; then
     error "Missing databases to backup for ${PGHOST}."
@@ -267,30 +286,6 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
   fi
 
   print "Databases to backup: ${databases_backup}"
-
-  # Validate that all included databases exist
-  if ! [ "${databases_included}" = "" ]; then
-    for database_include in ${databases_included}
-    do
-      database_include_lc=$(echo "${database_include}" | tr '[:upper:]' '[:lower:]')
-      found=0
-      for database_backup in ${databases_backup}
-      do
-        database_backup_lc=$(echo "${database_backup}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_backup_lc}" = "${database_include_lc}" ]; then
-          found=1
-          break
-        fi
-      done
-      if [ "${found}" = "0" ]; then
-        error "Included database '${database_include}' does not exist on ${PGHOST}."
-        result=1
-      fi
-    done
-    if ! [ "${result}" = "" ]; then
-      continue
-    fi
-  fi
 
   # Create backup path
 

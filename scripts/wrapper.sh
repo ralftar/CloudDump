@@ -360,7 +360,6 @@ elif [ "${SCRIPT}" = "pgdump.sh" ]; then
     compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
 
     databases=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" | tr '\n' ' ')
-    databases_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_included")
     databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
 
     database_configuration=""
@@ -388,7 +387,7 @@ Postgres username: ${PGUSERNAME}
 Backup path: ${backuppath}
 Filename date: ${filenamedate}
 Compress: ${compress}
-Included databases: ${databases_included}
+Configured databases: ${databases}
 Excluded databases: ${databases_excluded}"
 
     if [ ! "${databases_configuration}" = "" ]; then
