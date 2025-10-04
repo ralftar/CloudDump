@@ -4,134 +4,81 @@
 # This script runs mysqldump for each database on each server for the specified job
 # Usage: dump_mysql.sh <jobid>
 
+# Source common database dump functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/dump_db_common.sh" || exit 1
 
-CONFIGFILE="/config/config.json"
-
+# Database-specific configuration
+DB_TYPE="MySQL"
 JOBID="${1}"
 
-
-# Functions
-
-timestamp() {
-
-  date '+%Y-%m-%d %H:%M:%S'
-
-}
-
-print() {
-
-  echo "[$(timestamp)] $*"
-
-}
-
-errorprint() {
-
-  echo "[$(timestamp)] ERROR: $*" >&2
-
-}
-
-error() {
-
-  errorprint "$@"
-
-}
-
-json_array_to_strlist() {
-
-  local i
-  local output
-  count=$(jq -r "${1} | length" "${CONFIGFILE}")
-  for ((i = 0; i < count; i++)); do
-    local value
-    value=$(jq -r "${1}[${i}]" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "$value" = "" ] ; then
+# Check database-specific commands
+check_db_commands() {
+  local db_cmds="mysql mysqldump gzip"
+  local cmds_missing=
+  
+  for cmd in ${db_cmds}
+  do
+    which "${cmd}" >/dev/null 2>&1
+    if [ $? -eq 0 ] ; then
       continue
     fi
-    if [ "${output}" = "" ]; then
-      output="${value}"
+    if [ "${cmds_missing}" = "" ]; then
+      cmds_missing="${cmd}"
     else
-      output="${output} ${value}"
+      cmds_missing="${cmds_missing} ${cmd}"
     fi
   done
 
-  echo "${output}"
-
+  if ! [ "${cmds_missing}" = "" ]; then
+    error "Missing \"${cmds_missing}\" commands."
+    return 1
+  fi
+  return 0
 }
 
-
-# Init
-
-print "Vendanor MySQLDump ($0)"
-
-
-# Check commands
-
-cmds="which grep sed cut date touch mkdir cp rm jq mysql mysqldump gzip bzip2"
-cmds_missing=
-for cmd in ${cmds}
-do
-  which "${cmd}" >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
-    continue
+# List all databases for MySQL
+list_databases() {
+  local host="$1"
+  local port="$2"
+  local user="$3"
+  local pass="$4"
+  
+  mysql -h "${host}" -P "${port}" -u "${user}" -p"${pass}" -e "SHOW DATABASES;"
+  if [ $? -ne 0 ]; then
+    return 1
   fi
-  if [ "${cmds_missing}" = "" ]; then
-    cmds_missing="${cmd}"
-  else
-    cmds_missing="${cmds_missing} ${cmd}"
+
+  databases_all=$(mysql -h "${host}" -P "${port}" -u "${user}" -p"${pass}" -e "SHOW DATABASES;" 2>/dev/null | grep -v '^Database$' | grep -v '^information_schema$' | grep -v '^performance_schema$' | grep -v '^mysql$' | grep -v '^sys$' | sed -z 's/\n/ /g;s/ $/\n/')
+  if [ $? -ne 0 ]; then
+    return 1
   fi
-done
 
-if ! [ "${cmds_missing}" = "" ]; then
-  error "Missing \"${cmds_missing}\" commands."
-  exit 1
-fi
+  echo "${databases_all}"
+  return 0
+}
 
-
-# Check parameters
-
-if [ "${JOBID}" = "" ]; then
-  error "Missing Job ID."
-  exit 1
-fi
-
-
-# Check configfile
-
-if [ ! -f "${CONFIGFILE}" ]; then
-  error "Missing Json configuration file ${CONFIGFILE}."
-  exit 1
-fi
-
-if [ ! -r "${CONFIGFILE}" ]; then
-  error "Can't read Json configuration file ${CONFIGFILE}."
-  exit 1
-fi
-
-
-# Find the job index for this job ID
-
-jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
-if [ "${jobs}" = "" ] || [ -z "${jobs}" ] || ! [ "${jobs}" -eq "${jobs}" ] 2>/dev/null; then
-  error "Can't read jobs from Json configuration."
-  exit 1
-fi
-
-job_idx=
-for ((i = 0; i < jobs; i++)); do
-  jobid_current=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${jobid_current}" = "" ]; then
-    continue
+# List tables in a MySQL database
+list_tables() {
+  local host="$1"
+  local port="$2"
+  local user="$3"
+  local pass="$4"
+  local database="$5"
+  
+  tables_all=$(mysql -h "${host}" -P "${port}" -u "${user}" -p"${pass}" -D "${database}" -e "SHOW TABLES;" 2>/dev/null | grep -v '^Tables_in_' | sed -z 's/\n/ /g;s/ $/\n/')
+  if [ $? -ne 0 ]; then
+    return 1
   fi
-  if [ "${jobid_current}" = "${JOBID}" ]; then
-    job_idx="${i}"
-    break
-  fi
-done
+  
+  echo "${tables_all}"
+  return 0
+}
 
-if [ "${job_idx}" = "" ]; then
-  error "No job ID ${JOBID} in Json configuration."
-  exit 1
-fi
+# Initialize
+common_init "$0"
+validate_parameters "${JOBID}"
+job_idx=$(find_job_index "${JOBID}")
 
 
 # Iterate servers
@@ -198,124 +145,26 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
 
   print "Listing databases for ${MYSQLHOST}..."
 
-  mysql -h "${MYSQLHOST}" -P "${MYSQLPORT}" -u "${MYSQLUSERNAME}" -p"${MYSQLPASSWORD}" -e "SHOW DATABASES;"
-  if [ $? -ne 0 ]; then
+  databases_all=$(list_databases "${MYSQLHOST}" "${MYSQLPORT}" "${MYSQLUSERNAME}" "${MYSQLPASSWORD}")
+  if [ $? -ne 0 ] || [ "${databases_all}" = "" ]; then
     error "Failed to list databases for ${MYSQLHOST}."
     result=1
     continue
   fi
 
-  databases_all=$(mysql -h "${MYSQLHOST}" -P "${MYSQLPORT}" -u "${MYSQLUSERNAME}" -p"${MYSQLPASSWORD}" -e "SHOW DATABASES;" 2>/dev/null | grep -v '^Database$' | grep -v '^information_schema$' | grep -v '^performance_schema$' | grep -v '^mysql$' | grep -v '^sys$' | sed -z 's/\n/ /g;s/ $/\n/')
+  databases_backup=$(determine_databases_to_backup "${databases_all}" "${databases_configured}" "${databases_excluded}" "${MYSQLHOST}")
   if [ $? -ne 0 ]; then
-    error "Failed to list databases for ${MYSQLHOST}."
     result=1
     continue
   fi
-
-  if [ "${databases_all}" = "" ]; then
-    error "Missing databases for ${MYSQLHOST}."
-    result=1
-    continue
-  fi
-
-  print "All databases: ${databases_all}"
-  print "Configured databases: ${databases_configured}"
-  print "Excluded databases: ${databases_excluded}"
-
-  # Determine which databases to backup
-  # If databases are explicitly configured, use only those
-  # Otherwise, use all databases (excluding those in databases_excluded)
-  if ! [ "${databases_configured}" = "" ]; then
-    # Use only explicitly configured databases
-    for database in ${databases_configured}
-    do
-      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
-      
-      # Check if database exists
-      found=0
-      for database_available in ${databases_all}
-      do
-        database_available_lc=$(echo "${database_available}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_available_lc}" = "${database_lc}" ]; then
-          found=1
-          break
-        fi
-      done
-      
-      if [ "${found}" = "0" ]; then
-        error "Configured database '${database}' does not exist on ${MYSQLHOST}."
-        result=1
-        continue
-      fi
-      
-      if [ "${databases_backup}" = "" ]; then
-        databases_backup="${database}"
-      else
-        databases_backup="${databases_backup} ${database}"
-      fi
-    done
-  else
-    # Use all databases, excluding those in databases_excluded
-    for database in ${databases_all}
-    do
-      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
-      
-      # Check if database is excluded
-      if ! [ "${databases_excluded}" = "" ]; then
-        exclude=0
-        for database_exclude in ${databases_excluded}
-        do
-          database_exclude_lc=$(echo "${database_exclude}" | tr '[:upper:]' '[:lower:]')
-          if [ "${database_exclude_lc}" = "${database_lc}" ]; then
-            exclude=1
-            break
-          fi
-        done
-        if [ "${exclude}" = "1" ]; then
-          continue
-        fi
-      fi
-      
-      if [ "${databases_backup}" = "" ]; then
-        databases_backup="${database}"
-      else
-        databases_backup="${databases_backup} ${database}"
-      fi
-    done
-  fi
-
-  if [ "${databases_backup}" = "" ]; then
-    error "Missing databases to backup for ${MYSQLHOST}."
-    continue
-  fi
-
-  print "Databases to backup: ${databases_backup}"
 
   # Create backup path
-
-  print "Creating backuppath ${backuppath}..."
-
-  mkdir -p "${backuppath}"
-  if [ $? -ne 0 ]; then
-    error "Could not create backuppath ${backuppath}."
+  if ! prepare_backup_path "${backuppath}"; then
     result=1
     continue
   fi
 
-  # Check permissions
-
-  print "Checking permission for backuppath ${backuppath}..."
-
-  touch "${backuppath}/TEST_FILE"
-  if [ $? -ne 0 ]; then
-    error "Could not access ${backuppath}."
-    result=1
-    continue
-  fi
-
-  rm -f "${backuppath}/TEST_FILE"
-
-  # Run pg_dump for each database
+  # Run mysqldump for each database
 
   for database in ${databases_backup}; do
 
@@ -390,7 +239,7 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
     tables_all=""
     if ! [ "${tables_included}" = "" ] || ! [ "${tables_excluded}" = "" ]; then
       print "Fetching table list for ${database}..."
-      tables_all=$(mysql -h "${MYSQLHOST}" -P "${MYSQLPORT}" -u "${MYSQLUSERNAME}" -p"${MYSQLPASSWORD}" -D "${database}" -e "SHOW TABLES;" 2>/dev/null | grep -v '^Tables_in_' | sed -z 's/\n/ /g;s/ $/\n/')
+      tables_all=$(list_tables "${MYSQLHOST}" "${MYSQLPORT}" "${MYSQLUSERNAME}" "${MYSQLPASSWORD}" "${database}")
       if [ $? -ne 0 ]; then
         error "Failed to list tables for ${database} on ${MYSQLHOST}."
         result=1
@@ -488,31 +337,7 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
       continue
     fi
 
-    if ! [ -f "${BACKUPFILE_TEMP}" ]; then
-      error "Backupfile ${BACKUPFILE_TEMP} missing for ${database} on ${MYSQLHOST}."
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    size=$(wc -c "${BACKUPFILE_TEMP}" | cut -d ' ' -f 1)
-    if [ $? -ne 0 ]; then
-      error "Could not get filesize for backupfile ${BACKUPFILE_TEMP} of ${database} on ${MYSQLHOST}."
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    if [ -z "${size}" ] || ! [ "${size}" -eq "${size}" ] 2>/dev/null; then
-      error "Invalid filesize for backupfile ${BACKUPFILE_TEMP} of ${database} on ${MYSQLHOST}"
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    if [ "${size}" -lt 10 ]; then
-      error "Backupfile ${BACKUPFILE_TEMP} of ${database} on ${MYSQLHOST} too small (${size} bytes)."
-      rm -f "${BACKUPFILE_TEMP}"
+    if ! validate_backup_file "${BACKUPFILE_TEMP}" "${MYSQLHOST}" "${database}"; then
       result=1
       continue
     fi
@@ -529,22 +354,10 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
 
     print "Backup of ${database} on ${MYSQLHOST} to backupfile ${BACKUPFILE_FINAL} is successful."
 
-    if [ "${compress}" = "true" ]; then
-      print "BZipping ${BACKUPFILE_FINAL}..."
-      if [ -f "${BACKUPFILE_FINAL}.bz2" ]; then
-        rm -v "${BACKUPFILE_FINAL}.bz2"
-        if [ $? -ne 0 ]; then
-          error "Failed to delete old backupfile ${BACKUPFILE_FINAL}.bz2."
-          result=1
-          continue
-        fi
-      fi
-      bzip2 "${BACKUPFILE_FINAL}"
-      if [ $? -eq 0 ]; then
-        BACKUPFILE_FINAL="${BACKUPFILE_FINAL}.bz2"
-      else
-        result=1
-      fi
+    BACKUPFILE_FINAL=$(compress_backup "${BACKUPFILE_FINAL}" "${compress}")
+    if [ $? -ne 0 ]; then
+      result=1
+      continue
     fi
 
     print "Backup of ${database} on ${MYSQLHOST} to backupfile ${BACKUPFILE_FINAL} complete"
