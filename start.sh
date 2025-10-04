@@ -850,10 +850,10 @@ while true; do
                 endpoint_url=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
                 
                 if [ "${jobdebug}" = "true" ]; then
-                  /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${LOGFILE}" 2>&1
+                  /bin/bash -x "${scriptfile}" -s "${source}" -d "${destination}" -D "${delete_destination}" -a "${aws_access_key_id}" -k "${aws_secret_access_key}" -r "${aws_region}" -e "${endpoint_url}" >> "${LOGFILE}" 2>&1
                   bucket_result=$?
                 else
-                  /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${LOGFILE}" 2>&1
+                  /bin/bash "${scriptfile}" -s "${source}" -d "${destination}" -D "${delete_destination}" -a "${aws_access_key_id}" -k "${aws_secret_access_key}" -r "${aws_region}" -e "${endpoint_url}" >> "${LOGFILE}" 2>&1
                   bucket_result=$?
                 fi
                 
@@ -878,10 +878,10 @@ while true; do
                 delete_destination=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
                 
                 if [ "${jobdebug}" = "true" ]; then
-                  /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${LOGFILE}" 2>&1
+                  /bin/bash -x "${scriptfile}" -s "${source}" -d "${destination}" -D "${delete_destination}" >> "${LOGFILE}" 2>&1
                   bs_result=$?
                 else
-                  /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${LOGFILE}" 2>&1
+                  /bin/bash "${scriptfile}" -s "${source}" -d "${destination}" -D "${delete_destination}" >> "${LOGFILE}" 2>&1
                   bs_result=$?
                 fi
                 
@@ -953,10 +953,10 @@ while true; do
                     done
                     
                     if [ "${jobdebug}" = "true" ]; then
-                      /bin/bash -x "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${LOGFILE}" 2>&1
+                      /bin/bash -x "${scriptfile}" -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -P "${PGPASSWORD}" -d "${database}" -b "${backuppath}" -f "${filenamedate}" -z "${compress}" -i "${tables_included}" -x "${tables_excluded}" >> "${LOGFILE}" 2>&1
                       db_result=$?
                     else
-                      /bin/bash "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${LOGFILE}" 2>&1
+                      /bin/bash "${scriptfile}" -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -P "${PGPASSWORD}" -d "${database}" -b "${backuppath}" -f "${filenamedate}" -z "${compress}" -i "${tables_included}" -x "${tables_excluded}" >> "${LOGFILE}" 2>&1
                       db_result=$?
                     fi
                     
