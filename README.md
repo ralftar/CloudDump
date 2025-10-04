@@ -181,8 +181,8 @@ CloudDump implements a custom cron-like scheduler that determines when to run or
 ```
 10:00:03 - Loop wakes up, checks jobs, finds job1 matches "*/5 * * * *", runs job1
 10:00:45 - Job1 completes, last_run_times[job1] = timestamp for 10:00
-10:01:02 - Loop wakes up, checks jobs, job1 doesn't match (not a multiple of 5)
-10:05:01 - Loop wakes up, checks jobs, job1 matches but last ran at 10:00, runs job1
+10:01:02 - Loop wakes up, checks jobs, job1 doesn't match (not a */5 minute)
+10:05:01 - Loop wakes up, checks jobs, job1 matches and last ran at 10:00, runs job1
 10:05:30 - Job1 still running...
 10:06:01 - Loop wakes up, checks jobs, job1 already ran in minute 10:05, skips
 ```
