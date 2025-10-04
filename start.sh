@@ -58,10 +58,186 @@ json_array_to_strlist() {
 
 }
 
+# Function to redact sensitive information from text
+redact_sensitive() {
+  local text="$1"
+  # Redact passwords, keys, tokens, and SAS tokens
+  text=$(echo "${text}" | sed 's/\(password\|pass\|key\|token\|secret\)[[:space:]]*[:=][[:space:]]*[^[:space:]]*/\1: [REDACTED]/gi')
+  text=$(echo "${text}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\)=[^&?]*/\?[REDACTED]/g')
+  echo "${text}"
+}
+
 # Signal handler for graceful shutdown
 shutdown_handler() {
   log "Received shutdown signal, exiting gracefully..."
   exit 0
+}
+
+# Helper function to build azstorage configuration
+build_azstorage_config() {
+  local job_idx="$1"
+  local crontab="$2"
+  local debug="$3"
+  
+  local bs_count
+  bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
+  if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
+    bs_count=0
+  fi
+
+  local blobstorages=""
+  for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
+    local source destination delete_destination source_stripped
+    source=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+    destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+
+    if [ "${delete_destination}" = "" ]; then
+      delete_destination="false"
+    fi
+
+    source_stripped=$(echo "${source}" | cut -d '?' -f 1)
+
+    local blobstorage="Source: ${source_stripped}
+Destination: ${destination}   
+Delete destination: ${delete_destination}   "
+
+    if [ "${blobstorages}" = "" ]; then
+      blobstorages="${blobstorage}"
+    else
+      blobstorages="${blobstorages}
+${blobstorage}"
+    fi
+  done
+
+  echo "Schedule: ${crontab}
+Debug: ${debug}
+${blobstorages}"
+}
+
+# Helper function to build s3bucket configuration
+build_s3bucket_config() {
+  local job_idx="$1"
+  local crontab="$2"
+  local debug="$3"
+  
+  local bucket_count
+  bucket_count=$(jq -r ".jobs[${job_idx}].buckets | length" "${CONFIGFILE}")
+  if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
+    bucket_count=0
+  fi
+
+  local buckets=""
+  for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
+    local source destination delete_destination aws_region endpoint_url
+    source=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+    destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    delete_destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    aws_region=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
+    endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
+
+    if [ "${delete_destination}" = "" ]; then
+      delete_destination="false"
+    fi
+
+    if [ "${aws_region}" = "" ]; then
+      aws_region="us-east-1"
+    fi
+
+    local bucket="Source: ${source}
+Destination: ${destination}
+Delete destination: ${delete_destination}
+AWS Region: ${aws_region}"
+
+    if [ ! "${endpoint_url}" = "" ]; then
+      bucket="${bucket}
+Endpoint URL: ${endpoint_url}"
+    fi
+
+    if [ "${buckets}" = "" ]; then
+      buckets="${bucket}"
+    else
+      buckets="${buckets}
+
+${bucket}"
+    fi
+  done
+
+  echo "Schedule: ${crontab}
+Debug: ${debug}
+${buckets}"
+}
+
+# Helper function to build pgsql configuration
+build_pgsql_config() {
+  local job_idx="$1"
+  local crontab="$2"
+  local debug="$3"
+  
+  local server_count
+  server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
+  if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
+    server_count=0
+  fi
+
+  local entry_servers=""
+  for ((server_idx = 0; server_idx < server_count; server_idx++)); do
+    local PGHOST PGPORT PGUSERNAME backuppath filenamedate compress databases databases_excluded
+    PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
+    PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
+    PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
+    backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
+    filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
+    compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
+
+    databases=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
+    databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
+
+    local database_configuration=""
+    local databases_configuration=""
+
+    for database in ${databases}
+    do
+      local tables_included tables_excluded
+      tables_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_included")
+      tables_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_excluded")
+      database_configuration="Database: ${database}
+Tables included: ${tables_included}
+Tables excluded: ${tables_excluded}"
+      if [ "${databases_configuration}" = "" ]; then
+        databases_configuration="${database_configuration}"
+      else
+        databases_configuration="${databases_configuration}
+${database_configuration}"
+      fi
+    done
+
+    local entry_server="Postgres server: ${PGHOST}
+Postgres port: ${PGPORT}
+Postgres username: ${PGUSERNAME}
+Backup path: ${backuppath}
+Filename date: ${filenamedate}
+Compress: ${compress}
+Configured databases: ${databases}
+Excluded databases: ${databases_excluded}"
+
+    if [ ! "${databases_configuration}" = "" ]; then
+    entry_server="${entry_server}
+Database configuration:
+${databases_configuration}"
+    fi
+
+    if [ "${entry_servers}" = "" ]; then
+      entry_servers="${entry_server}"
+    else
+      entry_servers="${entry_servers}
+${entry_server}"
+    fi
+  done
+
+  echo "Schedule: ${crontab}
+Debug: ${debug}
+${entry_servers}"
 }
 
 # Function to send email with job results
@@ -162,6 +338,7 @@ get_job_configuration() {
   local script="$2"
   
   # Find the job index for this job ID
+  local jobs job_idx
   jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
   if [ "${jobs}" = "" ] || [ -z "${jobs}" ] || ! [ "${jobs}" -eq "${jobs}" ] 2>/dev/null; then
     echo ""
@@ -170,6 +347,7 @@ get_job_configuration() {
 
   job_idx=
   for ((i = 0; i < jobs; i++)); do
+    local jobid_current
     jobid_current=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
     if [ $? -ne 0 ] || [ "${jobid_current}" = "" ]; then
       continue
@@ -185,166 +363,198 @@ get_job_configuration() {
     return 1
   fi
 
+  local crontab debug configuration
   crontab=$(jq -r ".jobs[${job_idx}].crontab" "${CONFIGFILE}")
   debug=$(jq -r ".jobs[${job_idx}].debug" "${CONFIGFILE}")
   
-  local configuration=""
+  configuration=""
 
   if [ "${script}" = "dump_azstorage.sh" ]; then
-
-    bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
-    if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
-      bs_count=0
-    fi
-
-    local blobstorages=""
-    for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
-
-      source=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
-      destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
-      delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
-
-      if [ "${delete_destination}" = "" ]; then
-        delete_destination="false"
-      fi
-
-      source_stripped=$(echo "${source}" | cut -d '?' -f 1)
-
-      blobstorage="Source: ${source_stripped}
-Destination: ${destination}   
-Delete destination: ${delete_destination}   "
-
-      if [ "${blobstorages}" = "" ]; then
-        blobstorages="${blobstorage}"
-      else
-        blobstorages="${blobstorages}
-${blobstorage}"
-      fi
-
-    done
-
-    configuration="Schedule: ${crontab}
-Debug: ${debug}
-${blobstorages}"
-
+    configuration=$(build_azstorage_config "${job_idx}" "${crontab}" "${debug}")
   elif [ "${script}" = "dump_s3bucket.sh" ]; then
-
-    bucket_count=$(jq -r ".jobs[${job_idx}].buckets | length" "${CONFIGFILE}")
-    if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
-      bucket_count=0
-    fi
-
-    local buckets=""
-    for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
-
-      source=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
-      destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
-      delete_destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
-      aws_region=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
-      endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
-
-      if [ "${delete_destination}" = "" ]; then
-        delete_destination="false"
-      fi
-
-      if [ "${aws_region}" = "" ]; then
-        aws_region="us-east-1"
-      fi
-
-      bucket="Source: ${source}
-Destination: ${destination}
-Delete destination: ${delete_destination}
-AWS Region: ${aws_region}"
-
-      if [ ! "${endpoint_url}" = "" ]; then
-        bucket="${bucket}
-Endpoint URL: ${endpoint_url}"
-      fi
-
-      if [ "${buckets}" = "" ]; then
-        buckets="${bucket}"
-      else
-        buckets="${buckets}
-
-${bucket}"
-      fi
-
-    done
-
-    configuration="Schedule: ${crontab}
-Debug: ${debug}
-${buckets}"
-
+    configuration=$(build_s3bucket_config "${job_idx}" "${crontab}" "${debug}")
   elif [ "${script}" = "dump_pgsql.sh" ]; then
-
-    server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
-    if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
-      server_count=0
-    fi
-
-    local entry_servers=""
-    for ((server_idx = 0; server_idx < server_count; server_idx++)); do
-
-      PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
-      PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
-      PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
-      backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
-      filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
-      compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
-
-      databases=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
-      databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
-
-      local database_configuration=""
-      local databases_configuration=""
-
-      for database in ${databases}
-      do
-        tables_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_included")
-        tables_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_excluded")
-        database_configuration="Database: ${database}
-Tables included: ${tables_included}
-Tables excluded: ${tables_excluded}"
-        if [ "${databases_configuration}" = "" ]; then
-          databases_configuration="${database_configuration}"
-        else
-          databases_configuration="${databases_configuration}
-${database_configuration}"
-        fi
-
-      done
-
-      entry_server="Postgres server: ${PGHOST}
-Postgres port: ${PGPORT}
-Postgres username: ${PGUSERNAME}
-Backup path: ${backuppath}
-Filename date: ${filenamedate}
-Compress: ${compress}
-Configured databases: ${databases}
-Excluded databases: ${databases_excluded}"
-
-      if [ ! "${databases_configuration}" = "" ]; then
-      entry_server="${entry_server}
-Database configuration:
-${databases_configuration}"
-      fi
-
-      if [ "${entry_servers}" = "" ]; then
-        entry_servers="${entry_server}"
-      else
-        entry_servers="${entry_servers}
-${entry_server}"
-      fi
-
-    done
-
-    configuration="Schedule: ${crontab}
-Debug: ${debug}
-${entry_servers}"
-
+    configuration=$(build_pgsql_config "${job_idx}" "${crontab}" "${debug}")
   fi
   
   echo "${configuration}"
+}
+
+
+# Helper function to execute s3bucket job
+execute_s3bucket_job() {
+  local job_idx="$1"
+  local jobid="$2"
+  local scriptfile="$3"
+  local jobdebug="$4"
+  local logfile="$5"
+  
+  local bucket_count result
+  result=0
+  bucket_count=$(jq -r ".jobs[${job_idx}].buckets | length" "${CONFIGFILE}")
+  if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
+    log "Error: Can't read buckets from Json configuration for job ${jobid}." >> "${logfile}"
+    return 1
+  elif [ "${bucket_count}" -eq 0 ]; then
+    log "Error: No buckets for ${jobid} in Json configuration." >> "${logfile}"
+    return 1
+  fi
+  
+  for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
+    local source destination delete_destination aws_access_key_id aws_secret_access_key aws_region endpoint_url bucket_result
+    source=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+    destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    delete_destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    aws_access_key_id=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_access_key_id" "${CONFIGFILE}" | sed 's/^null$//g')
+    aws_secret_access_key=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_secret_access_key" "${CONFIGFILE}" | sed 's/^null$//g')
+    aws_region=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
+    endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
+    
+    if [ "${jobdebug}" = "true" ]; then
+      /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
+      bucket_result=$?
+    else
+      /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
+      bucket_result=$?
+    fi
+    
+    if [ ${bucket_result} -ne 0 ]; then
+      result=${bucket_result}
+    fi
+  done
+  
+  return ${result}
+}
+
+# Helper function to execute azstorage job
+execute_azstorage_job() {
+  local job_idx="$1"
+  local jobid="$2"
+  local scriptfile="$3"
+  local jobdebug="$4"
+  local logfile="$5"
+  
+  local bs_count result
+  result=0
+  bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
+  if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
+    log "Error: Can't read blobstorages from Json configuration for job ${jobid}." >> "${logfile}"
+    return 1
+  elif [ "${bs_count}" -eq 0 ]; then
+    log "Error: No blobstorages for ${jobid} in Json configuration." >> "${logfile}"
+    return 1
+  fi
+  
+  for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
+    local source destination delete_destination bs_result
+    source=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+    destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+    
+    if [ "${jobdebug}" = "true" ]; then
+      /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
+      bs_result=$?
+    else
+      /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
+      bs_result=$?
+    fi
+    
+    if [ ${bs_result} -ne 0 ]; then
+      result=${bs_result}
+    fi
+  done
+  
+  return ${result}
+}
+
+# Helper function to execute pgsql job
+execute_pgsql_job() {
+  local job_idx="$1"
+  local jobid="$2"
+  local scriptfile="$3"
+  local jobdebug="$4"
+  local logfile="$5"
+  
+  local server_count result
+  result=0
+  server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
+  if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
+    log "Error: Can't read servers from Json configuration for job ${jobid}." >> "${logfile}"
+    return 1
+  elif [ "${server_count}" -eq 0 ]; then
+    log "Error: No servers for ${jobid} in Json configuration." >> "${logfile}"
+    return 1
+  fi
+  
+  for ((server_idx = 0; server_idx < server_count; server_idx++)); do
+    local PGHOST PGPORT PGUSERNAME PGPASSWORD backuppath filenamedate compress
+    local databases_configured databases_excluded_list databases_all databases_backup
+    PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
+    PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
+    PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
+    PGPASSWORD=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].pass" "${CONFIGFILE}" | sed 's/^null$//g')
+    backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
+    filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
+    compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
+    
+    # Get list of databases with explicit configuration
+    databases_configured=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
+    databases_excluded_list=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    
+    # Get all databases from server
+    databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1 | sed -z 's/\n/ /g;s/ $/\n/')
+    
+    # Determine which databases to backup
+    databases_backup=""
+    if [ ! "${databases_configured}" = "" ]; then
+      # Use only explicitly configured databases
+      databases_backup="${databases_configured}"
+    else
+      # Use all databases, excluding those in databases_excluded
+      for database in ${databases_all}
+      do
+        if echo ",${databases_excluded_list}," | grep -q ",${database},"; then
+          continue
+        fi
+        databases_backup="${databases_backup} ${database}"
+      done
+    fi
+    
+    # Backup each database
+    for database in ${databases_backup}
+    do
+      # Get table configuration for this database
+      local tables_included tables_excluded db_count db_idx jq_output db_result
+      tables_included=""
+      tables_excluded=""
+      
+      db_count=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases | length" "${CONFIGFILE}" 2>/dev/null)
+      for ((db_idx = 0; db_idx < db_count; db_idx++)); do
+        jq_output=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"] | length" "${CONFIGFILE}" 2>/dev/null | sed 's/^null$//g')
+        if [ "${jq_output}" = "" ] || [ -z "${jq_output}" ] || ! [ "${jq_output}" -eq "${jq_output}" ] || [ "${jq_output}" -eq 0 ] 2>/dev/null; then
+          continue
+        fi
+        
+        tables_excluded=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        tables_included=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_included[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        break
+      done
+      
+      if [ "${jobdebug}" = "true" ]; then
+        /bin/bash -x "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
+        db_result=$?
+      else
+        /bin/bash "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
+        db_result=$?
+      fi
+      
+      if [ ${db_result} -ne 0 ]; then
+        result=${db_result}
+      fi
+    done
+  done
+  
+  return ${result}
 }
 
 
@@ -630,28 +840,42 @@ done
 
 # Send startup e-mail
 
+# Build comprehensive startup configuration (with redaction)
+startup_config="Debug: ${DEBUG}
+SMTP server: ${SMTPSERVER}
+SMTP port: ${SMTPPORT}
+Mail from: ${MAILFROM}
+Mail to: ${MAILTO}"
+
+# Add mount summary if present
+if [ ! "${mounts_summary}" = "" ]; then
+  startup_config="${startup_config}
+
+Mountpoints:
+${mounts_summary}"
+fi
+
+# Add jobs count
+startup_config="${startup_config}
+
+Total jobs configured: ${jobs}"
+
+# Redact sensitive information from the entire mail body
+startup_config=$(redact_sensitive "${startup_config}")
+jobs_summary=$(redact_sensitive "${jobs_summary}")
+
 mail_body="CloudDump ${HOST}
 
 STARTED
 
-Debug: ${DEBUG}
-SMTP server: ${SMTPSERVER}
-"
+CONFIGURATION
 
-if [ ! "${mounts_summary}" = "" ]; then
-  mail_body="${mail_body}
-Mountpoints:
-${mounts_summary}
-"
-fi
+${startup_config}
 
-  mail_body="${mail_body}
 JOBS
 
 ${jobs_summary}
-"
 
-mail_body="${mail_body}
 Vendanor CloudDump v${VERSION}"
 
 if [ "${MAIL}" = "mutt" ]; then
@@ -831,146 +1055,18 @@ while true; do
           result=0
           
           if [ "${type}" = "s3bucket" ]; then
-            # For s3bucket, parse config and call script for each bucket
-            bucket_count=$(jq -r ".jobs[${i}].buckets | length" "${CONFIGFILE}")
-            if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
-              log "Error: Can't read buckets from Json configuration for job ${jobid}." >> "${LOGFILE}"
-              result=1
-            elif [ "${bucket_count}" -eq 0 ]; then
-              log "Error: No buckets for ${jobid} in Json configuration." >> "${LOGFILE}"
-              result=1
-            else
-              for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
-                source=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
-                destination=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
-                delete_destination=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
-                aws_access_key_id=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].aws_access_key_id" "${CONFIGFILE}" | sed 's/^null$//g')
-                aws_secret_access_key=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].aws_secret_access_key" "${CONFIGFILE}" | sed 's/^null$//g')
-                aws_region=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
-                endpoint_url=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
-                
-                if [ "${jobdebug}" = "true" ]; then
-                  /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${LOGFILE}" 2>&1
-                  bucket_result=$?
-                else
-                  /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${LOGFILE}" 2>&1
-                  bucket_result=$?
-                fi
-                
-                if [ ${bucket_result} -ne 0 ]; then
-                  result=${bucket_result}
-                fi
-              done
-            fi
+            execute_s3bucket_job "${i}" "${jobid}" "${scriptfile}" "${jobdebug}" "${LOGFILE}"
+            result=$?
           elif [ "${type}" = "azstorage" ]; then
-            # For azstorage, parse config and call script for each blobstorage
-            bs_count=$(jq -r ".jobs[${i}].blobstorages | length" "${CONFIGFILE}")
-            if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
-              log "Error: Can't read blobstorages from Json configuration for job ${jobid}." >> "${LOGFILE}"
-              result=1
-            elif [ "${bs_count}" -eq 0 ]; then
-              log "Error: No blobstorages for ${jobid} in Json configuration." >> "${LOGFILE}"
-              result=1
-            else
-              for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
-                source=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
-                destination=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
-                delete_destination=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
-                
-                if [ "${jobdebug}" = "true" ]; then
-                  /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${LOGFILE}" 2>&1
-                  bs_result=$?
-                else
-                  /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${LOGFILE}" 2>&1
-                  bs_result=$?
-                fi
-                
-                if [ ${bs_result} -ne 0 ]; then
-                  result=${bs_result}
-                fi
-              done
-            fi
+            execute_azstorage_job "${i}" "${jobid}" "${scriptfile}" "${jobdebug}" "${LOGFILE}"
+            result=$?
+          elif [ "${type}" = "pgsql" ]; then
+            execute_pgsql_job "${i}" "${jobid}" "${scriptfile}" "${jobdebug}" "${LOGFILE}"
+            result=$?
           else
-            # For pgsql type, parse config and call script for each database
-            if [ "${type}" = "pgsql" ]; then
-              server_count=$(jq -r ".jobs[${i}].servers | length" "${CONFIGFILE}")
-              if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
-                log "Error: Can't read servers from Json configuration for job ${jobid}." >> "${LOGFILE}"
-                result=1
-              elif [ "${server_count}" -eq 0 ]; then
-                log "Error: No servers for ${jobid} in Json configuration." >> "${LOGFILE}"
-                result=1
-              else
-                for ((server_idx = 0; server_idx < server_count; server_idx++)); do
-                  PGHOST=$(jq -r ".jobs[${i}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
-                  PGPORT=$(jq -r ".jobs[${i}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
-                  PGUSERNAME=$(jq -r ".jobs[${i}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
-                  PGPASSWORD=$(jq -r ".jobs[${i}].servers[${server_idx}].pass" "${CONFIGFILE}" | sed 's/^null$//g')
-                  backuppath=$(jq -r ".jobs[${i}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
-                  filenamedate=$(jq -r ".jobs[${i}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
-                  compress=$(jq -r ".jobs[${i}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
-                  
-                  # Get list of databases with explicit configuration
-                  databases_configured=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
-                  databases_excluded_list=$(jq -r ".jobs[${i}].servers[${server_idx}].databases_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
-                  
-                  # Get all databases from server
-                  databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1 | sed -z 's/\n/ /g;s/ $/\n/')
-                  
-                  # Determine which databases to backup
-                  databases_backup=""
-                  if [ ! "${databases_configured}" = "" ]; then
-                    # Use only explicitly configured databases
-                    databases_backup="${databases_configured}"
-                  else
-                    # Use all databases, excluding those in databases_excluded
-                    for database in ${databases_all}
-                    do
-                      if echo ",${databases_excluded_list}," | grep -q ",${database},"; then
-                        continue
-                      fi
-                      databases_backup="${databases_backup} ${database}"
-                    done
-                  fi
-                  
-                  # Backup each database
-                  for database in ${databases_backup}
-                  do
-                    # Get table configuration for this database
-                    tables_included=""
-                    tables_excluded=""
-                    
-                    db_count=$(jq -r ".jobs[${i}].servers[${server_idx}].databases | length" "${CONFIGFILE}" 2>/dev/null)
-                    for ((db_idx = 0; db_idx < db_count; db_idx++)); do
-                      jq_output=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[${db_idx}][\"${database}\"] | length" "${CONFIGFILE}" 2>/dev/null | sed 's/^null$//g')
-                      if [ "${jq_output}" = "" ] || [ -z "${jq_output}" ] || ! [ "${jq_output}" -eq "${jq_output}" ] || [ "${jq_output}" -eq 0 ] 2>/dev/null; then
-                        continue
-                      fi
-                      
-                      tables_excluded=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
-                      tables_included=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_included[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
-                      break
-                    done
-                    
-                    if [ "${jobdebug}" = "true" ]; then
-                      /bin/bash -x "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${LOGFILE}" 2>&1
-                      db_result=$?
-                    else
-                      /bin/bash "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${LOGFILE}" 2>&1
-                      db_result=$?
-                    fi
-                    
-                    if [ ${db_result} -ne 0 ]; then
-                      result=${db_result}
-                    fi
-                  done
-                done
-              fi
-            else
-              # Unknown type - should not happen
-              log "Error: Unknown job type ${type} for job ${jobid}." >> "${LOGFILE}"
-              result=1
-            fi
+            # Unknown type - should not happen
+            log "Error: Unknown job type ${type} for job ${jobid}." >> "${LOGFILE}"
+            result=1
           fi
           
           time_end=$(date +%s)
