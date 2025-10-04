@@ -6,8 +6,6 @@ on:
 jobs:
 
   shellcheck:
-    if: (!contains(github.event.head_commit.message, 'skip ci'))
-
     name: Shell check
     runs-on: ubuntu-latest
     permissions:
@@ -26,8 +24,6 @@ jobs:
           SHELLCHECK_OPTS: --exclude=SC2181 --exclude=SC2230 --exclude=SC2086 --exclude=SC2001 --exclude=SC2317
 
   build:
-    if: (!contains(github.event.head_commit.message, 'skip ci'))
-
     name: Build
     runs-on: ubuntu-latest
 
