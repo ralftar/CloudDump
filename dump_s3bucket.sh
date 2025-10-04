@@ -2,17 +2,57 @@
 
 # Vendanor S3Dump Script
 # This script runs aws s3 sync
-# Usage: dump_s3bucket.sh <source> <destination> <delete_destination> <aws_access_key_id> <aws_secret_access_key> <aws_region> <endpoint_url>
+# Usage:
+#   dump_s3bucket.sh [-s source] [-d destination] [-m mirror]
+#                    [-a aws_access_key_id] [-k aws_secret_access_key]
+#                    [-r aws_region] [-e endpoint_url]
+#
+# Example:
+#   dump_s3bucket.sh -s s3://my-bucket/path -d /backups/s3 -a AKIAIOSFODNN7EXAMPLE -k wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY -r us-east-1
 
+# ----------------------------
+# Default values
+# ----------------------------
+SOURCE=""
+DESTINATION=""
+DELETE_DESTINATION="true"
+AWS_ACCESS_KEY_ID_PARAM=""
+AWS_SECRET_ACCESS_KEY_PARAM=""
+AWS_REGION_PARAM="us-east-1"
+ENDPOINT_URL=""
 
-# Parameters
-SOURCE="${1}"
-DESTINATION="${2}"
-DELETE_DESTINATION="${3}"
-AWS_ACCESS_KEY_ID_PARAM="${4}"
-AWS_SECRET_ACCESS_KEY_PARAM="${5}"
-AWS_REGION_PARAM="${6}"
-ENDPOINT_URL="${7}"
+# ----------------------------
+# Parse command-line arguments
+# ----------------------------
+while getopts "s:d:m:a:k:r:e:" opt; do
+  case ${opt} in
+    s )
+      SOURCE="${OPTARG}"
+      ;;
+    d )
+      DESTINATION="${OPTARG}"
+      ;;
+    m )
+      DELETE_DESTINATION="${OPTARG}"
+      ;;
+    a )
+      AWS_ACCESS_KEY_ID_PARAM="${OPTARG}"
+      ;;
+    k )
+      AWS_SECRET_ACCESS_KEY_PARAM="${OPTARG}"
+      ;;
+    r )
+      AWS_REGION_PARAM="${OPTARG}"
+      ;;
+    e )
+      ENDPOINT_URL="${OPTARG}"
+      ;;
+    \? )
+      echo "Invalid option: -${OPTARG}" >&2
+      exit 1
+      ;;
+  esac
+done
 
 
 # Functions
@@ -73,26 +113,23 @@ fi
 # Check parameters
 
 if [ "${SOURCE}" = "" ]; then
-  error "Missing source parameter."
+  error "Missing source parameter (-s)."
   exit 1
 fi
 
 if [ "${DESTINATION}" = "" ]; then
-  error "Missing destination parameter."
+  error "Missing destination parameter (-d)."
   exit 1
 fi
 
-if [ "${DELETE_DESTINATION}" = "" ]; then
-  DELETE_DESTINATION="false"
-fi
-
-if [ "${AWS_REGION_PARAM}" = "" ]; then
-  AWS_REGION_PARAM="us-east-1"
+# Ensure delete_destination is boolean
+if [ "${DELETE_DESTINATION}" != "true" ] && [ "${DELETE_DESTINATION}" != "false" ]; then
+  DELETE_DESTINATION="true"
 fi
 
 print "Source: ${SOURCE}"
 print "Destination: ${DESTINATION}"
-print "Delete destination: ${DELETE_DESTINATION}"
+print "Mirror (delete): ${DELETE_DESTINATION}"
 print "AWS Region: ${AWS_REGION_PARAM}"
 if [ ! "${ENDPOINT_URL}" = "" ]; then
   print "Endpoint URL: ${ENDPOINT_URL}"

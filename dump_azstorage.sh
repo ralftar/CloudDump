@@ -2,13 +2,39 @@
 
 # Vendanor AzDump Script
 # This script runs azcopy sync
-# Usage: dump_azstorage.sh <source> <destination> <delete_destination>
+# Usage:
+#   dump_azstorage.sh [-s source] [-d destination] [-m mirror]
+#
+# Example:
+#   dump_azstorage.sh -s https://example.blob.core.windows.net/container?SAS -d /backups/azure -m false
 
+# ----------------------------
+# Default values
+# ----------------------------
+SOURCE=""
+DESTINATION=""
+DELETE_DESTINATION="true"
 
-# Parameters
-SOURCE="${1}"
-DESTINATION="${2}"
-DELETE_DESTINATION="${3}"
+# ----------------------------
+# Parse command-line arguments
+# ----------------------------
+while getopts "s:d:m:" opt; do
+  case ${opt} in
+    s )
+      SOURCE="${OPTARG}"
+      ;;
+    d )
+      DESTINATION="${OPTARG}"
+      ;;
+    m )
+      DELETE_DESTINATION="${OPTARG}"
+      ;;
+    \? )
+      echo "Invalid option: -${OPTARG}" >&2
+      exit 1
+      ;;
+  esac
+done
 
 
 # Functions
@@ -69,24 +95,25 @@ fi
 # Check parameters
 
 if [ "${SOURCE}" = "" ]; then
-  error "Missing source parameter."
+  error "Missing source parameter (-s)."
   exit 1
 fi
 
 if [ "${DESTINATION}" = "" ]; then
-  error "Missing destination parameter."
+  error "Missing destination parameter (-d)."
   exit 1
 fi
 
-if [ "${DELETE_DESTINATION}" = "" ]; then
-  DELETE_DESTINATION="false"
+# Ensure delete_destination is boolean
+if [ "${DELETE_DESTINATION}" != "true" ] && [ "${DELETE_DESTINATION}" != "false" ]; then
+  DELETE_DESTINATION="true"
 fi
 
 source_stripped=$(echo "${SOURCE}" | cut -d '?' -f 1)
 
 print "Source: ${source_stripped}"
 print "Destination: ${DESTINATION}"
-print "Delete destination: ${DELETE_DESTINATION}"
+print "Mirror (delete): ${DELETE_DESTINATION}"
 
 
 # Validate source
