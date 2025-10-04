@@ -11,7 +11,7 @@ While CloudDump can be a useful component of a disaster recovery or backup regim
 - **Skip Missed Schedules**: If a scheduled time is missed while jobs are running, it will be skipped to avoid backlog
 - **Stdout Logging**: All logs go to stdout for proper container log management
 - **Email Reports**: Email reports with temporary log files attached for each job execution
-- **Mount Support**: Support for SSH (sshfs) and SMB (CIFS) mounts
+- **Mount Support**: Support for SSH (sshfs) and SMB (smbnetfs) mounts without requiring elevated privileges
 - **OpenSUSE Leap**: Built on OpenSUSE Leap 15.6
 
 ## Running
@@ -24,10 +24,6 @@ docker run \
   -d --restart always \
   ghcr.io/vendanor/clouddump:latest
 ```
-
-To give mount permissions, add capabilities DAC_READ_SEARCH and SYS_ADMIN. Example.:
-
-```docker run --name "clouddump" --cap-add DAC_READ_SEARCH --cap-add SYS_ADMIN --mount type=bind,source=config.json,target=/config/config.json,readonly --volume /clouddump/:/mnt/clouddump -d --restart always ghcr.io/vendanor/clouddump:latest```
 
 
 ### config.json example
