@@ -229,9 +229,8 @@ get_job_configuration() {
 execute_s3bucket_job() {
   local job_idx="$1"
   local jobid="$2"
-  local scriptfile="$3"
-  local jobdebug="$4"
-  local logfile="$5"
+  local jobdebug="$3"
+  local logfile="$4"
   
   local bucket_count result
   result=0
@@ -255,10 +254,10 @@ execute_s3bucket_job() {
     endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
     
     if [ "${jobdebug}" = "true" ]; then
-      /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
+      /bin/bash -x dump_s3bucket.sh "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
       bucket_result=$?
     else
-      /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
+      /bin/bash dump_s3bucket.sh "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
       bucket_result=$?
     fi
     
@@ -274,9 +273,8 @@ execute_s3bucket_job() {
 execute_azstorage_job() {
   local job_idx="$1"
   local jobid="$2"
-  local scriptfile="$3"
-  local jobdebug="$4"
-  local logfile="$5"
+  local jobdebug="$3"
+  local logfile="$4"
   
   local bs_count result
   result=0
@@ -296,10 +294,10 @@ execute_azstorage_job() {
     delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
     
     if [ "${jobdebug}" = "true" ]; then
-      /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
+      /bin/bash -x dump_azstorage.sh "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
       bs_result=$?
     else
-      /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
+      /bin/bash dump_azstorage.sh "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
       bs_result=$?
     fi
     
@@ -315,9 +313,8 @@ execute_azstorage_job() {
 execute_pgsql_job() {
   local job_idx="$1"
   local jobid="$2"
-  local scriptfile="$3"
-  local jobdebug="$4"
-  local logfile="$5"
+  local jobdebug="$3"
+  local logfile="$4"
   
   local server_count result
   result=0
@@ -385,10 +382,10 @@ execute_pgsql_job() {
       done
       
       if [ "${jobdebug}" = "true" ]; then
-        /bin/bash -x "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
+        /bin/bash -x dump_pgsql.sh "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
         db_result=$?
       else
-        /bin/bash "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
+        /bin/bash dump_pgsql.sh "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
         db_result=$?
       fi
       
@@ -839,8 +836,6 @@ while true; do
       continue
     fi
     
-    script="dump_${type}.sh"
-    
     crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g')
     if [ $? -ne 0 ] || [ "${crontab}" = "" ]; then
       continue
@@ -862,23 +857,10 @@ while true; do
       # Only run if we haven't run this job in the current minute
       if [ "${last_run_minute}" != "${current_minute}" ]; then
         
-        log "Running job ${jobid} (script: ${script})"
+        log "Running job ${jobid} (type: ${type})"
         
-        # Get script path
-        echo "${script}" | grep '^\/' >/dev/null 2>&1
-        if [ $? -eq 0 ]; then
-          scriptfile="${script}"
-          scriptfilename=$(echo "${script}" | sed 's/.*\///g')
-        else
-          scriptfile=$(which "${script}" 2>/dev/null)
-          if [ "${scriptfile}" = "" ]; then
-            scriptfile="/usr/local/bin/${script}"
-          fi
-          scriptfilename="${script}"
-        fi
-        
-        # Create lockfile
-        LOCKFILE="/tmp/LOCKFILE_${scriptfilename}_${jobid}"
+        # Create lockfile using job type and id
+        LOCKFILE="/tmp/LOCKFILE_dump_${type}_${jobid}"
         LOCKFILE=$(echo "${LOCKFILE}" | sed 's/\.//g')
         
         # Check if already running
@@ -899,13 +881,13 @@ while true; do
           result=0
           
           if [ "${type}" = "s3bucket" ]; then
-            execute_s3bucket_job "${i}" "${jobid}" "${scriptfile}" "${jobdebug}" "${LOGFILE}"
+            execute_s3bucket_job "${i}" "${jobid}" "${jobdebug}" "${LOGFILE}"
             result=$?
           elif [ "${type}" = "azstorage" ]; then
-            execute_azstorage_job "${i}" "${jobid}" "${scriptfile}" "${jobdebug}" "${LOGFILE}"
+            execute_azstorage_job "${i}" "${jobid}" "${jobdebug}" "${LOGFILE}"
             result=$?
           elif [ "${type}" = "pgsql" ]; then
-            execute_pgsql_job "${i}" "${jobid}" "${scriptfile}" "${jobdebug}" "${LOGFILE}"
+            execute_pgsql_job "${i}" "${jobid}" "${jobdebug}" "${LOGFILE}"
             result=$?
           else
             # Unknown type - should not happen
