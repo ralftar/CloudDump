@@ -43,6 +43,17 @@ jobs:
             echo "Update available: ${azcopy_version} (${azcopy_date})"
           fi
       
+      - name: Close outdated azcopy PRs
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get all open PRs with "azcopy-update-" branch prefix
+          gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("azcopy-update-")) | .number' | while read pr_number; do
+            echo "Closing outdated PR #${pr_number}"
+            gh pr close ${pr_number} --comment "Closing this PR as a newer AzCopy version (${{ steps.check.outputs.version }}) is now available." --delete-branch || true
+          done
+      
       - name: Create Pull Request
         if: steps.check.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@v7
