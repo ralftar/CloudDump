@@ -854,8 +854,36 @@ while true; do
                 fi
               done
             fi
+          elif [ "${type}" = "azstorage" ]; then
+            # For azstorage, parse config and call script for each blobstorage
+            bs_count=$(jq -r ".jobs[${i}].blobstorages | length" "${CONFIGFILE}")
+            if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
+              log "Error: Can't read blobstorages from Json configuration for job ${jobid}." >> "${LOGFILE}"
+              result=1
+            elif [ "${bs_count}" -eq 0 ]; then
+              log "Error: No blobstorages for ${jobid} in Json configuration." >> "${LOGFILE}"
+              result=1
+            else
+              for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
+                source=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+                destination=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+                delete_destination=$(jq -r ".jobs[${i}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+                
+                if [ "${jobdebug}" = "true" ]; then
+                  /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${LOGFILE}" 2>&1
+                  bs_result=$?
+                else
+                  /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" >> "${LOGFILE}" 2>&1
+                  bs_result=$?
+                fi
+                
+                if [ ${bs_result} -ne 0 ]; then
+                  result=${bs_result}
+                fi
+              done
+            fi
           else
-            # For other types, use the old method
+            # For other types (pgsql), use the old method
             if [ "${jobdebug}" = "true" ]; then
               /bin/bash -x "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
               result=$?
