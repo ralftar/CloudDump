@@ -819,13 +819,50 @@ while true; do
           
           log "Job ${jobid} starting at ${time_start_timestamp}" >> "${LOGFILE}"
           
-          # Run the script directly
-          if [ "${jobdebug}" = "true" ]; then
-            /bin/bash -x "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
-            result=$?
+          # Run the script based on type
+          result=0
+          
+          if [ "${type}" = "s3bucket" ]; then
+            # For s3bucket, parse config and call script for each bucket
+            bucket_count=$(jq -r ".jobs[${i}].buckets | length" "${CONFIGFILE}")
+            if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
+              log "Error: Can't read buckets from Json configuration for job ${jobid}." >> "${LOGFILE}"
+              result=1
+            elif [ "${bucket_count}" -eq 0 ]; then
+              log "Error: No buckets for ${jobid} in Json configuration." >> "${LOGFILE}"
+              result=1
+            else
+              for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
+                source=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+                destination=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+                delete_destination=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+                aws_access_key_id=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].aws_access_key_id" "${CONFIGFILE}" | sed 's/^null$//g')
+                aws_secret_access_key=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].aws_secret_access_key" "${CONFIGFILE}" | sed 's/^null$//g')
+                aws_region=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
+                endpoint_url=$(jq -r ".jobs[${i}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
+                
+                if [ "${jobdebug}" = "true" ]; then
+                  /bin/bash -x "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${LOGFILE}" 2>&1
+                  bucket_result=$?
+                else
+                  /bin/bash "${scriptfile}" "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${LOGFILE}" 2>&1
+                  bucket_result=$?
+                fi
+                
+                if [ ${bucket_result} -ne 0 ]; then
+                  result=${bucket_result}
+                fi
+              done
+            fi
           else
-            /bin/bash "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
-            result=$?
+            # For other types, use the old method
+            if [ "${jobdebug}" = "true" ]; then
+              /bin/bash -x "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
+              result=$?
+            else
+              /bin/bash "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
+              result=$?
+            fi
           fi
           
           time_end=$(date +%s)
