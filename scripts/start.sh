@@ -189,39 +189,36 @@ ${mount_summary}"
       smb_host=$(echo "${path}" | sed 's|^//\([^/]*\)/.*|\1|')
       smb_share=$(echo "${path}" | sed 's|^//[^/]*/\(.*\)|\1|')
       
-      # Create config and credential files in memory
-      mkdir -p /dev/shm || exit 1
-      
-      smbnetfs_config="/dev/shm/smbnetfs_${i}.conf"
-      smbcredentials="/dev/shm/.smbcredentials_${i}"
-      
-      # Set up credentials if username is provided
-      if [ ! "${username}" = "" ]; then
-        echo "auth ${smbcredentials}" > "${smbnetfs_config}" || exit 1
-        if [ "${password}" = "" ]; then
-          echo -e "${username}\n" > "${smbcredentials}" || exit 1
-        else
-          echo -e "${username}\n${password}" > "${smbcredentials}" || exit 1
-        fi
-        chmod 600 "${smbcredentials}" || exit 1
-      else
-        # Guest access
-        echo "auth ${smbcredentials}" > "${smbnetfs_config}" || exit 1
-        echo -e "guest\n" > "${smbcredentials}" || exit 1
-        chmod 600 "${smbcredentials}" || exit 1
-      fi
-      
       log "Mounting ${path} to ${mountpoint} using smbnetfs."
       
-      # Create a base mount point for smbnetfs
-      smbnetfs_root="/tmp/smbnetfs_${i}"
-      mkdir -p "${smbnetfs_root}" || exit 1
+      # Use a single shared smbnetfs root for all mounts
+      smbnetfs_root="/tmp/smbnetfs"
       
-      # Mount using smbnetfs to the root directory
-      smbnetfs "${smbnetfs_root}" -o config="${smbnetfs_config}",allow_other || exit 1
-      
-      # Wait a moment for the mount to be ready
-      sleep 2
+      # Mount smbnetfs if not already mounted
+      if [ ! -d "${smbnetfs_root}/${smb_host}" ]; then
+        mkdir -p "${smbnetfs_root}" || exit 1
+        
+        # Create credentials file if username is provided
+        if [ ! "${username}" = "" ]; then
+          mkdir -p /dev/shm || exit 1
+          smbcredentials="/dev/shm/.smbcredentials"
+          if [ "${password}" = "" ]; then
+            echo -e "${username}\n" > "${smbcredentials}"
+          else
+            echo -e "${username}\n${password}" > "${smbcredentials}"
+          fi
+          chmod 600 "${smbcredentials}" || exit 1
+          
+          # Create config file
+          echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
+          smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other || exit 1
+        else
+          # Mount without credentials for guest access
+          smbnetfs "${smbnetfs_root}" -o allow_other || exit 1
+        fi
+        
+        sleep 2
+      fi
       
       # Create a symlink to the actual share path
       ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}" || exit 1
