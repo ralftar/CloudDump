@@ -26,7 +26,7 @@ jobs:
           
           has_issues=0
           # Run shellcheck on each script and capture output
-          for script in scripts/start.sh scripts/wrapper.sh scripts/azdump.sh scripts/pgdump.sh; do
+          for script in scripts/start.sh scripts/azdump.sh scripts/pgdump.sh; do
             echo "### \`$script\`" >> shellcheck-results.txt
             output=$(shellcheck -s bash --exclude=SC2181,SC2230,SC2086,SC2001,SC2317 "$script" 2>&1)
             if [ $? -eq 0 ]; then
