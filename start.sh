@@ -328,8 +328,9 @@ execute_pgsql_job() {
   fi
   
   for ((server_idx = 0; server_idx < server_count; server_idx++)); do
-    local PGHOST PGPORT PGUSERNAME PGPASSWORD backuppath filenamedate compress
-    local databases_configured databases_excluded_list databases_all databases_backup
+    local PGHOST PGPORT PGUSERNAME PGPASSWORD backuppath filenamedate compress server_result
+    local databases_json databases_excluded_json
+    
     PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
     PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
     PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
@@ -338,61 +339,21 @@ execute_pgsql_job() {
     filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
     compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
     
-    # Get list of databases with explicit configuration
-    databases_configured=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
-    databases_excluded_list=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    # Pass the databases and databases_excluded configuration as JSON to the dump script
+    databases_json=$(jq -c ".jobs[${job_idx}].servers[${server_idx}].databases // []" "${CONFIGFILE}")
+    databases_excluded_json=$(jq -c ".jobs[${job_idx}].servers[${server_idx}].databases_excluded // []" "${CONFIGFILE}")
     
-    # Get all databases from server
-    databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1 | sed -z 's/\n/ /g;s/ $/\n/')
-    
-    # Determine which databases to backup
-    databases_backup=""
-    if [ ! "${databases_configured}" = "" ]; then
-      # Use only explicitly configured databases
-      databases_backup="${databases_configured}"
+    if [ "${jobdebug}" = "true" ]; then
+      /bin/bash -x dump_pgsql.sh "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${backuppath}" "${filenamedate}" "${compress}" "${databases_json}" "${databases_excluded_json}" >> "${logfile}" 2>&1
+      server_result=$?
     else
-      # Use all databases, excluding those in databases_excluded
-      for database in ${databases_all}
-      do
-        if echo ",${databases_excluded_list}," | grep -q ",${database},"; then
-          continue
-        fi
-        databases_backup="${databases_backup} ${database}"
-      done
+      /bin/bash dump_pgsql.sh "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${backuppath}" "${filenamedate}" "${compress}" "${databases_json}" "${databases_excluded_json}" >> "${logfile}" 2>&1
+      server_result=$?
     fi
     
-    # Backup each database
-    for database in ${databases_backup}
-    do
-      # Get table configuration for this database
-      local tables_included tables_excluded db_count db_idx jq_output db_result
-      tables_included=""
-      tables_excluded=""
-      
-      db_count=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases | length" "${CONFIGFILE}" 2>/dev/null)
-      for ((db_idx = 0; db_idx < db_count; db_idx++)); do
-        jq_output=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"] | length" "${CONFIGFILE}" 2>/dev/null | sed 's/^null$//g')
-        if [ "${jq_output}" = "" ] || [ -z "${jq_output}" ] || ! [ "${jq_output}" -eq "${jq_output}" ] || [ "${jq_output}" -eq 0 ] 2>/dev/null; then
-          continue
-        fi
-        
-        tables_excluded=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
-        tables_included=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_included[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
-        break
-      done
-      
-      if [ "${jobdebug}" = "true" ]; then
-        /bin/bash -x dump_pgsql.sh "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
-        db_result=$?
-      else
-        /bin/bash dump_pgsql.sh "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${logfile}" 2>&1
-        db_result=$?
-      fi
-      
-      if [ ${db_result} -ne 0 ]; then
-        result=${db_result}
-      fi
-    done
+    if [ ${server_result} -ne 0 ]; then
+      result=${server_result}
+    fi
   done
   
   return ${result}
