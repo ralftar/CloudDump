@@ -1,13 +1,21 @@
 #!/bin/bash
 
 # Vendanor PgDump Script
-# This script runs pg_dump for each database on each server for the specified job
-# Usage: dump_pgsql.sh <jobid>
+# This script runs pg_dump for a single database
+# Usage: dump_pgsql.sh <host> <port> <user> <pass> <database> <backuppath> <filenamedate> <compress> <tables_included> <tables_excluded>
 
 
-CONFIGFILE="/config/config.json"
-
-JOBID="${1}"
+# Parameters
+PGHOST="${1}"
+PGPORT="${2}"
+PGUSERNAME="${3}"
+PGPASSWORD="${4}"
+DATABASE="${5}"
+BACKUPPATH="${6}"
+FILENAMEDATE="${7}"
+COMPRESS="${8}"
+TABLES_INCLUDED="${9}"
+TABLES_EXCLUDED="${10}"
 
 
 # Functions
@@ -36,28 +44,6 @@ error() {
 
 }
 
-json_array_to_strlist() {
-
-  local i
-  local output
-  count=$(jq -r "${1} | length" "${CONFIGFILE}")
-  for ((i = 0; i < count; i++)); do
-    local value
-    value=$(jq -r "${1}[${i}]" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "$value" = "" ] ; then
-      continue
-    fi
-    if [ "${output}" = "" ]; then
-      output="${value}"
-    else
-      output="${output} ${value}"
-    fi
-  done
-
-  echo "${output}"
-
-}
-
 
 # Init
 
@@ -66,7 +52,7 @@ print "Vendanor PgDump ($0)"
 
 # Check commands
 
-cmds="which grep sed cut date touch mkdir cp rm jq psql pg_dump tar bzip2"
+cmds="which grep sed cut date touch mkdir rm psql pg_dump tar bzip2"
 cmds_missing=
 for cmd in ${cmds}
 do
@@ -89,463 +75,185 @@ fi
 
 # Check parameters
 
-if [ "${JOBID}" = "" ]; then
-  error "Missing Job ID."
+if [ "${PGHOST}" = "" ]; then
+  error "Missing host parameter."
+  exit 1
+fi
+
+if [ "${PGPORT}" = "" ]; then
+  PGPORT="5432"
+fi
+
+if [ "${PGUSERNAME}" = "" ]; then
+  error "Missing user parameter."
+  exit 1
+fi
+
+if [ "${PGPASSWORD}" = "" ]; then
+  error "Missing pass parameter."
+  exit 1
+fi
+
+if [ "${DATABASE}" = "" ]; then
+  error "Missing database parameter."
+  exit 1
+fi
+
+if [ "${BACKUPPATH}" = "" ]; then
+  error "Missing backuppath parameter."
+  exit 1
+fi
+
+if [ "${FILENAMEDATE}" = "" ]; then
+  FILENAMEDATE="false"
+fi
+
+if [ "${COMPRESS}" = "" ]; then
+  COMPRESS="false"
+fi
+
+print "Database: ${DATABASE}"
+print "Host: ${PGHOST}"
+print "Port: ${PGPORT}"
+print "Username: ${PGUSERNAME}"
+print "Backup path: ${BACKUPPATH}"
+print "Filename date: ${FILENAMEDATE}"
+print "Compress: ${COMPRESS}"
+
+
+# Create backup path
+
+print "Creating backuppath ${BACKUPPATH}..."
+
+mkdir -p "${BACKUPPATH}"
+if [ $? -ne 0 ]; then
+  error "Could not create backuppath ${BACKUPPATH}."
   exit 1
 fi
 
 
-# Check configfile
+# Check permissions
 
-if [ ! -f "${CONFIGFILE}" ]; then
-  error "Missing Json configuration file ${CONFIGFILE}."
+print "Checking permission for backuppath ${BACKUPPATH}..."
+
+touch "${BACKUPPATH}/TEST_FILE"
+if [ $? -ne 0 ]; then
+  error "Could not access ${BACKUPPATH}."
   exit 1
 fi
 
-if [ ! -r "${CONFIGFILE}" ]; then
-  error "Can't read Json configuration file ${CONFIGFILE}."
-  exit 1
-fi
+rm -f "${BACKUPPATH}/TEST_FILE"
 
 
-# Find the job index for this job ID
+# Build table parameters
 
-jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
-if [ "${jobs}" = "" ] || [ -z "${jobs}" ] || ! [ "${jobs}" -eq "${jobs}" ] 2>/dev/null; then
-  error "Can't read jobs from Json configuration."
-  exit 1
-fi
+tables_excluded_params=""
+tables_included_params=""
 
-job_idx=
-for ((i = 0; i < jobs; i++)); do
-  jobid_current=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${jobid_current}" = "" ]; then
-    continue
-  fi
-  if [ "${jobid_current}" = "${JOBID}" ]; then
-    job_idx="${i}"
-    break
-  fi
-done
-
-if [ "${job_idx}" = "" ]; then
-  error "No job ID ${JOBID} in Json configuration."
-  exit 1
-fi
-
-
-# Iterate servers
-
-result=0
-
-server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
-if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
-  error "Can't read servers for ${JOBID} from Json configuration."
-  exit 1
-fi
-
-if [ "${server_count}" -eq 0 ]; then
-  error "No servers for ${JOBID} in Json configuration."
-  exit 1
-fi
-
-
-for ((server_idx = 0; server_idx < server_count; server_idx++)); do
-
-  # Reset databases_backup for each server
-  databases_backup=""
-
-  PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${PGHOST}" = "" ]; then
-    error "Missing host for server at index ${server_idx} for job ID ${JOBID}."
-    result=1
-    continue
-  fi
-
-  print "Checking server ${PGHOST} (${server_idx}) for job ID ${job_idx}..."
-
-  PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ]; then
-    PGPORT="5432"
-  fi
-
-  PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${PGUSERNAME}" = "" ]; then
-    error "Missing user for server ${PGHOST}."
-    result=1
-    continue
-  fi
-
-  PGPASSWORD=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].pass" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${PGPASSWORD}" = "" ]; then
-    error "Missing pass for ${PGHOST}."
-    result=1
-    continue
-  fi
-
-  backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${backuppath}" = "" ]; then
-    error "Missing backuppath for ${PGHOST}."
-    continue
-  fi
-
-  filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
-  compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
-
-  # Get list of databases with explicit configuration
-  databases_configured=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
-  databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
-
-  print "Listing databases for ${PGHOST}..."
-
-  PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l
-  if [ $? -ne 0 ]; then
-    error "Failed to list databases for ${PGHOST}."
-    result=1
-    continue
-  fi
-
-  databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1 | sed -z 's/\n/ /g;s/ $/\n/')
-  if [ $? -ne 0 ]; then
-    error "Failed to list databases for ${PGHOST}."
-    result=1
-    continue
-  fi
-
-  if [ "${databases_all}" = "" ]; then
-    error "Missing databases for ${PGHOST}."
-    result=1
-    continue
-  fi
-
-  print "All databases: ${databases_all}"
-  print "Configured databases: ${databases_configured}"
-  print "Excluded databases: ${databases_excluded}"
-
-  # Determine which databases to backup
-  # If databases are explicitly configured, use only those
-  # Otherwise, use all databases (excluding those in databases_excluded)
-  if ! [ "${databases_configured}" = "" ]; then
-    # Use only explicitly configured databases
-    for database in ${databases_configured}
-    do
-      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
-      
-      # Check if database exists
-      found=0
-      for database_available in ${databases_all}
-      do
-        database_available_lc=$(echo "${database_available}" | tr '[:upper:]' '[:lower:]')
-        if [ "${database_available_lc}" = "${database_lc}" ]; then
-          found=1
-          break
-        fi
-      done
-      
-      if [ "${found}" = "0" ]; then
-        error "Configured database '${database}' does not exist on ${PGHOST}."
-        result=1
-        continue
-      fi
-      
-      if [ "${databases_backup}" = "" ]; then
-        databases_backup="${database}"
-      else
-        databases_backup="${databases_backup} ${database}"
-      fi
-    done
-  else
-    # Use all databases, excluding those in databases_excluded
-    for database in ${databases_all}
-    do
-      database_lc=$(echo "${database}" | tr '[:upper:]' '[:lower:]')
-      
-      # Check if database is excluded
-      if ! [ "${databases_excluded}" = "" ]; then
-        exclude=0
-        for database_exclude in ${databases_excluded}
-        do
-          database_exclude_lc=$(echo "${database_exclude}" | tr '[:upper:]' '[:lower:]')
-          if [ "${database_exclude_lc}" = "${database_lc}" ]; then
-            exclude=1
-            break
-          fi
-        done
-        if [ "${exclude}" = "1" ]; then
-          continue
-        fi
-      fi
-      
-      if [ "${databases_backup}" = "" ]; then
-        databases_backup="${database}"
-      else
-        databases_backup="${databases_backup} ${database}"
-      fi
-    done
-  fi
-
-  if [ "${databases_backup}" = "" ]; then
-    error "Missing databases to backup for ${PGHOST}."
-    continue
-  fi
-
-  print "Databases to backup: ${databases_backup}"
-
-  # Create backup path
-
-  print "Creating backuppath ${backuppath}..."
-
-  mkdir -p "${backuppath}"
-  if [ $? -ne 0 ]; then
-    error "Could not create backuppath ${backuppath}."
-    result=1
-    continue
-  fi
-
-  # Check permissions
-
-  print "Checking permission for backuppath ${backuppath}..."
-
-  touch "${backuppath}/TEST_FILE"
-  if [ $? -ne 0 ]; then
-    error "Could not access ${backuppath}."
-    result=1
-    continue
-  fi
-
-  rm -f "${backuppath}/TEST_FILE"
-
-  # Run pg_dump for each database
-
-  for database in ${databases_backup}; do
-
-    # Read the configuration for this database
-
-    tables_excluded=
-    tables_included=
-    tables_excluded_params=
-    tables_included_params=
-
-    db_count=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases | length" "${CONFIGFILE}")
-    if [ "${db_count}" = "" ] || [ -z "${db_count}" ] || ! [ "${db_count}" -eq "${db_count}" ] 2>/dev/null; then
-      error "Can't read database configuration for ${PGHOST} from Json configuration."
-      result=1
-      continue
+if [ ! "${TABLES_EXCLUDED}" = "" ]; then
+  print "Tables excluded: ${TABLES_EXCLUDED}"
+  for table_excluded in ${TABLES_EXCLUDED//,/ }
+  do
+    table_excluded=$(echo "${table_excluded}" | xargs)
+    if [ ! "${table_excluded}" = "" ]; then
+      tables_excluded_params="${tables_excluded_params} --exclude-table=${table_excluded}"
     fi
-
-    for ((db_idx = 0; db_idx < db_count; db_idx++)); do
-
-      # Check if this is the correct array index for this database.
-      jq_output=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[${db_idx}][\"${database}\"] | length" "${CONFIGFILE}" | sed 's/^null$//g')
-      if [ "${jq_output}" = "" ] || [ -z "${jq_output}" ] || ! [ "${jq_output}" -eq "${jq_output}" ] || [ "${jq_output}" -eq 0 ] 2>/dev/null; then
-        continue
-      fi
-
-      # Read excluded tables
-      tb_count=$(jq -r ".jobs[${job_idx}].servers[${server_idx}][\"databases\"][${db_idx}][\"${database}\"].tables_excluded | length" "${CONFIGFILE}")
-      for ((tb_idx = 0; tb_idx < tb_count; tb_idx++)); do
-        table_excluded=$(jq -r ".jobs[${job_idx}].servers[${server_idx}][\"databases\"][${db_idx}][\"${database}\"].tables_excluded[${tb_idx}]" "${CONFIGFILE}" | sed 's/^null$//g')
-        if [ "${table_excluded}" = "" ]; then
-          continue
-        fi
-        if [ "${tables_excluded}" = "" ]; then
-          tables_excluded="$table_excluded"
-          tables_excluded_params="--exclude-table=$table_excluded"
-        else
-          tables_excluded="${tables_excluded}, ${table_excluded}"
-          tables_excluded_params="${tables_excluded_params} --exclude-table=${table_excluded}"
-        fi
-      done
-
-      # Read included tables
-      tb_count=$(jq -r ".jobs[${job_idx}].servers[${server_idx}][\"databases\"][${db_idx}][\"${database}\"].tables_included | length" "${CONFIGFILE}")
-      for ((tb_idx = 0; tb_idx < tb_count; tb_idx++)); do
-        table_included=$(jq -r ".jobs[${job_idx}].servers[${server_idx}][\"databases\"][${db_idx}][\"${database}\"].tables_included[${tb_idx}]" "${CONFIGFILE}" | sed 's/^null$//g')
-        if [ "${table_included}" = "" ]; then
-          continue
-        fi
-        if [ "${tables_included}" = "" ]; then
-          tables_included="$table_included"
-          tables_included_params="--table=$table_included"
-        else
-          tables_included="${tables_included}, ${table_included}"
-          tables_included_params="${tables_included_params} --table=${table_included}"
-        fi
-      done
-
-      break
-
-    done
-
-    BACKUPFILE_TEMP="${backuppath}/${database}-$(date '+%Y%m%d%H%M%S').tar"
-    if [ "${filenamedate}" = "true" ]; then
-      BACKUPFILE_FINAL="${BACKUPFILE_TEMP}"
-    else
-      BACKUPFILE_FINAL="${backuppath}/${database}.tar"
-    fi
-
-    print "Running pg_dump of ${database} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
-
-    # Fetch list of all tables if we need to validate includes or excludes
-    tables_all=""
-    if ! [ "${tables_included}" = "" ] || ! [ "${tables_excluded}" = "" ]; then
-      print "Fetching table list for ${database}..."
-      tables_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>&1 | sed 's/^ *//g' | sed 's/ *$//g' | grep -v '^$' | sed -z 's/\n/ /g;s/ $/\n/')
-      if [ $? -ne 0 ]; then
-        error "Failed to list tables for ${database} on ${PGHOST}."
-        result=1
-        continue
-      fi
-    fi
-
-    if [ "${tables_included}" = "" ]; then
-      print "All tables for ${database} included"
-    else
-      print "Tables included for ${database}: ${tables_included}"
-      
-      # Validate that all included tables exist
-      print "Validating included tables for ${database}..."
-      
-      # Validate tables and build params only for existing tables
-      tables_included_validated=""
-      tables_included_params=""
-      for table_include in ${tables_included//,/ }
-      do
-        table_include=$(echo "${table_include}" | xargs)
-        table_include_lc=$(echo "${table_include}" | tr '[:upper:]' '[:lower:]')
-        found=0
-        for table_available in ${tables_all}
-        do
-          table_available_lc=$(echo "${table_available}" | tr '[:upper:]' '[:lower:]')
-          if [ "${table_available_lc}" = "${table_include_lc}" ]; then
-            found=1
-            break
-          fi
-        done
-        if [ "${found}" = "0" ]; then
-          error "Included table '${table_include}' does not exist in database '${database}' on ${PGHOST}. Skipping this table."
-          result=1
-        else
-          # Only add existing tables to params
-          if [ "${tables_included_validated}" = "" ]; then
-            tables_included_validated="$table_include"
-            tables_included_params="--table=$table_include"
-          else
-            tables_included_validated="${tables_included_validated}, ${table_include}"
-            tables_included_params="${tables_included_params} --table=${table_include}"
-          fi
-        fi
-      done
-      
-      # If none of the specified tables exist, skip this database
-      if [ "${tables_included_validated}" = "" ]; then
-        error "None of the specified tables exist in ${database} on ${PGHOST}. Skipping database backup."
-        result=1
-        continue
-      fi
-      
-      tables_included="${tables_included_validated}"
-    fi
-
-    # Validate excluded tables (warnings only, don't fail)
-    if ! [ "${tables_excluded}" = "" ]; then
-      print "Validating excluded tables for ${database}..."
-      
-      for table_exclude in ${tables_excluded//,/ }
-      do
-        table_exclude=$(echo "${table_exclude}" | xargs)
-        table_exclude_lc=$(echo "${table_exclude}" | tr '[:upper:]' '[:lower:]')
-        found=0
-        for table_available in ${tables_all}
-        do
-          table_available_lc=$(echo "${table_available}" | tr '[:upper:]' '[:lower:]')
-          if [ "${table_available_lc}" = "${table_exclude_lc}" ]; then
-            found=1
-            break
-          fi
-        done
-        if [ "${found}" = "0" ]; then
-          print "WARNING: Excluded table '${table_exclude}' does not exist in database '${database}' on ${PGHOST}."
-        fi
-      done
-      
-      print "Tables excluded for ${database}: ${tables_excluded}"
-    fi
-
-    PGPASSWORD=${PGPASSWORD} pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -F tar ${tables_included_params} ${tables_excluded_params} > "${BACKUPFILE_TEMP}"
-    if [ $? -ne 0 ]; then
-      error "pg_dump for ${database} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} failed."
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    if ! [ -f "${BACKUPFILE_TEMP}" ]; then
-      error "Backupfile ${BACKUPFILE_TEMP} missing for ${database} on ${PGHOST}."
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    size=$(wc -c "${BACKUPFILE_TEMP}" | cut -d ' ' -f 1)
-    if [ $? -ne 0 ]; then
-      error "Could not get filesize for backupfile ${BACKUPFILE_TEMP} of ${database} on ${PGHOST}."
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    if [ -z "${size}" ] || ! [ "${size}" -eq "${size}" ] 2>/dev/null; then
-      error "Invalid filesize for backupfile ${BACKUPFILE_TEMP} of ${database} on ${PGHOST}"
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    if [ "${size}" -lt 10 ]; then
-      error "Backupfile ${BACKUPFILE_TEMP} of ${database} on ${PGHOST} too small (${size} bytes)."
-      rm -f "${BACKUPFILE_TEMP}"
-      result=1
-      continue
-    fi
-
-    if ! [ "${BACKUPFILE_TEMP}" = "${BACKUPFILE_FINAL}" ]; then
-      mv -v "${BACKUPFILE_TEMP}" "${BACKUPFILE_FINAL}"
-      if [ $? -ne 0 ]; then
-        error "Failed to rename backupfile ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}."
-        rm -f "${BACKUPFILE_TEMP}"
-        result=1
-        continue
-      fi
-    fi
-
-    print "Backup of ${database} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} is successful."
-
-    if [ "${compress}" = "true" ]; then
-      print "BZipping ${BACKUPFILE_FINAL}..."
-      if [ -f "${BACKUPFILE_FINAL}.bz2" ]; then
-        rm -v "${BACKUPFILE_FINAL}.bz2"
-        if [ $? -ne 0 ]; then
-          error "Failed to delete old backupfile ${BACKUPFILE_FINAL}.bz2."
-          result=1
-          continue
-        fi
-      fi
-      bzip2 "${BACKUPFILE_FINAL}"
-      if [ $? -eq 0 ]; then
-        BACKUPFILE_FINAL="${BACKUPFILE_FINAL}.bz2"
-      else
-        result=1
-      fi
-    fi
-
-    print "Backup of ${database} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} complete"
-
   done
-
-done
-
-
-if ! [ "${result}" = "" ]; then
-  exit "${result}"
 fi
+
+if [ ! "${TABLES_INCLUDED}" = "" ]; then
+  print "Tables included: ${TABLES_INCLUDED}"
+  for table_included in ${TABLES_INCLUDED//,/ }
+  do
+    table_included=$(echo "${table_included}" | xargs)
+    if [ ! "${table_included}" = "" ]; then
+      tables_included_params="${tables_included_params} --table=${table_included}"
+    fi
+  done
+fi
+
+
+# Prepare backup file names
+
+BACKUPFILE_TEMP="${BACKUPPATH}/${DATABASE}-$(date '+%Y%m%d%H%M%S').tar"
+if [ "${FILENAMEDATE}" = "true" ]; then
+  BACKUPFILE_FINAL="${BACKUPFILE_TEMP}"
+else
+  BACKUPFILE_FINAL="${BACKUPPATH}/${DATABASE}.tar"
+fi
+
+
+# Run pg_dump
+
+print "Running pg_dump of ${DATABASE} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
+
+PGPASSWORD=${PGPASSWORD} pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${DATABASE}" -F tar ${tables_included_params} ${tables_excluded_params} > "${BACKUPFILE_TEMP}"
+if [ $? -ne 0 ]; then
+  error "pg_dump for ${DATABASE} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} failed."
+  rm -f "${BACKUPFILE_TEMP}"
+  exit 1
+fi
+
+if ! [ -f "${BACKUPFILE_TEMP}" ]; then
+  error "Backupfile ${BACKUPFILE_TEMP} missing for ${DATABASE} on ${PGHOST}."
+  rm -f "${BACKUPFILE_TEMP}"
+  exit 1
+fi
+
+size=$(wc -c "${BACKUPFILE_TEMP}" | cut -d ' ' -f 1)
+if [ $? -ne 0 ]; then
+  error "Could not get filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}."
+  rm -f "${BACKUPFILE_TEMP}"
+  exit 1
+fi
+
+if [ -z "${size}" ] || ! [ "${size}" -eq "${size}" ] 2>/dev/null; then
+  error "Invalid filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}"
+  rm -f "${BACKUPFILE_TEMP}"
+  exit 1
+fi
+
+if [ "${size}" -eq 0 ]; then
+  error "Backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST} is empty."
+  rm -f "${BACKUPFILE_TEMP}"
+  exit 1
+fi
+
+print "pg_dump of ${DATABASE} completed. Backupfile size: ${size} bytes."
+
+
+# Compress if needed
+
+if [ "${COMPRESS}" = "true" ]; then
+  print "Compressing backupfile ${BACKUPFILE_TEMP}..."
+  
+  bzip2 -f "${BACKUPFILE_TEMP}"
+  if [ $? -ne 0 ]; then
+    error "Compression of ${BACKUPFILE_TEMP} failed."
+    exit 1
+  fi
+  
+  BACKUPFILE_TEMP="${BACKUPFILE_TEMP}.bz2"
+  if [ "${FILENAMEDATE}" = "true" ]; then
+    BACKUPFILE_FINAL="${BACKUPFILE_FINAL}.bz2"
+  else
+    BACKUPFILE_FINAL="${BACKUPPATH}/${DATABASE}.tar.bz2"
+  fi
+  
+  print "Compression completed. Compressed file: ${BACKUPFILE_TEMP}"
+fi
+
+
+# Move to final filename
+
+if [ ! "${BACKUPFILE_TEMP}" = "${BACKUPFILE_FINAL}" ]; then
+  print "Moving ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}..."
+  
+  mv "${BACKUPFILE_TEMP}" "${BACKUPFILE_FINAL}"
+  if [ $? -ne 0 ]; then
+    error "Could not move ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}."
+    exit 1
+  fi
+fi
+
+print "Backup completed successfully: ${BACKUPFILE_FINAL}"
