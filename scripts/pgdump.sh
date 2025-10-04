@@ -268,6 +268,30 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
 
   print "Databases to backup: ${databases_backup}"
 
+  # Validate that all included databases exist
+  if ! [ "${databases_included}" = "" ]; then
+    for database_include in ${databases_included}
+    do
+      database_include_lc=$(echo "${database_include}" | tr '[:upper:]' '[:lower:]')
+      found=0
+      for database_backup in ${databases_backup}
+      do
+        database_backup_lc=$(echo "${database_backup}" | tr '[:upper:]' '[:lower:]')
+        if [ "${database_backup_lc}" = "${database_include_lc}" ]; then
+          found=1
+          break
+        fi
+      done
+      if [ "${found}" = "0" ]; then
+        error "Included database '${database_include}' does not exist on ${PGHOST}."
+        result=1
+      fi
+    done
+    if ! [ "${result}" = "" ]; then
+      continue
+    fi
+  fi
+
   # Create backup path
 
   print "Creating backuppath ${backuppath}..."
@@ -367,6 +391,38 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
       print "All tables for ${database} included"
     else
       print "Tables included for ${database}: ${tables_included}"
+      
+      # Validate that all included tables exist
+      print "Validating included tables for ${database}..."
+      tables_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>&1 | sed 's/^ *//g' | sed 's/ *$//g' | grep -v '^$' | sed -z 's/\n/ /g;s/ $/\n/')
+      if [ $? -ne 0 ]; then
+        error "Failed to list tables for ${database} on ${PGHOST}."
+        result=1
+        continue
+      fi
+      
+      for table_include in ${tables_included//,/ }
+      do
+        table_include=$(echo "${table_include}" | xargs)
+        table_include_lc=$(echo "${table_include}" | tr '[:upper:]' '[:lower:]')
+        found=0
+        for table_available in ${tables_all}
+        do
+          table_available_lc=$(echo "${table_available}" | tr '[:upper:]' '[:lower:]')
+          if [ "${table_available_lc}" = "${table_include_lc}" ]; then
+            found=1
+            break
+          fi
+        done
+        if [ "${found}" = "0" ]; then
+          error "Included table '${table_include}' does not exist in database '${database}' on ${PGHOST}."
+          result=1
+        fi
+      done
+      
+      if ! [ "${result}" = "" ]; then
+        continue
+      fi
     fi
 
     if ! [ "${tables_excluded}" = "" ]; then
