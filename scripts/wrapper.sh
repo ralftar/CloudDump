@@ -72,7 +72,7 @@ function exit_clean() {
     rm -f "${LOCKFILE}"
   fi
 
-  exit 0
+  # Don't exit here - let the trap return naturally to preserve exit code
 
 }
 
