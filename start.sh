@@ -883,13 +883,85 @@ while true; do
               done
             fi
           else
-            # For other types (pgsql), use the old method
-            if [ "${jobdebug}" = "true" ]; then
-              /bin/bash -x "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
-              result=$?
+            # For pgsql type, parse config and call script for each database
+            if [ "${type}" = "pgsql" ]; then
+              server_count=$(jq -r ".jobs[${i}].servers | length" "${CONFIGFILE}")
+              if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
+                log "Error: Can't read servers from Json configuration for job ${jobid}." >> "${LOGFILE}"
+                result=1
+              elif [ "${server_count}" -eq 0 ]; then
+                log "Error: No servers for ${jobid} in Json configuration." >> "${LOGFILE}"
+                result=1
+              else
+                for ((server_idx = 0; server_idx < server_count; server_idx++)); do
+                  PGHOST=$(jq -r ".jobs[${i}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
+                  PGPORT=$(jq -r ".jobs[${i}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
+                  PGUSERNAME=$(jq -r ".jobs[${i}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
+                  PGPASSWORD=$(jq -r ".jobs[${i}].servers[${server_idx}].pass" "${CONFIGFILE}" | sed 's/^null$//g')
+                  backuppath=$(jq -r ".jobs[${i}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
+                  filenamedate=$(jq -r ".jobs[${i}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
+                  compress=$(jq -r ".jobs[${i}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
+                  
+                  # Get list of databases with explicit configuration
+                  databases_configured=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
+                  databases_excluded_list=$(jq -r ".jobs[${i}].servers[${server_idx}].databases_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+                  
+                  # Get all databases from server
+                  databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1 | sed -z 's/\n/ /g;s/ $/\n/')
+                  
+                  # Determine which databases to backup
+                  databases_backup=""
+                  if [ ! "${databases_configured}" = "" ]; then
+                    # Use only explicitly configured databases
+                    databases_backup="${databases_configured}"
+                  else
+                    # Use all databases, excluding those in databases_excluded
+                    for database in ${databases_all}
+                    do
+                      if echo ",${databases_excluded_list}," | grep -q ",${database},"; then
+                        continue
+                      fi
+                      databases_backup="${databases_backup} ${database}"
+                    done
+                  fi
+                  
+                  # Backup each database
+                  for database in ${databases_backup}
+                  do
+                    # Get table configuration for this database
+                    tables_included=""
+                    tables_excluded=""
+                    
+                    db_count=$(jq -r ".jobs[${i}].servers[${server_idx}].databases | length" "${CONFIGFILE}" 2>/dev/null)
+                    for ((db_idx = 0; db_idx < db_count; db_idx++)); do
+                      jq_output=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[${db_idx}][\"${database}\"] | length" "${CONFIGFILE}" 2>/dev/null | sed 's/^null$//g')
+                      if [ "${jq_output}" = "" ] || [ -z "${jq_output}" ] || ! [ "${jq_output}" -eq "${jq_output}" ] || [ "${jq_output}" -eq 0 ] 2>/dev/null; then
+                        continue
+                      fi
+                      
+                      tables_excluded=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_excluded[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+                      tables_included=$(jq -r ".jobs[${i}].servers[${server_idx}].databases[${db_idx}][\"${database}\"].tables_included[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+                      break
+                    done
+                    
+                    if [ "${jobdebug}" = "true" ]; then
+                      /bin/bash -x "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${LOGFILE}" 2>&1
+                      db_result=$?
+                    else
+                      /bin/bash "${scriptfile}" "${PGHOST}" "${PGPORT}" "${PGUSERNAME}" "${PGPASSWORD}" "${database}" "${backuppath}" "${filenamedate}" "${compress}" "${tables_included}" "${tables_excluded}" >> "${LOGFILE}" 2>&1
+                      db_result=$?
+                    fi
+                    
+                    if [ ${db_result} -ne 0 ]; then
+                      result=${db_result}
+                    fi
+                  done
+                done
+              fi
             else
-              /bin/bash "${scriptfile}" "${jobid}" >> "${LOGFILE}" 2>&1
-              result=$?
+              # Unknown type - should not happen
+              log "Error: Unknown job type ${type} for job ${jobid}." >> "${LOGFILE}"
+              result=1
             fi
           fi
           
