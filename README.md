@@ -106,7 +106,9 @@ Basic example:
 
 ### PostgreSQL Backup Configuration
 
-The PostgreSQL backup configuration (`pgdump.sh`) supports flexible database and table filtering:
+The PostgreSQL backup configuration (`pgdump.sh`) supports flexible database and table filtering.
+
+> **Note**: If you're upgrading from a previous version, see [MIGRATION.md](MIGRATION.md) for migration instructions.
 
 #### Database Selection
 
