@@ -427,7 +427,9 @@ postconf smtp_tls_security_level=encrypt || exit 1
 postconf smtp_sasl_security_options=noanonymous || exit 1
 
 touch /etc/postfix/relay || exit 1
+chmod 600 /etc/postfix/relay || exit 1
 touch /etc/postfix/sasl_passwd || exit 1
+chmod 600 /etc/postfix/sasl_passwd || exit 1
 touch /etc/Muttrc || exit 1
 
 if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
@@ -490,6 +492,8 @@ ${mount_summary}"
     if echo "${path}" | grep ':' >/dev/null 2>&1; then # SSH
       if [ ! "${privkey}" = "" ]; then
         mkdir -p "${HOME}/.ssh" || exit 1
+        # Add cleanup trap for SSH key
+        trap 'rm -f "${HOME}/.ssh/id_rsa"' EXIT
         echo "${privkey}" >"${HOME}/.ssh/id_rsa" || exit 1
         chmod 600 "${HOME}/.ssh/id_rsa" || exit 1
       fi
@@ -524,6 +528,8 @@ ${mount_summary}"
         if [ ! "${username}" = "" ]; then
           mkdir -p /dev/shm || exit 1
           smbcredentials="/dev/shm/.smbcredentials"
+          # Add cleanup trap for SMB credentials
+          trap 'rm -f "${smbcredentials}" /dev/shm/smbnetfs.conf' EXIT
           if [ "${password}" = "" ]; then
             echo -e "${username}\n" > "${smbcredentials}"
           else
@@ -760,15 +766,51 @@ check_cron_match() {
 }
 
 
+# Clean up stale lockfiles (older than 24 hours)
+cleanup_stale_locks() {
+  local lockdir="/tmp"
+  local max_age_seconds=86400  # 24 hours
+  local current_time
+  current_time=$(date +%s)
+
+  for lockfile in "${lockdir}"/LOCKFILE_*; do
+    if [ -f "${lockfile}" ]; then
+      local file_time
+      file_time=$(stat -c %Y "${lockfile}" 2>/dev/null || stat -f %m "${lockfile}" 2>/dev/null)
+      if [ -n "${file_time}" ]; then
+        local age=$((current_time - file_time))
+        if [ "${age}" -gt "${max_age_seconds}" ]; then
+          log "Removing stale lockfile: ${lockfile} (age: ${age}s)"
+          rm -f "${lockfile}"
+        fi
+      fi
+    fi
+  done
+}
+
+
 # Main loop - check every minute and run jobs sequentially
 log "Starting main loop..."
+
+# Clean up stale lockfiles before starting
+cleanup_stale_locks
 
 # Track last run time for each job (initialize to 0)
 declare -A last_run_times
 
+# Track last cleanup time
+last_cleanup_time=$(date +%s)
+
 while true; do
   
   current_minute=$(date '+%Y-%m-%d %H:%M')
+  current_time=$(date +%s)
+  
+  # Clean up stale locks every hour
+  if [ $((current_time - last_cleanup_time)) -ge 3600 ]; then
+    cleanup_stale_locks
+    last_cleanup_time=${current_time}
+  fi
   
   # Check each job
   for ((i = 0; i < jobs; i++)); do
