@@ -8,7 +8,7 @@ While CloudDump can be a useful component of a disaster recovery or backup regim
 
 - **Sequential Job Execution**: Jobs run in sequence, not in parallel, ensuring predictable resource usage
 - **Cron-based Scheduling**: Standard cron patterns for job scheduling (e.g., `*/5 * * * *` for every 5 minutes)
-- **Skip Missed Schedules**: If a scheduled time is missed while jobs are running, it will be skipped to avoid backlog
+- **Catch-up Execution**: If a scheduled time is missed while jobs are running, the job will run when checked to catch up on missed schedules
 - **Stdout Logging**: All logs go to stdout for proper container log management
 - **Email Reports**: Email reports with temporary log files attached for each job execution
 - **Mount Support**: Support for SSH (sshfs) and SMB (smbnetfs) mounts without requiring elevated privileges
@@ -139,7 +139,7 @@ CloudDump runs as a single-process Docker container with a main loop that:
 
 1. Checks every minute for jobs that match their cron schedule
 2. Executes matching jobs sequentially (one at a time)
-3. Skips schedules that were missed while jobs were running
+3. Looks backward in time from the last run to determine if a job should have run (catch-up execution)
 4. Logs all output to stdout for container log management
 5. Creates temporary log files that are attached to email reports and then deleted
 
