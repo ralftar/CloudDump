@@ -1,6 +1,6 @@
 # Vendanor CloudDump 📥 [![Publish Status](https://github.com/vendanor/CloudDump/workflows/Publish/badge.svg)](https://github.com/vendanor/CloudDump/actions)
 
-CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages and PostgreSQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
+CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages, PostgreSQL databases, and MySQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
 
 While CloudDump can be a useful component of a disaster recovery or backup regime (e.g. from cloud to on premises), it should not be used as a standalone backup tool, as it offers limited or no backup history, retention policies, and archival features. The tool is designed to create a current-state backup, which can then be fed into other tools for fully featured file-level backups.
 
@@ -86,6 +86,35 @@ docker run \
               ],
               "databases_excluded": [],
               "backuppath": "/pgdump",
+              "filenamedate": true,
+              "compress": true
+            }
+          ]
+        },
+        {
+          "type": "mysql",
+          "id": "mysqldump1",
+          "crontab": "0 2 * * *",
+          "debug": false,
+          "servers": [
+            {
+              "host": "mysql.example.com",
+              "port": 3306,
+              "user": "username",
+              "pass": "password",
+              "databases": [
+                {
+                  "mydb": {
+                    "tables_included": [],
+                    "tables_excluded": [
+                      "table1",
+                      "table2"
+                    ]
+                  }
+                }
+              ],
+              "databases_excluded": [],
+              "backuppath": "/mysqldump",
               "filenamedate": true,
               "compress": true
             }

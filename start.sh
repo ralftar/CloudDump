@@ -293,6 +293,73 @@ ${entry_server}"
 Debug: ${debug}
 ${entry_servers}"
 
+  elif [ "${script}" = "dump_mysql.sh" ]; then
+
+    server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
+    if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
+      server_count=0
+    fi
+
+    local entry_servers=""
+    for ((server_idx = 0; server_idx < server_count; server_idx++)); do
+
+      MYSQLHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
+      MYSQLPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
+      MYSQLUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
+      backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
+      filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
+      compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
+
+      databases=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
+      databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
+
+      local database_configuration=""
+      local databases_configuration=""
+
+      for database in ${databases}
+      do
+        tables_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_included")
+        tables_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_excluded")
+        database_configuration="Database: ${database}
+Tables included: ${tables_included}
+Tables excluded: ${tables_excluded}"
+        if [ "${databases_configuration}" = "" ]; then
+          databases_configuration="${database_configuration}"
+        else
+          databases_configuration="${databases_configuration}
+${database_configuration}"
+        fi
+
+      done
+
+      entry_server="MySQL server: ${MYSQLHOST}
+MySQL port: ${MYSQLPORT}
+MySQL username: ${MYSQLUSERNAME}
+Backup path: ${backuppath}
+Filename date: ${filenamedate}
+Compress: ${compress}
+Configured databases: ${databases}
+Excluded databases: ${databases_excluded}"
+
+      if [ ! "${databases_configuration}" = "" ]; then
+      entry_server="${entry_server}
+Database configuration:
+${databases_configuration}"
+      fi
+
+      if [ "${entry_servers}" = "" ]; then
+        entry_servers="${entry_server}"
+      else
+        entry_servers="${entry_servers}
+${entry_server}"
+      fi
+
+    done
+
+    configuration="Schedule: ${crontab}
+Debug: ${debug}
+${entry_servers}"
+
   fi
   
   echo "${configuration}"
