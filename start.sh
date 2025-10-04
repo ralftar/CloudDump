@@ -73,171 +73,29 @@ shutdown_handler() {
   exit 0
 }
 
-# Helper function to build azstorage configuration
-build_azstorage_config() {
+# Helper function to format job configuration from JSON
+format_job_config() {
   local job_idx="$1"
-  local crontab="$2"
-  local debug="$3"
   
-  local bs_count
-  bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
-  if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
-    bs_count=0
-  fi
-
-  local blobstorages=""
-  for ((bs_idx = 0; bs_idx < bs_count; bs_idx++)); do
-    local source destination delete_destination source_stripped
-    source=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
-    destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
-    delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
-
-    if [ "${delete_destination}" = "" ]; then
-      delete_destination="false"
-    fi
-
-    source_stripped=$(echo "${source}" | cut -d '?' -f 1)
-
-    local blobstorage="Source: ${source_stripped}
-Destination: ${destination}   
-Delete destination: ${delete_destination}   "
-
-    if [ "${blobstorages}" = "" ]; then
-      blobstorages="${blobstorage}"
-    else
-      blobstorages="${blobstorages}
-${blobstorage}"
-    fi
-  done
-
-  echo "Schedule: ${crontab}
-Debug: ${debug}
-${blobstorages}"
-}
-
-# Helper function to build s3bucket configuration
-build_s3bucket_config() {
-  local job_idx="$1"
-  local crontab="$2"
-  local debug="$3"
-  
-  local bucket_count
-  bucket_count=$(jq -r ".jobs[${job_idx}].buckets | length" "${CONFIGFILE}")
-  if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
-    bucket_count=0
-  fi
-
-  local buckets=""
-  for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
-    local source destination delete_destination aws_region endpoint_url
-    source=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
-    destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
-    delete_destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
-    aws_region=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
-    endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
-
-    if [ "${delete_destination}" = "" ]; then
-      delete_destination="false"
-    fi
-
-    if [ "${aws_region}" = "" ]; then
-      aws_region="us-east-1"
-    fi
-
-    local bucket="Source: ${source}
-Destination: ${destination}
-Delete destination: ${delete_destination}
-AWS Region: ${aws_region}"
-
-    if [ ! "${endpoint_url}" = "" ]; then
-      bucket="${bucket}
-Endpoint URL: ${endpoint_url}"
-    fi
-
-    if [ "${buckets}" = "" ]; then
-      buckets="${bucket}"
-    else
-      buckets="${buckets}
-
-${bucket}"
-    fi
-  done
-
-  echo "Schedule: ${crontab}
-Debug: ${debug}
-${buckets}"
-}
-
-# Helper function to build pgsql configuration
-build_pgsql_config() {
-  local job_idx="$1"
-  local crontab="$2"
-  local debug="$3"
-  
-  local server_count
-  server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
-  if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
-    server_count=0
-  fi
-
-  local entry_servers=""
-  for ((server_idx = 0; server_idx < server_count; server_idx++)); do
-    local PGHOST PGPORT PGUSERNAME backuppath filenamedate compress databases databases_excluded
-    PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
-    PGPORT=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].port" "${CONFIGFILE}" | sed 's/^null$//g')
-    PGUSERNAME=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].user" "${CONFIGFILE}" | sed 's/^null$//g')
-    backuppath=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].backuppath" "${CONFIGFILE}" | sed 's/^null$//g')
-    filenamedate=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].filenamedate" "${CONFIGFILE}" | sed 's/^null$//g')
-    compress=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].compress" "${CONFIGFILE}" | sed 's/^null$//g')
-
-    databases=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].databases[] | keys[]" "${CONFIGFILE}" 2>/dev/null | tr '\n' ' ')
-    databases_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases_excluded")
-
-    local database_configuration=""
-    local databases_configuration=""
-
-    for database in ${databases}
-    do
-      local tables_included tables_excluded
-      tables_included=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_included")
-      tables_excluded=$(json_array_to_strlist ".jobs[${job_idx}].servers[${server_idx}].databases[0][\"${database}\"].tables_excluded")
-      database_configuration="Database: ${database}
-Tables included: ${tables_included}
-Tables excluded: ${tables_excluded}"
-      if [ "${databases_configuration}" = "" ]; then
-        databases_configuration="${database_configuration}"
+  # Get the job object and format it for display, removing sensitive fields
+  jq -r ".jobs[${job_idx}] | 
+    # Remove sensitive password/key fields from output
+    del(.buckets[]?.aws_access_key_id, .buckets[]?.aws_secret_access_key) |
+    del(.servers[]?.pass) |
+    # Strip SAS tokens from Azure Storage URLs
+    if .blobstorages then
+      .blobstorages = [.blobstorages[] | .source = (.source | split(\"?\")[0])]
+    else . end |
+    # Convert to YAML-like format for readability
+    to_entries |
+    map(
+      if .key == \"blobstorages\" or .key == \"buckets\" or .key == \"servers\" then
+        \"\(.key):\\n\" + (.value | to_entries | map(\"  [\(.key)]\\n\" + (.value | to_entries | map(\"    \(.key): \(.value)\") | join(\"\\n\"))) | join(\"\\n\"))
       else
-        databases_configuration="${databases_configuration}
-${database_configuration}"
-      fi
-    done
-
-    local entry_server="Postgres server: ${PGHOST}
-Postgres port: ${PGPORT}
-Postgres username: ${PGUSERNAME}
-Backup path: ${backuppath}
-Filename date: ${filenamedate}
-Compress: ${compress}
-Configured databases: ${databases}
-Excluded databases: ${databases_excluded}"
-
-    if [ ! "${databases_configuration}" = "" ]; then
-    entry_server="${entry_server}
-Database configuration:
-${databases_configuration}"
-    fi
-
-    if [ "${entry_servers}" = "" ]; then
-      entry_servers="${entry_server}"
-    else
-      entry_servers="${entry_servers}
-${entry_server}"
-    fi
-  done
-
-  echo "Schedule: ${crontab}
-Debug: ${debug}
-${entry_servers}"
+        \"\(.key): \(.value)\"
+      end
+    ) |
+    join(\"\\n\")" "${CONFIGFILE}" 2>/dev/null || echo "Configuration unavailable"
 }
 
 # Function to send email with job results
@@ -335,7 +193,6 @@ Vendanor CloudDump v${VERSION}
 # Function to get job configuration for email
 get_job_configuration() {
   local jobid="$1"
-  local script="$2"
   
   # Find the job index for this job ID
   local jobs job_idx
@@ -363,21 +220,8 @@ get_job_configuration() {
     return 1
   fi
 
-  local crontab debug configuration
-  crontab=$(jq -r ".jobs[${job_idx}].crontab" "${CONFIGFILE}")
-  debug=$(jq -r ".jobs[${job_idx}].debug" "${CONFIGFILE}")
-  
-  configuration=""
-
-  if [ "${script}" = "dump_azstorage.sh" ]; then
-    configuration=$(build_azstorage_config "${job_idx}" "${crontab}" "${debug}")
-  elif [ "${script}" = "dump_s3bucket.sh" ]; then
-    configuration=$(build_s3bucket_config "${job_idx}" "${crontab}" "${debug}")
-  elif [ "${script}" = "dump_pgsql.sh" ]; then
-    configuration=$(build_pgsql_config "${job_idx}" "${crontab}" "${debug}")
-  fi
-  
-  echo "${configuration}"
+  # Use jq to format the configuration directly from JSON
+  format_job_config "${job_idx}"
 }
 
 
@@ -1080,7 +924,7 @@ while true; do
           fi
           
           # Get configuration for email
-          configuration=$(get_job_configuration "${jobid}" "${script}")
+          configuration=$(get_job_configuration "${jobid}")
           
           # Send email report
           send_job_email "${jobid}" "${script}" "${result}" "${time_start}" "${time_end}" "${time_start_timestamp}" "${LOGFILE}" "${configuration}"
