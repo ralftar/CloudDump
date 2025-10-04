@@ -189,7 +189,7 @@ get_job_configuration() {
   
   local configuration=""
 
-  if [ "${script}" = "dump_azstorage" ]; then
+  if [ "${script}" = "dump_azstorage.sh" ]; then
 
     bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
     if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
@@ -226,7 +226,7 @@ ${blobstorage}"
 Debug: ${debug}
 ${blobstorages}"
 
-  elif [ "${script}" = "dump_pgsql" ]; then
+  elif [ "${script}" = "dump_pgsql.sh" ]; then
 
     server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
     if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
@@ -526,11 +526,13 @@ for ((i = 0; i < jobs; i++)); do
     continue
   fi
 
-  script=$(jq -r ".jobs[${i}].script" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${script}" = "" ]; then
-    error "Missing script for job ID ${jobid}."
+  type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g')
+  if [ $? -ne 0 ] || [ "${type}" = "" ]; then
+    error "Missing type for job ID ${jobid}."
     continue
   fi
+  
+  script="dump_${type}.sh"
 
   crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g')
   if [ $? -ne 0 ] || [ "${crontab}" = "" ]; then
@@ -708,10 +710,12 @@ while true; do
       continue
     fi
     
-    script=$(jq -r ".jobs[${i}].script" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "${script}" = "" ]; then
+    type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g')
+    if [ $? -ne 0 ] || [ "${type}" = "" ]; then
       continue
     fi
+    
+    script="dump_${type}.sh"
     
     crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g')
     if [ $? -ne 0 ] || [ "${crontab}" = "" ]; then

@@ -2,7 +2,7 @@
 
 # Vendanor AzDump Script
 # This script runs azcopy sync
-# Usage: dump_azstorage <jobid>
+# Usage: dump_azstorage.sh <jobid>
 
 
 CONFIGFILE="/config/config.json"
