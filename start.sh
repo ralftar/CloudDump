@@ -680,14 +680,14 @@ log "Startup email sent."
 
 
 # Helper function to check if a timestamp matches a cron pattern
+# Simplified version that handles common patterns: wildcards, exact matches, and step values
+# Does not support ranges (1-5) or lists (1,3,5) as these are not used in documented examples
 check_cron_match_timestamp() {
   local cron_pattern="$1"
   local timestamp="$2"
-  local check_min
-  local check_hour
-  local check_day
-  local check_month
-  local check_dow
+  
+  # Extract time components
+  local check_min check_hour check_day check_month check_dow
   check_min=$(date -d "@${timestamp}" '+%-M')
   check_hour=$(date -d "@${timestamp}" '+%-H')
   check_day=$(date -d "@${timestamp}" '+%-d')
@@ -695,73 +695,37 @@ check_cron_match_timestamp() {
   check_dow=$(date -d "@${timestamp}" '+%u')  # 1-7, Monday is 1
   
   # Convert Sunday from 7 to 0 for cron compatibility
-  if [ "${check_dow}" = "7" ]; then
-    check_dow="0"
-  fi
+  [ "${check_dow}" = "7" ] && check_dow="0"
   
   # Parse cron pattern (minute hour day month dow)
   read -r cron_min cron_hour cron_day cron_month cron_dow <<< "${cron_pattern}"
   
-  # Check each field
+  # Helper to check a field (handles wildcards, exact matches, and step values)
   check_field() {
     local field="$1"
     local value="$2"
     
-    # Handle wildcard
-    if [ "${field}" = "*" ]; then
-      return 0
-    fi
+    [ "${field}" = "*" ] && return 0
     
-    # Handle step values (e.g., */5)
     if echo "${field}" | grep -q '^\*/[0-9]\+$'; then
       local step
       step=$(echo "${field}" | sed 's|^\*/||')
-      if [ $((value % step)) -eq 0 ]; then
-        return 0
-      fi
+      [ $((value % step)) -eq 0 ] && return 0
       return 1
     fi
     
-    # Handle ranges (e.g., 1-5)
-    if echo "${field}" | grep -q '^[0-9]\+-[0-9]\+$'; then
-      local start
-      local end
-      start=$(echo "${field}" | cut -d'-' -f1)
-      end=$(echo "${field}" | cut -d'-' -f2)
-      if [ "${value}" -ge "${start}" ] && [ "${value}" -le "${end}" ]; then
-        return 0
-      fi
-      return 1
-    fi
-    
-    # Handle lists (e.g., 1,3,5)
-    if echo "${field}" | grep -q ','; then
-      local IFS=','
-      for item in ${field}; do
-        if [ "${item}" = "${value}" ]; then
-          return 0
-        fi
-      done
-      return 1
-    fi
-    
-    # Handle exact match
-    if [ "${field}" = "${value}" ]; then
-      return 0
-    fi
-    
+    [ "${field}" = "${value}" ] && return 0
     return 1
   }
   
-  if check_field "${cron_min}" "${check_min}" && \
-     check_field "${cron_hour}" "${check_hour}" && \
-     check_field "${cron_day}" "${check_day}" && \
-     check_field "${cron_month}" "${check_month}" && \
-     check_field "${cron_dow}" "${check_dow}"; then
-    return 0
-  fi
+  # Check all fields
+  check_field "${cron_min}" "${check_min}" || return 1
+  check_field "${cron_hour}" "${check_hour}" || return 1
+  check_field "${cron_day}" "${check_day}" || return 1
+  check_field "${cron_month}" "${check_month}" || return 1
+  check_field "${cron_dow}" "${check_dow}" || return 1
   
-  return 1
+  return 0
 }
 
 # Helper function to check if job should run by looking backward in time
