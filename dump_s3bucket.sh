@@ -3,7 +3,7 @@
 # Vendanor S3Dump Script
 # This script runs aws s3 sync
 # Usage:
-#   dump_s3bucket.sh [-s source] [-d destination] [-D delete_destination]
+#   dump_s3bucket.sh [-s source] [-d destination] [-m mirror]
 #                    [-a aws_access_key_id] [-k aws_secret_access_key]
 #                    [-r aws_region] [-e endpoint_url]
 #
@@ -15,7 +15,7 @@
 # ----------------------------
 SOURCE=""
 DESTINATION=""
-DELETE_DESTINATION="false"
+DELETE_DESTINATION="true"
 AWS_ACCESS_KEY_ID_PARAM=""
 AWS_SECRET_ACCESS_KEY_PARAM=""
 AWS_REGION_PARAM="us-east-1"
@@ -24,7 +24,7 @@ ENDPOINT_URL=""
 # ----------------------------
 # Parse command-line arguments
 # ----------------------------
-while getopts "s:d:D:a:k:r:e:" opt; do
+while getopts "s:d:m:a:k:r:e:" opt; do
   case ${opt} in
     s )
       SOURCE="${OPTARG}"
@@ -32,7 +32,7 @@ while getopts "s:d:D:a:k:r:e:" opt; do
     d )
       DESTINATION="${OPTARG}"
       ;;
-    D )
+    m )
       DELETE_DESTINATION="${OPTARG}"
       ;;
     a )
@@ -124,12 +124,12 @@ fi
 
 # Ensure delete_destination is boolean
 if [ "${DELETE_DESTINATION}" != "true" ] && [ "${DELETE_DESTINATION}" != "false" ]; then
-  DELETE_DESTINATION="false"
+  DELETE_DESTINATION="true"
 fi
 
 print "Source: ${SOURCE}"
 print "Destination: ${DESTINATION}"
-print "Delete destination: ${DELETE_DESTINATION}"
+print "Mirror (delete): ${DELETE_DESTINATION}"
 print "AWS Region: ${AWS_REGION_PARAM}"
 if [ ! "${ENDPOINT_URL}" = "" ]; then
   print "Endpoint URL: ${ENDPOINT_URL}"

@@ -3,22 +3,22 @@
 # Vendanor AzDump Script
 # This script runs azcopy sync
 # Usage:
-#   dump_azstorage.sh [-s source] [-d destination] [-D delete_destination]
+#   dump_azstorage.sh [-s source] [-d destination] [-m mirror]
 #
 # Example:
-#   dump_azstorage.sh -s https://example.blob.core.windows.net/container?SAS -d /backups/azure -D false
+#   dump_azstorage.sh -s https://example.blob.core.windows.net/container?SAS -d /backups/azure -m false
 
 # ----------------------------
 # Default values
 # ----------------------------
 SOURCE=""
 DESTINATION=""
-DELETE_DESTINATION="false"
+DELETE_DESTINATION="true"
 
 # ----------------------------
 # Parse command-line arguments
 # ----------------------------
-while getopts "s:d:D:" opt; do
+while getopts "s:d:m:" opt; do
   case ${opt} in
     s )
       SOURCE="${OPTARG}"
@@ -26,7 +26,7 @@ while getopts "s:d:D:" opt; do
     d )
       DESTINATION="${OPTARG}"
       ;;
-    D )
+    m )
       DELETE_DESTINATION="${OPTARG}"
       ;;
     \? )
@@ -106,14 +106,14 @@ fi
 
 # Ensure delete_destination is boolean
 if [ "${DELETE_DESTINATION}" != "true" ] && [ "${DELETE_DESTINATION}" != "false" ]; then
-  DELETE_DESTINATION="false"
+  DELETE_DESTINATION="true"
 fi
 
 source_stripped=$(echo "${SOURCE}" | cut -d '?' -f 1)
 
 print "Source: ${source_stripped}"
 print "Destination: ${DESTINATION}"
-print "Delete destination: ${DELETE_DESTINATION}"
+print "Mirror (delete): ${DELETE_DESTINATION}"
 
 
 # Validate source
