@@ -37,12 +37,22 @@ error() {
 }
 
 
+# Signal handler for graceful shutdown
+shutdown_handler() {
+  log "Received shutdown signal, exiting gracefully..."
+  exit 0
+}
+
+
 # Init
 
 mkdir -p /persistent-data/logs
 rm -rf /tmp/LOCKFILE_*
 
 log "Vendanor CloudDump v${VERSION} Start ($0)"
+
+# Set up signal handlers
+trap 'shutdown_handler' SIGTERM SIGINT
 
 
 # Check commands
@@ -130,7 +140,13 @@ fi
 postmap /etc/postfix/relay || exit 1
 postmap lmdb:/etc/postfix/sasl_passwd || exit 1
 
-/usr/sbin/postfix start || exit 1
+# Start postfix if not already running
+if ! pgrep -x master >/dev/null 2>&1; then
+  /usr/sbin/postfix start || exit 1
+else
+  log "Postfix already running, reloading configuration..."
+  /usr/sbin/postfix reload || exit 1
+fi
 
 
 # Mount
@@ -156,7 +172,7 @@ Path: ${path}
 Mountpoint ${mountpoint}
 "
 
-  if [ "${jobs_summary}" = "" ]; then
+  if [ "${mounts_summary}" = "" ]; then
     mounts_summary="${mount_summary}"
   else
     mounts_summary="${mounts_summary}
@@ -496,6 +512,10 @@ while true; do
   # Sleep until the next minute boundary
   current_second=$(date '+%-S')
   sleep_seconds=$((60 - current_second))
+  # Ensure we always sleep at least 1 second
+  if [ "${sleep_seconds}" -le 0 ]; then
+    sleep_seconds=1
+  fi
   sleep ${sleep_seconds}
   
 done

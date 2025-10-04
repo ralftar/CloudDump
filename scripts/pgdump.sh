@@ -137,6 +137,8 @@ fi
 
 # Iterate servers
 
+result=0
+
 server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
 if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
   error "Can't read servers for ${JOBID} from Json configuration."
@@ -150,6 +152,9 @@ fi
 
 
 for ((server_idx = 0; server_idx < server_count; server_idx++)); do
+
+  # Reset databases_backup for each server
+  databases_backup=""
 
   PGHOST=$(jq -r ".jobs[${job_idx}].servers[${server_idx}].host" "${CONFIGFILE}" | sed 's/^null$//g')
   if [ $? -ne 0 ] || [ "${PGHOST}" = "" ]; then
