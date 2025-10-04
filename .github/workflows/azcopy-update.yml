@@ -1,0 +1,66 @@
+name: AzCopy Update Check
+
+on:
+  schedule:
+    # Run daily at 08:00 UTC (to match dependabot schedule)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-update:
+    name: Check for AzCopy updates
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y wget
+      
+      - name: Check for AzCopy updates
+        id: check
+        run: |
+          cd tools
+          chmod +x azcopy-update.sh
+          ./azcopy-update.sh
+          
+          # Check if there are changes
+          if git diff --quiet scripts/azcopy-install.sh; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No updates needed"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            
+            # Extract version info for PR
+            azcopy_version=$(grep '^azcopy_version=' ../scripts/azcopy-install.sh | sed -n 's/^azcopy_version="\(.*\)"$/\1/p')
+            azcopy_date=$(grep '^azcopy_date=' ../scripts/azcopy-install.sh | sed -n 's/^azcopy_date="\(.*\)"$/\1/p')
+            
+            echo "version=${azcopy_version}" >> $GITHUB_OUTPUT
+            echo "date=${azcopy_date}" >> $GITHUB_OUTPUT
+            echo "Update available: ${azcopy_version} (${azcopy_date})"
+          fi
+      
+      - name: Create Pull Request
+        if: steps.check.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update azcopy to version ${{ steps.check.outputs.version }}"
+          title: "chore: update azcopy to version ${{ steps.check.outputs.version }}"
+          body: |
+            ## AzCopy Update
+            
+            This PR updates AzCopy to the latest version.
+            
+            **New Version:** ${{ steps.check.outputs.version }}
+            **Release Date:** ${{ steps.check.outputs.date }}
+            
+            **Source:** https://github.com/Azure/azure-storage-azcopy/releases
+            
+            This PR was automatically created by the AzCopy Update workflow.
+          branch: "azcopy-update-${{ steps.check.outputs.version }}"
+          delete-branch: true
+          labels: dependencies
