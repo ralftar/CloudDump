@@ -382,6 +382,18 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
 
     print "Running pg_dump of ${database} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
 
+    # Fetch list of all tables if we need to validate includes or excludes
+    tables_all=""
+    if ! [ "${tables_included}" = "" ] || ! [ "${tables_excluded}" = "" ]; then
+      print "Fetching table list for ${database}..."
+      tables_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>&1 | sed 's/^ *//g' | sed 's/ *$//g' | grep -v '^$' | sed -z 's/\n/ /g;s/ $/\n/')
+      if [ $? -ne 0 ]; then
+        error "Failed to list tables for ${database} on ${PGHOST}."
+        result=1
+        continue
+      fi
+    fi
+
     if [ "${tables_included}" = "" ]; then
       print "All tables for ${database} included"
     else
@@ -389,12 +401,6 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
       
       # Validate that all included tables exist
       print "Validating included tables for ${database}..."
-      tables_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${database}" -t -c "SELECT tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');" 2>&1 | sed 's/^ *//g' | sed 's/ *$//g' | grep -v '^$' | sed -z 's/\n/ /g;s/ $/\n/')
-      if [ $? -ne 0 ]; then
-        error "Failed to list tables for ${database} on ${PGHOST}."
-        result=1
-        continue
-      fi
       
       # Validate tables and build params only for existing tables
       tables_included_validated=""
@@ -427,17 +433,38 @@ for ((server_idx = 0; server_idx < server_count; server_idx++)); do
         fi
       done
       
-      # Update the display with validated tables
+      # If none of the specified tables exist, skip this database
       if [ "${tables_included_validated}" = "" ]; then
-        print "WARNING: None of the specified tables exist in ${database}. Backup will include all tables."
-        tables_included=""
-        tables_included_params=""
-      else
-        tables_included="${tables_included_validated}"
+        error "None of the specified tables exist in ${database} on ${PGHOST}. Skipping database backup."
+        result=1
+        continue
       fi
+      
+      tables_included="${tables_included_validated}"
     fi
 
+    # Validate excluded tables (warnings only, don't fail)
     if ! [ "${tables_excluded}" = "" ]; then
+      print "Validating excluded tables for ${database}..."
+      
+      for table_exclude in ${tables_excluded//,/ }
+      do
+        table_exclude=$(echo "${table_exclude}" | xargs)
+        table_exclude_lc=$(echo "${table_exclude}" | tr '[:upper:]' '[:lower:]')
+        found=0
+        for table_available in ${tables_all}
+        do
+          table_available_lc=$(echo "${table_available}" | tr '[:upper:]' '[:lower:]')
+          if [ "${table_available_lc}" = "${table_exclude_lc}" ]; then
+            found=1
+            break
+          fi
+        done
+        if [ "${found}" = "0" ]; then
+          print "WARNING: Excluded table '${table_exclude}' does not exist in database '${database}' on ${PGHOST}."
+        fi
+      done
+      
       print "Tables excluded for ${database}: ${tables_excluded}"
     fi
 
