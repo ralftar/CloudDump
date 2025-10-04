@@ -22,17 +22,3 @@ jobs:
           additional_files: 'start.sh wrapper.sh azdump.sh pgdump.sh'
         env:
           SHELLCHECK_OPTS: --exclude=SC2181 --exclude=SC2230 --exclude=SC2086 --exclude=SC2001 --exclude=SC2317
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker Image
-        run: |
-          docker build ${{github.workspace}}
