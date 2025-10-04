@@ -32,6 +32,10 @@ To give mount permissions, add capabilities DAC_READ_SEARCH and SYS_ADMIN. Examp
 
 ### config.json example
 
+For a comprehensive configuration example with both Azure blob storage and PostgreSQL backups, see [config.example.json](config.example.json).
+
+Basic example:
+
     {
       "settings": {
         "HOST": "host.domain.dom",

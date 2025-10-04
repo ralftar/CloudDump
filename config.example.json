@@ -1,0 +1,99 @@
+{
+  "settings": {
+    "HOST": "hostname.example.com",
+    "SMTPSERVER": "smtp.example.com",
+    "SMTPPORT": "465",
+    "SMTPUSER": "smtp_username",
+    "SMTPPASS": "smtp_password",
+    "MAILFROM": "clouddump@example.com",
+    "MAILTO": "admin@example.com",
+    "DEBUG": false,
+    "mount": [
+      {
+        "path": "//server/share",
+        "mountpoint": "/mnt/backup",
+        "username": "backup_user",
+        "password": "backup_pass",
+        "privkey": ""
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "script": "azdump.sh",
+      "id": "azdump-example",
+      "crontab": "0 1 * * *",
+      "debug": false,
+      "blobstorages": [
+        {
+          "source": "https://example.blob.core.windows.net/container?sas_token",
+          "destination": "/mnt/backup/azdump",
+          "delete_destination": false
+        }
+      ]
+    },
+    {
+      "script": "pgdump.sh",
+      "id": "pgdump-specific-databases",
+      "crontab": "0 2 * * *",
+      "debug": false,
+      "servers": [
+        {
+          "host": "db.example.com",
+          "port": 5432,
+          "user": "postgres",
+          "pass": "password",
+          "databases": [
+            {
+              "production": {
+                "tables_included": [],
+                "tables_excluded": ["audit_log", "temp_data", "session_cache"]
+              }
+            },
+            {
+              "analytics": {
+                "tables_included": [],
+                "tables_excluded": ["raw_events"]
+              }
+            },
+            {
+              "reporting": {
+                "tables_included": ["sales", "customers", "products"],
+                "tables_excluded": []
+              }
+            }
+          ],
+          "databases_excluded": [],
+          "backuppath": "/mnt/backup/pgdump/specific",
+          "filenamedate": true,
+          "compress": true
+        }
+      ]
+    },
+    {
+      "script": "pgdump.sh",
+      "id": "pgdump-all-databases",
+      "crontab": "0 3 * * *",
+      "debug": false,
+      "servers": [
+        {
+          "host": "db.example.com",
+          "port": 5432,
+          "user": "postgres",
+          "pass": "password",
+          "databases": [],
+          "databases_excluded": [
+            "template0",
+            "template1",
+            "postgres",
+            "azure_sys",
+            "azure_maintenance"
+          ],
+          "backuppath": "/mnt/backup/pgdump/all",
+          "filenamedate": true,
+          "compress": true
+        }
+      ]
+    }
+  ]
+}
