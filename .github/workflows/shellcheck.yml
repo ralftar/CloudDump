@@ -1,0 +1,67 @@
+name: Shellcheck
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+
+  shellcheck:
+    name: Shell check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+      
+      - name: Run shellcheck and capture output
+        id: shellcheck-output
+        continue-on-error: true
+        run: |
+          echo "## ShellCheck Results" > shellcheck-results.txt
+          echo "" >> shellcheck-results.txt
+          
+          has_issues=0
+          # Run shellcheck on each script and capture output
+          for script in scripts/start.sh scripts/wrapper.sh scripts/azdump.sh scripts/pgdump.sh; do
+            echo "### \`$script\`" >> shellcheck-results.txt
+            output=$(shellcheck -s bash --exclude=SC2181,SC2230,SC2086,SC2001,SC2317 "$script" 2>&1)
+            if [ $? -eq 0 ]; then
+              echo "✅ No issues found" >> shellcheck-results.txt
+            else
+              has_issues=1
+              echo '```' >> shellcheck-results.txt
+              echo "$output" >> shellcheck-results.txt
+              echo '```' >> shellcheck-results.txt
+            fi
+            echo "" >> shellcheck-results.txt
+          done
+          
+          if [ $has_issues -eq 0 ]; then
+            echo "All scripts passed shellcheck! ✨" >> shellcheck-results.txt
+          fi
+          
+          exit $has_issues
+      
+      - name: Comment PR with results
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            let results = '';
+            try {
+              results = fs.readFileSync('shellcheck-results.txt', 'utf8');
+            } catch (error) {
+              results = '## ShellCheck Results\n\nFailed to read results file.';
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: results
+            });
