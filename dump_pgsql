@@ -2,7 +2,7 @@
 
 # Vendanor PgDump Script
 # This script runs pg_dump for each database on each server for the specified job
-# Usage: pgdump.sh <jobid>
+# Usage: dump_pgsql <jobid>
 
 
 CONFIGFILE="/config/config.json"

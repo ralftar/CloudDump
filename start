@@ -189,7 +189,7 @@ get_job_configuration() {
   
   local configuration=""
 
-  if [ "${script}" = "azdump.sh" ]; then
+  if [ "${script}" = "dump_azstorage" ]; then
 
     bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
     if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
@@ -226,7 +226,7 @@ ${blobstorage}"
 Debug: ${debug}
 ${blobstorages}"
 
-  elif [ "${script}" = "pgdump.sh" ]; then
+  elif [ "${script}" = "dump_pgsql" ]; then
 
     server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
     if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
