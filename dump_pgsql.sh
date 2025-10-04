@@ -1,14 +1,17 @@
 #!/bin/bash
 
 # Vendanor PgDump Script
-# This script runs pg_dump for a single database
+# This script runs pg_dump for databases on a PostgreSQL server
 # Usage:
 #   dump_pgsql.sh [-h host] [-p port] [-U user] [-P password] [-d database]
 #                 [-b backuppath] [-f filename_date] [-z compress]
-#                 [-i tables_included] [-x tables_excluded]
 #
 # Example:
-#   dump_pgsql.sh -d mydb -U postgres -P secret -b /backups -z true
+#   dump_pgsql.sh -U postgres -P secret -h localhost -b /backups -z true
+#
+# Note: Database selection and table filtering are controlled via environment variables:
+#   - DATABASES_JSON: JSON array specifying databases and their table configurations
+#   - DATABASES_EXCLUDED_JSON: JSON array of database names to exclude
 
 # ----------------------------
 # Default values
@@ -21,13 +24,11 @@ DATABASE=""
 BACKUPPATH=""
 FILENAMEDATE="false"
 COMPRESS="true"
-TABLES_INCLUDED=""
-TABLES_EXCLUDED=""
 
 # ----------------------------
 # Parse command-line arguments
 # ----------------------------
-while getopts "h:p:U:P:d:b:f:z:i:x:" opt; do
+while getopts "h:p:U:P:d:b:f:z:" opt; do
   case ${opt} in
     h )
       PGHOST="${OPTARG}"
@@ -52,12 +53,6 @@ while getopts "h:p:U:P:d:b:f:z:i:x:" opt; do
       ;;
     z )
       COMPRESS="${OPTARG}"
-      ;;
-    i )
-      TABLES_INCLUDED="${OPTARG}"
-      ;;
-    x )
-      TABLES_EXCLUDED="${OPTARG}"
       ;;
     \? )
       echo "Invalid option: -${OPTARG}" >&2
@@ -105,8 +100,7 @@ cmds="which grep sed cut date touch mkdir rm psql pg_dump tar bzip2 jq"
 cmds_missing=
 for cmd in ${cmds}
 do
-  which "${cmd}" >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
+  if which "${cmd}" >/dev/null 2>&1 ; then
     continue
   fi
   if [ "${cmds_missing}" = "" ]; then
@@ -174,8 +168,7 @@ print "Compress: ${COMPRESS}"
 
 print "Creating backuppath ${BACKUPPATH}..."
 
-mkdir -p "${BACKUPPATH}"
-if [ $? -ne 0 ]; then
+if ! mkdir -p "${BACKUPPATH}"; then
   error "Could not create backuppath ${BACKUPPATH}."
   exit 1
 fi
@@ -185,8 +178,7 @@ fi
 
 print "Checking permission for backuppath ${BACKUPPATH}..."
 
-touch "${BACKUPPATH}/TEST_FILE"
-if [ $? -ne 0 ]; then
+if ! touch "${BACKUPPATH}/TEST_FILE"; then
   error "Could not access ${BACKUPPATH}."
   exit 1
 fi
@@ -198,8 +190,7 @@ rm -f "${BACKUPPATH}/TEST_FILE"
 
 print "Querying server for list of databases..."
 
-databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1)
-if [ $? -ne 0 ]; then
+if ! databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1); then
   error "Failed to query database list from ${PGHOST}."
   exit 1
 fi
@@ -297,8 +288,8 @@ do
   # Run pg_dump
   print "Running pg_dump of ${DATABASE} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
   
-  PGPASSWORD=${PGPASSWORD} pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${DATABASE}" -F tar ${tables_included_params} ${tables_excluded_params} > "${BACKUPFILE_TEMP}"
-  if [ $? -ne 0 ]; then
+  # shellcheck disable=SC2086
+  if ! PGPASSWORD=${PGPASSWORD} pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${DATABASE}" -F tar ${tables_included_params} ${tables_excluded_params} > "${BACKUPFILE_TEMP}"; then
     error "pg_dump for ${DATABASE} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} failed."
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
@@ -312,8 +303,7 @@ do
     continue
   fi
   
-  size=$(wc -c "${BACKUPFILE_TEMP}" | cut -d ' ' -f 1)
-  if [ $? -ne 0 ]; then
+  if ! size=$(wc -c "${BACKUPFILE_TEMP}" | cut -d ' ' -f 1); then
     error "Could not get filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}."
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
@@ -340,8 +330,7 @@ do
   if [ "${COMPRESS}" = "true" ]; then
     print "Compressing backupfile ${BACKUPFILE_TEMP}..."
     
-    bzip2 -f "${BACKUPFILE_TEMP}"
-    if [ $? -ne 0 ]; then
+    if ! bzip2 -f "${BACKUPFILE_TEMP}"; then
       error "Compression of ${BACKUPFILE_TEMP} failed."
       overall_result=1
       continue
@@ -361,8 +350,7 @@ do
   if [ ! "${BACKUPFILE_TEMP}" = "${BACKUPFILE_FINAL}" ]; then
     print "Moving ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}..."
     
-    mv "${BACKUPFILE_TEMP}" "${BACKUPFILE_FINAL}"
-    if [ $? -ne 0 ]; then
+    if ! mv "${BACKUPFILE_TEMP}" "${BACKUPFILE_FINAL}"; then
       error "Could not move ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}."
       overall_result=1
       continue
