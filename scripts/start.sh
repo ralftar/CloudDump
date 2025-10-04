@@ -1,11 +1,10 @@
 #!/bin/bash
 
 # Vendanor CloudDump Startup Script
-# This script reads Json configuration and starts the cron daemon
+# This script reads Json configuration and runs jobs in a single loop
 
 
 CONFIGFILE="/config/config.json"
-LOGFILE="/persistent-data/logs/vnclouddump.log"
 MAIL="mutt"
 
 VERSION=$(head -n 1 /VERSION)
@@ -27,7 +26,6 @@ timestamp() {
 log() {
 
   echo "[$(timestamp)] $*"
-  echo "[$(timestamp)] $*" >>${LOGFILE}
 
 }
 
@@ -35,7 +33,6 @@ error() {
 
   error="$*"
   echo "[$(timestamp)] ERROR: ${error}" >&2
-  echo "[$(timestamp)] ERROR: ${error}" >>${LOGFILE}
 
 }
 
@@ -50,7 +47,7 @@ log "Vendanor CloudDump v${VERSION} Start ($0)"
 
 # Check commands
 
-cmds="which grep sed cut cp chmod mkdir bc jq crontab mail mutt postconf postmap ssh sshfs mount.cifs"
+cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh sshfs mount.cifs"
 cmds_missing=
 for cmd in ${cmds}
 do
@@ -68,22 +65,6 @@ done
 if ! [ "${cmds_missing}" = "" ]; then
   error "Missing \"${cmds_missing}\" commands."
   exit 1
-fi
-
-
-# Locate cron daemon
-
-which cron >/dev/null 2>&1
-if [ $? -eq 0 ]; then
-  CRON="cron"
-else
-  which crond >/dev/null 2>&1
-  if [ $? -eq 0 ]; then
-    CRON="crond"
-  else
-    error "Missing cron daemon."
-    exit 1
-  fi
 fi
 
 
@@ -226,15 +207,7 @@ fi
 #tail -f /var/log/postfix.log
 
 
-# Create crontab jobs
-
-CRONFILE="/etc/cron.d/vnclouddump-cron"
-
-rm -f "${CRONFILE}"
-touch "${CRONFILE}" || exit 1
-
-echo "MAILFROM=${MAILFROM}" >>"${CRONFILE}" || exit 1
-echo "MAILTO=${MAILTO}" >>"${CRONFILE}" || exit 1
+# Read and validate jobs configuration
 
 jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
 if [ "${jobs}" = "" ] || [ -z "${jobs}" ] || ! [ "${jobs}" -eq "${jobs}" ] 2>/dev/null; then
@@ -247,6 +220,8 @@ if [ "${jobs}" -eq 0 ]; then
   exit 1
 fi
 
+# Build job summary for startup email
+jobs_summary=""
 for ((i = 0; i < jobs; i++)); do
 
   jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
@@ -289,12 +264,6 @@ for ((i = 0; i < jobs; i++)); do
     error "Scriptfile ${scriptfile} not executable."
     exit 1
   fi
-
-  if [ "${DEBUG}" = "true" ]; then
-    opt="-x"
-  fi
-
-  echo "${crontab} /bin/bash ${opt} /usr/local/bin/wrapper.sh ${script} ${jobid} ${jobdebug} >/dev/null" >>"${CRONFILE}" || exit 1
 
   job_summary="ID: ${jobid}
 Script: ${script}
@@ -344,25 +313,161 @@ else
   echo "${mail_body}" | ${MAIL} -r "${MAILFROM} <${MAILFROM}>" -s "[Started] CloudDump ${HOST}" "${MAILTO}"
 fi
 
-
-# Setup crontab
-
-chmod a+x "${CRONFILE}" || exit 1
-crontab -r >/dev/null 2>&1
-crontab "${CRONFILE}" || exit 1
-
-log "JOBS:"
-crontab -l || exit 1
-crontab -l >>"${LOGFILE}" || exit 1
+log "Startup email sent."
 
 
-# Start crontab
+# Helper function to check if cron pattern matches current time
+check_cron_match() {
+  local cron_pattern="$1"
+  local current_min=$(date '+%-M')
+  local current_hour=$(date '+%-H')
+  local current_day=$(date '+%-d')
+  local current_month=$(date '+%-m')
+  local current_dow=$(date '+%u')  # 1-7, Monday is 1
+  
+  # Convert Sunday from 7 to 0 for cron compatibility
+  if [ "${current_dow}" = "7" ]; then
+    current_dow="0"
+  fi
+  
+  # Parse cron pattern (minute hour day month dow)
+  read -r cron_min cron_hour cron_day cron_month cron_dow <<< "${cron_pattern}"
+  
+  # Check each field
+  check_field() {
+    local field="$1"
+    local value="$2"
+    
+    # Handle wildcard
+    if [ "${field}" = "*" ]; then
+      return 0
+    fi
+    
+    # Handle step values (e.g., */5)
+    if echo "${field}" | grep -q '^\*/[0-9]\+$'; then
+      local step=$(echo "${field}" | sed 's|^\*/||')
+      if [ $((value % step)) -eq 0 ]; then
+        return 0
+      fi
+      return 1
+    fi
+    
+    # Handle ranges (e.g., 1-5)
+    if echo "${field}" | grep -q '^[0-9]\+-[0-9]\+$'; then
+      local start=$(echo "${field}" | cut -d'-' -f1)
+      local end=$(echo "${field}" | cut -d'-' -f2)
+      if [ "${value}" -ge "${start}" ] && [ "${value}" -le "${end}" ]; then
+        return 0
+      fi
+      return 1
+    fi
+    
+    # Handle lists (e.g., 1,3,5)
+    if echo "${field}" | grep -q ','; then
+      local IFS=','
+      for item in ${field}; do
+        if [ "${item}" = "${value}" ]; then
+          return 0
+        fi
+      done
+      return 1
+    fi
+    
+    # Handle exact match
+    if [ "${field}" = "${value}" ]; then
+      return 0
+    fi
+    
+    return 1
+  }
+  
+  if check_field "${cron_min}" "${current_min}" && \
+     check_field "${cron_hour}" "${current_hour}" && \
+     check_field "${cron_day}" "${current_day}" && \
+     check_field "${cron_month}" "${current_month}" && \
+     check_field "${cron_dow}" "${current_dow}"; then
+    return 0
+  fi
+  
+  return 1
+}
 
-log "Starting cron daemon..."
 
-"${CRON}" -V >/dev/null 2>&1
-if [ $? -eq 0 ]; then
-  "${CRON}" -n
-else
-  "${CRON}" -f
-fi
+# Main loop - check every minute and run jobs sequentially
+log "Starting main loop..."
+
+# Track last run time for each job (initialize to 0)
+declare -A last_run_times
+
+while true; do
+  
+  current_timestamp=$(date +%s)
+  current_minute=$(date '+%Y-%m-%d %H:%M')
+  
+  # Check each job
+  for ((i = 0; i < jobs; i++)); do
+    
+    jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
+    if [ $? -ne 0 ] || [ "${jobid}" = "" ]; then
+      continue
+    fi
+    
+    script=$(jq -r ".jobs[${i}].script" "${CONFIGFILE}" | sed 's/^null$//g')
+    if [ $? -ne 0 ] || [ "${script}" = "" ]; then
+      continue
+    fi
+    
+    crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g')
+    if [ $? -ne 0 ] || [ "${crontab}" = "" ]; then
+      continue
+    fi
+    
+    jobdebug=$(jq -r ".jobs[${i}].debug" "${CONFIGFILE}")
+    
+    # Initialize last run time if not set
+    if [ -z "${last_run_times[${jobid}]}" ]; then
+      last_run_times[${jobid}]="0"
+    fi
+    
+    # Check if cron pattern matches current time
+    if check_cron_match "${crontab}"; then
+      
+      # Get last run minute for this job
+      last_run_minute=$(date -d "@${last_run_times[${jobid}]}" '+%Y-%m-%d %H:%M' 2>/dev/null)
+      
+      # Only run if we haven't run this job in the current minute
+      if [ "${last_run_minute}" != "${current_minute}" ]; then
+        
+        log "Running job ${jobid} (script: ${script})"
+        
+        # Run the wrapper script with the job
+        if [ "${DEBUG}" = "true" ]; then
+          /bin/bash -x /usr/local/bin/wrapper.sh "${script}" "${jobid}" "${jobdebug}"
+        else
+          /bin/bash /usr/local/bin/wrapper.sh "${script}" "${jobid}" "${jobdebug}"
+        fi
+        
+        result=$?
+        if [ ${result} -eq 0 ]; then
+          log "Job ${jobid} completed successfully"
+        else
+          log "Job ${jobid} completed with errors (exit code: ${result})"
+        fi
+        
+        # Update last run time for this job
+        last_run_times[${jobid}]=$(date +%s)
+        
+      else
+        log "Skipping job ${jobid} - already ran in current minute"
+      fi
+      
+    fi
+    
+  done
+  
+  # Sleep until the next minute boundary
+  current_second=$(date '+%-S')
+  sleep_seconds=$((60 - current_second))
+  sleep ${sleep_seconds}
+  
+done

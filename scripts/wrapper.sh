@@ -6,7 +6,7 @@
 
 
 RANDOM=$$
-LOGFILE="/persistent-data/logs/vnclouddump-${RANDOM}.log"
+LOGFILE="/tmp/vnclouddump-${RANDOM}.log"
 MAIL="mutt"
 
 CONFIGFILE="/config/config.json"
@@ -79,7 +79,7 @@ function exit_clean() {
 
 # Init
 
-mkdir -p /persistent-data/logs
+mkdir -p /tmp
 
 log "Vendanor CloudDump v${VERSION} Wrapper ($0)"
 
