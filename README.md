@@ -1,8 +1,18 @@
 # Vendanor CloudDump [![Publish Status](https://github.com/vendanor/CloudDump/workflows/Publish/badge.svg)](https://github.com/vendanor/CloudDump/actions)
 
-CloudDump is a containerized tool that by cron tab by schedule data dumps from Azure blob storages and PostgreSQL databases. Email reports are generated for each job and SMB shares can be mounted and used as destinations.
+CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages and PostgreSQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
 
 While CloudDump can be a useful component of a disaster recovery or backup regime (e.g. from cloud to on premises), it should not be used as a standalone backup tool, as it offers limited or no backup history, retention policies, and archival features. The tool is designed to create a current-state backup, which can then be fed into other tools for fully featured file-level backups.
+
+## Features
+
+- **Sequential Job Execution**: Jobs run in sequence, not in parallel, ensuring predictable resource usage
+- **Cron-based Scheduling**: Standard cron patterns for job scheduling (e.g., `*/5 * * * *` for every 5 minutes)
+- **Skip Missed Schedules**: If a scheduled time is missed while jobs are running, it will be skipped to avoid backlog
+- **Stdout Logging**: All logs go to stdout for proper container log management
+- **Email Reports**: Email reports with temporary log files attached for each job execution
+- **Mount Support**: Support for SSH (sshfs) and SMB (CIFS) mounts
+- **OpenSUSE Leap**: Built on OpenSUSE Leap 15.6
 
 ## Running
 
@@ -93,6 +103,18 @@ To give mount permissions, add capabilities DAC_READ_SEARCH and SYS_ADMIN. Examp
       ]
     }
        
+## Architecture
+
+CloudDump runs as a single-process Docker container with a main loop that:
+
+1. Checks every minute for jobs that match their cron schedule
+2. Executes matching jobs sequentially (one at a time)
+3. Skips schedules that were missed while jobs were running
+4. Logs all output to stdout for container log management
+5. Creates temporary log files that are attached to email reports and then deleted
+
+This architecture ensures predictable resource usage and simplifies deployment and monitoring in containerized environments.
+
 ## License
 
 This tool is released under the MIT License.
