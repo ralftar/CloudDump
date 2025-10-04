@@ -88,11 +88,7 @@ To give mount permissions, add capabilities DAC_READ_SEARCH and SYS_ADMIN. Examp
                   }
                 }
               ],
-              "databases_excluded": [
-                "azure_sys",
-                "azure_maintenance",
-                "template0"
-              ],
+              "databases_excluded": [],
               "backuppath": "/pgdump",
               "filenamedate": true,
               "compress": true
@@ -110,7 +106,7 @@ The PostgreSQL backup configuration (`pgdump.sh`) supports flexible database and
 
 #### Database Selection
 
-- **Specific databases**: List databases in the `databases` array. Only these databases will be backed up.
+- **Specific databases**: List databases in the `databases` array. Only these databases will be backed up. The `databases_excluded` setting is ignored when `databases` is not empty.
   ```json
   "databases": [
     {
@@ -125,7 +121,8 @@ The PostgreSQL backup configuration (`pgdump.sh`) supports flexible database and
         "tables_excluded": []
       }
     }
-  ]
+  ],
+  "databases_excluded": []
   ```
 
 - **All databases with exclusions**: If `databases` array is empty, all databases will be backed up except those in `databases_excluded`:
