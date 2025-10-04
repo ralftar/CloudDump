@@ -226,6 +226,54 @@ ${blobstorage}"
 Debug: ${debug}
 ${blobstorages}"
 
+  elif [ "${script}" = "dump_s3bucket.sh" ]; then
+
+    bucket_count=$(jq -r ".jobs[${job_idx}].buckets | length" "${CONFIGFILE}")
+    if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
+      bucket_count=0
+    fi
+
+    local buckets=""
+    for ((bucket_idx = 0; bucket_idx < bucket_count; bucket_idx++)); do
+
+      source=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].source" "${CONFIGFILE}" | sed 's/^null$//g')
+      destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].destination" "${CONFIGFILE}" | sed 's/^null$//g')
+      delete_destination=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
+      aws_region=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].aws_region" "${CONFIGFILE}" | sed 's/^null$//g')
+      endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
+
+      if [ "${delete_destination}" = "" ]; then
+        delete_destination="false"
+      fi
+
+      if [ "${aws_region}" = "" ]; then
+        aws_region="us-east-1"
+      fi
+
+      bucket="Source: ${source}
+Destination: ${destination}
+Delete destination: ${delete_destination}
+AWS Region: ${aws_region}"
+
+      if [ ! "${endpoint_url}" = "" ]; then
+        bucket="${bucket}
+Endpoint URL: ${endpoint_url}"
+      fi
+
+      if [ "${buckets}" = "" ]; then
+        buckets="${bucket}"
+      else
+        buckets="${buckets}
+
+${bucket}"
+      fi
+
+    done
+
+    configuration="Schedule: ${crontab}
+Debug: ${debug}
+${buckets}"
+
   elif [ "${script}" = "dump_pgsql.sh" ]; then
 
     server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
