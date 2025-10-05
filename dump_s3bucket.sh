@@ -57,15 +57,6 @@ done
 
 # Functions
 
-# Gets a formatted timestamp string for logging purposes
-#
-# Returns:
-#   Current date and time in 'YYYY-MM-DD HH:MM:SS' format
-#
-get_timestamp() {
-  date '+%Y-%m-%d %H:%M:%S'
-}
-
 # Logs an informational message to stdout with timestamp prefix
 #
 # Arguments:
@@ -75,7 +66,7 @@ get_timestamp() {
 #   [YYYY-MM-DD HH:MM:SS] message
 #
 log_info() {
-  echo "[$(get_timestamp)] $*"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
 # Logs an error message to stderr with timestamp and ERROR prefix
@@ -87,7 +78,7 @@ log_info() {
 #   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
 #
 log_error() {
-  echo "[$(get_timestamp)] ERROR: $*" >&2
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
 

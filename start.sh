@@ -17,16 +17,7 @@ fi
 
 # Functions
 
-# Gets a formatted timestamp string for logging purposes
-#
-# Returns:
-#   Current date and time in 'YYYY-MM-DD HH:MM:SS' format
-#
-get_timestamp() {
-  date '+%Y-%m-%d %H:%M:%S'
-}
-
-# Logs a message to stdout with timestamp prefix
+# Logs an informational message to stdout with timestamp prefix
 #
 # Arguments:
 #   All arguments are concatenated and logged as the message
@@ -34,8 +25,8 @@ get_timestamp() {
 # Output:
 #   [YYYY-MM-DD HH:MM:SS] message
 #
-log() {
-  echo "[$(get_timestamp)] $*"
+log_info() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
 # Logs an error message to stderr with timestamp and ERROR prefix
@@ -47,7 +38,7 @@ log() {
 #   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
 #
 log_error() {
-  echo "[$(get_timestamp)] ERROR: $*" >&2
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
 # Converts a JSON array to a space-separated string
@@ -117,7 +108,7 @@ removes_sensitive_data() {
 # allowing the application to log the shutdown and exit cleanly.
 #
 handles_shutdown_signal() {
-  log "Received shutdown signal, exiting gracefully..."
+  log_info "Received shutdown signal, exiting gracefully..."
   exit 0
 }
 
@@ -203,7 +194,7 @@ sends_job_completion_email() {
     script_filename="${script_name}"
   fi
   
-  log "Sending e-mail to ${MAILTO} from ${MAILFROM} for job ${job_identifier}."
+  log_info "Sending e-mail to ${MAILTO} from ${MAILFROM} for job ${job_identifier}."
   
   # Determine the correct attachment option flag based on mail command type
   local mail_attachment_option
@@ -220,7 +211,7 @@ sends_job_completion_email() {
   elif [ "${MAIL}" = "mutt" ]; then
     mail_attachment_option="-a"
   else
-    log "Unknown mail command: ${MAIL}"
+    log_info "Unknown mail command: ${MAIL}"
     return 1
   fi
   
@@ -249,7 +240,7 @@ JOB REPORT (${result_status_text})
 Script: ${script_filename}
 ID: ${job_identifier}
 Started: ${start_formatted_timestamp}
-Completed: $(get_timestamp)
+Completed: $(date '+%Y-%m-%d %H:%M:%S')
 Time elapsed: $(((end_unix_timestamp - start_unix_timestamp)/60)) minutes $(((end_unix_timestamp - start_unix_timestamp)%60)) seconds
 
 CONFIGURATION
@@ -329,10 +320,10 @@ execute_s3bucket_job() {
   result=0
   bucket_count=$(jq -r ".jobs[${job_idx}].buckets | length" "${CONFIGFILE}")
   if [ "${bucket_count}" = "" ] || [ -z "${bucket_count}" ] || ! [ "${bucket_count}" -eq "${bucket_count}" ] 2>/dev/null; then
-    log "Error: Can't read buckets from Json configuration for job ${jobid}." >> "${logfile}"
+    log_info "Error: Can't read buckets from Json configuration for job ${jobid}." >> "${logfile}"
     return 1
   elif [ "${bucket_count}" -eq 0 ]; then
-    log "Error: No buckets for ${jobid} in Json configuration." >> "${logfile}"
+    log_info "Error: No buckets for ${jobid} in Json configuration." >> "${logfile}"
     return 1
   fi
   
@@ -373,10 +364,10 @@ execute_azstorage_job() {
   result=0
   bs_count=$(jq -r ".jobs[${job_idx}].blobstorages | length" "${CONFIGFILE}")
   if [ "${bs_count}" = "" ] || [ -z "${bs_count}" ] || ! [ "${bs_count}" -eq "${bs_count}" ] 2>/dev/null; then
-    log "Error: Can't read blobstorages from Json configuration for job ${jobid}." >> "${logfile}"
+    log_info "Error: Can't read blobstorages from Json configuration for job ${jobid}." >> "${logfile}"
     return 1
   elif [ "${bs_count}" -eq 0 ]; then
-    log "Error: No blobstorages for ${jobid} in Json configuration." >> "${logfile}"
+    log_info "Error: No blobstorages for ${jobid} in Json configuration." >> "${logfile}"
     return 1
   fi
   
@@ -413,10 +404,10 @@ execute_pgsql_job() {
   result=0
   server_count=$(jq -r ".jobs[${job_idx}].servers | length" "${CONFIGFILE}")
   if [ "${server_count}" = "" ] || [ -z "${server_count}" ] || ! [ "${server_count}" -eq "${server_count}" ] 2>/dev/null; then
-    log "Error: Can't read servers from Json configuration for job ${jobid}." >> "${logfile}"
+    log_info "Error: Can't read servers from Json configuration for job ${jobid}." >> "${logfile}"
     return 1
   elif [ "${server_count}" -eq 0 ]; then
-    log "Error: No servers for ${jobid} in Json configuration." >> "${logfile}"
+    log_info "Error: No servers for ${jobid} in Json configuration." >> "${logfile}"
     return 1
   fi
   
@@ -457,7 +448,7 @@ execute_pgsql_job() {
 
 mkdir -p /persistent-data/logs
 
-log "Vendanor CloudDump v${VERSION} Start ($0)"
+log_info "Vendanor CloudDump v${VERSION} Start ($0)"
 
 # Set up signal handlers
 trap 'handles_shutdown_signal' SIGTERM SIGINT
@@ -500,8 +491,8 @@ fi
 HOST=$(jq -r '.settings.HOST' "${CONFIGFILE}" | sed 's/^null$//g')
 DEBUG=$(jq -r '.settings.DEBUG' "${CONFIGFILE}")
 
-log "CONFIGURATION:"
-log "Host: $HOST"
+log_info "CONFIGURATION:"
+log_info "Host: $HOST"
 
 
 # Setup postfix and mutt
@@ -528,9 +519,9 @@ chmod 600 /etc/postfix/sasl_passwd || exit 1
 touch /etc/Muttrc || exit 1
 
 if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
-  log "SMTP server: $SMTPSERVER"
-  log "SMTP port: $SMTPPORT"
-  log "SMTP username: $SMTPUSER"
+  log_info "SMTP server: $SMTPSERVER"
+  log_info "SMTP port: $SMTPPORT"
+  log_info "SMTP username: $SMTPUSER"
   if [ "$SMTPUSER" = "" ] && [ "$SMTPPASS" = "" ]; then
     SMTPURL="smtps://${SMTPSERVER}:${SMTPPORT}"
   else
@@ -551,7 +542,7 @@ postmap lmdb:/etc/postfix/sasl_passwd || exit 1
 if ! pgrep -x master >/dev/null 2>&1; then
   /usr/sbin/postfix start || exit 1
 else
-  log "Postfix already running, reloading configuration..."
+  log_info "Postfix already running, reloading configuration..."
   /usr/sbin/postfix reload || exit 1
 fi
 
@@ -595,7 +586,7 @@ ${mount_summary}"
       if ! echo "${path}" | grep '@' >/dev/null 2>&1 && ! [ "${username}" = "" ]; then
         path="${username}@${path}"
       fi
-      log "Mounting ${path} to ${mountpoint} using sshfs."
+      log_info "Mounting ${path} to ${mountpoint} using sshfs."
       mkdir -p "${mountpoint}" || exit 1
       if [ "${port}" = "" ]; then
         sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}" || exit 1
@@ -609,7 +600,7 @@ ${mount_summary}"
       smb_host=$(echo "${path}" | sed 's|^//\([^/]*\)/.*|\1|')
       smb_share=$(echo "${path}" | sed 's|^//[^/]*/\(.*\)|\1|')
       
-      log "Mounting ${path} to ${mountpoint} using smbnetfs."
+      log_info "Mounting ${path} to ${mountpoint} using smbnetfs."
       
       # Use a single shared smbnetfs root for all mounts
       smbnetfs_root="/tmp/smbnetfs"
@@ -772,7 +763,7 @@ else
   echo "${mail_body}" | ${MAIL} -r "${MAILFROM} <${MAILFROM}>" -s "[Started] CloudDump ${HOST}" "${MAILTO}"
 fi
 
-log "Startup email sent."
+log_info "Startup email sent."
 
 
 # Determines if a given timestamp matches a cron schedule pattern
@@ -898,7 +889,7 @@ determines_job_execution_needed() {
 
 
 # Main loop - check every minute and run jobs sequentially
-log "Starting main loop..."
+log_info "Starting main loop..."
 
 # Track last run time for each job (initialize to 0)
 declare -A last_run_times
@@ -931,16 +922,16 @@ while true; do
     # This implements catch-up execution for jobs that should have run while other jobs were executing
     if determines_job_execution_needed "${crontab}" "${last_run_times[${jobid}]}"; then
       
-      log "Running job ${jobid} (type: ${type})"
+      log_info "Running job ${jobid} (type: ${type})"
         
         # Create log file
         RANDOM=$$
         LOGFILE="/tmp/vnclouddump-${jobid}-${RANDOM}.log"
         
         time_start=$(date +%s)
-        time_start_timestamp=$(get_timestamp)
+        time_start_timestamp=$(date '+%Y-%m-%d %H:%M:%S')
         
-        log "Job ${jobid} starting at ${time_start_timestamp}" >> "${LOGFILE}"
+        log_info "Job ${jobid} starting at ${time_start_timestamp}" >> "${LOGFILE}"
         
         # Run the script based on type
         result=0
@@ -956,18 +947,18 @@ while true; do
           result=$?
         else
           # Unknown type - should not happen
-          log "Error: Unknown job type ${type} for job ${jobid}." >> "${LOGFILE}"
+          log_info "Error: Unknown job type ${type} for job ${jobid}." >> "${LOGFILE}"
           result=1
         fi
         
         time_end=$(date +%s)
         
-        log "Job ${jobid} finished at $(get_timestamp)" >> "${LOGFILE}"
+        log_info "Job ${jobid} finished at $(date '+%Y-%m-%d %H:%M:%S')" >> "${LOGFILE}"
         
         if [ ${result} -eq 0 ]; then
-          log "Job ${jobid} completed successfully"
+          log_info "Job ${jobid} completed successfully"
         else
-          log "Job ${jobid} completed with errors (exit code: ${result})"
+          log_info "Job ${jobid} completed with errors (exit code: ${result})"
         fi
         
         # Get configuration for email
