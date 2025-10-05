@@ -41,6 +41,21 @@ log_error() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
+# Logs a debug message to stdout with timestamp and DEBUG prefix
+# Only outputs if DEBUG variable is set to "true"
+#
+# Arguments:
+#   All arguments are concatenated and logged as the debug message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] DEBUG: message (only if DEBUG=true)
+#
+log_debug() {
+  if [ "${DEBUG}" = "true" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG: $*"
+  fi
+}
+
 # Converts a JSON array to a space-separated string
 #
 # Reads a JSON array from the configuration file and converts it to a
