@@ -39,34 +39,52 @@ done
 
 # Functions
 
-timestamp() {
-
+# Generates a formatted timestamp string for logging purposes
+#
+# Returns:
+#   Current date and time in 'YYYY-MM-DD HH:MM:SS' format
+#
+generates_timestamp() {
   date '+%Y-%m-%d %H:%M:%S'
-
 }
 
-print() {
-
-  echo "[$(timestamp)] $*"
-
+# Writes an informational message to stdout with timestamp prefix
+#
+# Arguments:
+#   All arguments are concatenated and logged as the message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] message
+#
+writes_info_message() {
+  echo "[$(generates_timestamp)] $*"
 }
 
-errorprint() {
-
-  echo "[$(timestamp)] ERROR: $*" >&2
-
+# Writes an writes_error_message message to stderr with timestamp and ERROR prefix
+#
+# Arguments:
+#   All arguments are concatenated and logged as the writes_error_message message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
+#
+writes_error_to_stderr() {
+  echo "[$(generates_timestamp)] ERROR: $*" >&2
 }
 
-error() {
-
-  errorprint "$@"
-
+# Writes an writes_error_message message (wrapper for writes_error_to_stderr)
+#
+# Arguments:
+#   All arguments are passed to writes_error_to_stderr
+#
+writes_error_message() {
+  writes_error_to_stderr "$@"
 }
 
 
 # Init
 
-print "Vendanor AzDump ($0)"
+writes_info_message "Vendanor AzDump ($0)"
 
 
 # Check commands
@@ -87,7 +105,7 @@ do
 done
 
 if ! [ "${cmds_missing}" = "" ]; then
-  error "Missing \"${cmds_missing}\" commands."
+  writes_error_message "Missing \"${cmds_missing}\" commands."
   exit 1
 fi
 
@@ -95,12 +113,12 @@ fi
 # Check parameters
 
 if [ "${SOURCE}" = "" ]; then
-  error "Missing source parameter (-s)."
+  writes_error_message "Missing source parameter (-s)."
   exit 1
 fi
 
 if [ "${DESTINATION}" = "" ]; then
-  error "Missing destination parameter (-d)."
+  writes_error_message "Missing destination parameter (-d)."
   exit 1
 fi
 
@@ -111,38 +129,38 @@ fi
 
 source_stripped=$(echo "${SOURCE}" | cut -d '?' -f 1)
 
-print "Source: ${source_stripped}"
-print "Destination: ${DESTINATION}"
-print "Mirror (delete): ${DELETE_DESTINATION}"
+writes_info_message "Source: ${source_stripped}"
+writes_info_message "Destination: ${DESTINATION}"
+writes_info_message "Mirror (delete): ${DELETE_DESTINATION}"
 
 
 # Validate source
 
 echo "${SOURCE}" | grep "^https:\/\/.*" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  error "Invalid source. Source must start with https://"
+  writes_error_message "Invalid source. Source must start with https://"
   exit 1
 fi
 
 
 # Create directory
 
-print "Creating directory for destination ${DESTINATION}"
+writes_info_message "Creating directory for destination ${DESTINATION}"
 
 mkdir -p "${DESTINATION}"
 if [ $? -ne 0 ]; then
-  error "Could not create directory ${DESTINATION}"
+  writes_error_message "Could not create directory ${DESTINATION}"
   exit 1
 fi
 
 
 # Check permissions
 
-print "Checking permission for destination ${DESTINATION}"
+writes_info_message "Checking permission for destination ${DESTINATION}"
 
 touch "${DESTINATION}/TEST_FILE"
 if [ $? -ne 0 ]; then
-  error "Could not access ${DESTINATION}."
+  writes_error_message "Could not access ${DESTINATION}."
   exit 1
 fi
 
@@ -151,14 +169,14 @@ rm -f "${DESTINATION}/TEST_FILE"
 
 # Run azcopy
 
-print "Syncing source ${source_stripped} to destination ${DESTINATION}..."
+writes_info_message "Syncing source ${source_stripped} to destination ${DESTINATION}..."
 
 azcopy sync --recursive --delete-destination="${DELETE_DESTINATION}" "${SOURCE}" "${DESTINATION}"
 result=$?
 
 if [ ${result} -ne 0 ]; then
-  error "Sync from source ${source_stripped} to destination ${DESTINATION} failed."
+  writes_error_message "Sync from source ${source_stripped} to destination ${DESTINATION} failed."
   exit ${result}
 fi
 
-print "Sync completed successfully."
+writes_info_message "Sync completed successfully."
