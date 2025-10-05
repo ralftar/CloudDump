@@ -64,34 +64,34 @@ done
 
 # Functions
 
-timestamp() {
-
-  date '+%Y-%m-%d %H:%M:%S'
-
+# Logs an informational message to stdout with timestamp prefix
+#
+# Arguments:
+#   All arguments are concatenated and logged as the message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] message
+#
+log_info() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-print() {
-
-  echo "[$(timestamp)] $*"
-
-}
-
-errorprint() {
-
-  echo "[$(timestamp)] ERROR: $*" >&2
-
-}
-
-error() {
-
-  errorprint "$@"
-
+# Logs an error message to stderr with timestamp and ERROR prefix
+#
+# Arguments:
+#   All arguments are concatenated and logged as the error message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
+#
+log_error() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
 
 # Init
 
-print "Vendanor PgDump ($0)"
+log_info "Vendanor PgDump ($0)"
 
 
 # Check commands
@@ -111,7 +111,7 @@ do
 done
 
 if ! [ "${cmds_missing}" = "" ]; then
-  error "Missing \"${cmds_missing}\" commands."
+  log_error "Missing \"${cmds_missing}\" commands."
   exit 1
 fi
 
@@ -119,22 +119,22 @@ fi
 # Check parameters
 
 if [ "${PGHOST}" = "" ]; then
-  error "Missing host parameter (-h)."
+  log_error "Missing host parameter (-h)."
   exit 1
 fi
 
 if [ "${PGUSERNAME}" = "" ]; then
-  error "Missing user parameter (-U)."
+  log_error "Missing user parameter (-U)."
   exit 1
 fi
 
 if [ "${PGPASSWORD}" = "" ]; then
-  error "Missing password parameter (-P)."
+  log_error "Missing password parameter (-P)."
   exit 1
 fi
 
 if [ "${BACKUPPATH}" = "" ]; then
-  error "Missing backuppath parameter (-b)."
+  log_error "Missing backuppath parameter (-b)."
   exit 1
 fi
 
@@ -156,30 +156,30 @@ if [ "${DATABASES_EXCLUDED_JSON}" = "" ]; then
   DATABASES_EXCLUDED_JSON="[]"
 fi
 
-print "Host: ${PGHOST}"
-print "Port: ${PGPORT}"
-print "Username: ${PGUSERNAME}"
-print "Backup path: ${BACKUPPATH}"
-print "Filename date: ${FILENAMEDATE}"
-print "Compress: ${COMPRESS}"
+log_info "Host: ${PGHOST}"
+log_info "Port: ${PGPORT}"
+log_info "Username: ${PGUSERNAME}"
+log_info "Backup path: ${BACKUPPATH}"
+log_info "Filename date: ${FILENAMEDATE}"
+log_info "Compress: ${COMPRESS}"
 
 
 # Create backup path
 
-print "Creating backuppath ${BACKUPPATH}..."
+log_info "Creating backuppath ${BACKUPPATH}..."
 
 if ! mkdir -p "${BACKUPPATH}"; then
-  error "Could not create backuppath ${BACKUPPATH}."
+  log_error "Could not create backuppath ${BACKUPPATH}."
   exit 1
 fi
 
 
 # Check permissions
 
-print "Checking permission for backuppath ${BACKUPPATH}..."
+log_info "Checking permission for backuppath ${BACKUPPATH}..."
 
 if ! touch "${BACKUPPATH}/TEST_FILE"; then
-  error "Could not access ${BACKUPPATH}."
+  log_error "Could not access ${BACKUPPATH}."
   exit 1
 fi
 
@@ -188,10 +188,10 @@ rm -f "${BACKUPPATH}/TEST_FILE"
 
 # Get list of all databases from server
 
-print "Querying server for list of databases..."
+log_info "Querying server for list of databases..."
 
 if ! databases_all=$(PGPASSWORD=${PGPASSWORD} psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -l 2>/dev/null | grep '|' | sed 's/ //g' | grep -v '^Name|' | grep -v '^||' | cut -d '|' -f 1); then
-  error "Failed to query database list from ${PGHOST}."
+  log_error "Failed to query database list from ${PGHOST}."
   exit 1
 fi
 
@@ -204,11 +204,11 @@ databases_excluded=$(echo "${DATABASES_EXCLUDED_JSON}" | jq -r '.[]' 2>/dev/null
 databases_backup=""
 if [ ! "${databases_configured}" = "" ]; then
   # Use only explicitly configured databases
-  print "Using explicitly configured databases: ${databases_configured}"
+  log_info "Using explicitly configured databases: ${databases_configured}"
   databases_backup="${databases_configured}"
 else
   # Use all databases, excluding those in databases_excluded
-  print "Using all databases except excluded ones"
+  log_info "Using all databases except excluded ones"
   for database in ${databases_all}
   do
     skip=0
@@ -226,11 +226,11 @@ else
 fi
 
 if [ "${databases_backup}" = "" ]; then
-  error "No databases to backup."
+  log_error "No databases to backup."
   exit 1
 fi
 
-print "Databases to backup: ${databases_backup}"
+log_info "Databases to backup: ${databases_backup}"
 
 
 # Backup each database
@@ -238,7 +238,7 @@ print "Databases to backup: ${databases_backup}"
 overall_result=0
 for DATABASE in ${databases_backup}
 do
-  print "Processing database: ${DATABASE}"
+  log_info "Processing database: ${DATABASE}"
   
   # Get table configuration for this database
   tables_included=""
@@ -256,7 +256,7 @@ do
   tables_included_params=""
   
   if [ ! "${tables_excluded}" = "" ]; then
-    print "Tables excluded: ${tables_excluded}"
+    log_info "Tables excluded: ${tables_excluded}"
     for table_excluded in ${tables_excluded//,/ }
     do
       table_excluded=$(echo "${table_excluded}" | xargs)
@@ -267,7 +267,7 @@ do
   fi
   
   if [ ! "${tables_included}" = "" ]; then
-    print "Tables included: ${tables_included}"
+    log_info "Tables included: ${tables_included}"
     for table_included in ${tables_included//,/ }
     do
       table_included=$(echo "${table_included}" | xargs)
@@ -286,52 +286,52 @@ do
   fi
   
   # Run pg_dump
-  print "Running pg_dump of ${DATABASE} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
+  log_info "Running pg_dump of ${DATABASE} for ${PGHOST} to backupfile ${BACKUPFILE_FINAL}..."
   
   # shellcheck disable=SC2086
   if ! PGPASSWORD=${PGPASSWORD} pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSERNAME}" -d "${DATABASE}" -F tar ${tables_included_params} ${tables_excluded_params} > "${BACKUPFILE_TEMP}"; then
-    error "pg_dump for ${DATABASE} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} failed."
+    log_error "pg_dump for ${DATABASE} on ${PGHOST} to backupfile ${BACKUPFILE_FINAL} failed."
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
     continue
   fi
   
   if ! [ -f "${BACKUPFILE_TEMP}" ]; then
-    error "Backupfile ${BACKUPFILE_TEMP} missing for ${DATABASE} on ${PGHOST}."
+    log_error "Backupfile ${BACKUPFILE_TEMP} missing for ${DATABASE} on ${PGHOST}."
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
     continue
   fi
   
   if ! size=$(wc -c "${BACKUPFILE_TEMP}" | cut -d ' ' -f 1); then
-    error "Could not get filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}."
+    log_error "Could not get filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}."
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
     continue
   fi
   
   if [ -z "${size}" ] || ! [ "${size}" -eq "${size}" ] 2>/dev/null; then
-    error "Invalid filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}"
+    log_error "Invalid filesize for backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST}"
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
     continue
   fi
   
   if [ "${size}" -eq 0 ]; then
-    error "Backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST} is empty."
+    log_error "Backupfile ${BACKUPFILE_TEMP} of ${DATABASE} on ${PGHOST} is empty."
     rm -f "${BACKUPFILE_TEMP}"
     overall_result=1
     continue
   fi
   
-  print "pg_dump of ${DATABASE} completed. Backupfile size: ${size} bytes."
+  log_info "pg_dump of ${DATABASE} completed. Backupfile size: ${size} bytes."
   
   # Compress if needed
   if [ "${COMPRESS}" = "true" ]; then
-    print "Compressing backupfile ${BACKUPFILE_TEMP}..."
+    log_info "Compressing backupfile ${BACKUPFILE_TEMP}..."
     
     if ! bzip2 -f "${BACKUPFILE_TEMP}"; then
-      error "Compression of ${BACKUPFILE_TEMP} failed."
+      log_error "Compression of ${BACKUPFILE_TEMP} failed."
       overall_result=1
       continue
     fi
@@ -343,27 +343,27 @@ do
       BACKUPFILE_FINAL="${BACKUPPATH}/${DATABASE}.tar.bz2"
     fi
     
-    print "Compression completed. Compressed file: ${BACKUPFILE_TEMP}"
+    log_info "Compression completed. Compressed file: ${BACKUPFILE_TEMP}"
   fi
   
   # Move to final filename
   if [ ! "${BACKUPFILE_TEMP}" = "${BACKUPFILE_FINAL}" ]; then
-    print "Moving ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}..."
+    log_info "Moving ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}..."
     
     if ! mv "${BACKUPFILE_TEMP}" "${BACKUPFILE_FINAL}"; then
-      error "Could not move ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}."
+      log_error "Could not move ${BACKUPFILE_TEMP} to ${BACKUPFILE_FINAL}."
       overall_result=1
       continue
     fi
   fi
   
-  print "Backup completed successfully: ${BACKUPFILE_FINAL}"
+  log_info "Backup completed successfully: ${BACKUPFILE_FINAL}"
 done
 
 if [ ${overall_result} -eq 0 ]; then
-  print "All database backups completed successfully."
+  log_info "All database backups completed successfully."
 else
-  error "Some database backups failed."
+  log_error "Some database backups failed."
 fi
 
 exit ${overall_result}

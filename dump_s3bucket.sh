@@ -57,34 +57,34 @@ done
 
 # Functions
 
-timestamp() {
-
-  date '+%Y-%m-%d %H:%M:%S'
-
+# Logs an informational message to stdout with timestamp prefix
+#
+# Arguments:
+#   All arguments are concatenated and logged as the message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] message
+#
+log_info() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-print() {
-
-  echo "[$(timestamp)] $*"
-
-}
-
-errorprint() {
-
-  echo "[$(timestamp)] ERROR: $*" >&2
-
-}
-
-error() {
-
-  errorprint "$@"
-
+# Logs an error message to stderr with timestamp and ERROR prefix
+#
+# Arguments:
+#   All arguments are concatenated and logged as the error message
+#
+# Output:
+#   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
+#
+log_error() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
 
 # Init
 
-print "Vendanor S3Dump ($0)"
+log_info "Vendanor S3Dump ($0)"
 
 
 # Check commands
@@ -105,7 +105,7 @@ do
 done
 
 if ! [ "${cmds_missing}" = "" ]; then
-  error "Missing \"${cmds_missing}\" commands."
+  log_error "Missing \"${cmds_missing}\" commands."
   exit 1
 fi
 
@@ -113,12 +113,12 @@ fi
 # Check parameters
 
 if [ "${SOURCE}" = "" ]; then
-  error "Missing source parameter (-s)."
+  log_error "Missing source parameter (-s)."
   exit 1
 fi
 
 if [ "${DESTINATION}" = "" ]; then
-  error "Missing destination parameter (-d)."
+  log_error "Missing destination parameter (-d)."
   exit 1
 fi
 
@@ -127,12 +127,12 @@ if [ "${DELETE_DESTINATION}" != "true" ] && [ "${DELETE_DESTINATION}" != "false"
   DELETE_DESTINATION="true"
 fi
 
-print "Source: ${SOURCE}"
-print "Destination: ${DESTINATION}"
-print "Mirror (delete): ${DELETE_DESTINATION}"
-print "AWS Region: ${AWS_REGION_PARAM}"
+log_info "Source: ${SOURCE}"
+log_info "Destination: ${DESTINATION}"
+log_info "Mirror (delete): ${DELETE_DESTINATION}"
+log_info "AWS Region: ${AWS_REGION_PARAM}"
 if [ ! "${ENDPOINT_URL}" = "" ]; then
-  print "Endpoint URL: ${ENDPOINT_URL}"
+  log_info "Endpoint URL: ${ENDPOINT_URL}"
 fi
 
 
@@ -140,29 +140,29 @@ fi
 
 echo "${SOURCE}" | grep "^s3:\/\/.*" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  error "Invalid source. Source must start with s3://"
+  log_error "Invalid source. Source must start with s3://"
   exit 1
 fi
 
 
 # Create directory
 
-print "Creating directory for destination ${DESTINATION}"
+log_info "Creating directory for destination ${DESTINATION}"
 
 mkdir -p "${DESTINATION}"
 if [ $? -ne 0 ]; then
-  error "Could not create directory ${DESTINATION}"
+  log_error "Could not create directory ${DESTINATION}"
   exit 1
 fi
 
 
 # Check permissions
 
-print "Checking permission for destination ${DESTINATION}"
+log_info "Checking permission for destination ${DESTINATION}"
 
 touch "${DESTINATION}/TEST_FILE"
 if [ $? -ne 0 ]; then
-  error "Could not access ${DESTINATION}."
+  log_error "Could not access ${DESTINATION}."
   exit 1
 fi
 
@@ -183,7 +183,7 @@ fi
 
 # Run aws s3 sync
 
-print "Syncing source ${SOURCE} to destination ${DESTINATION}..."
+log_info "Syncing source ${SOURCE} to destination ${DESTINATION}..."
 
 aws_cmd="aws s3 sync"
 
@@ -210,8 +210,8 @@ unset AWS_SECRET_ACCESS_KEY
 unset AWS_DEFAULT_REGION
 
 if [ ${result} -ne 0 ]; then
-  error "Sync from source ${SOURCE} to destination ${DESTINATION} failed."
+  log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed."
   exit ${result}
 fi
 
-print "Sync completed successfully."
+log_info "Sync completed successfully."
