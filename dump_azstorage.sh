@@ -39,16 +39,16 @@ done
 
 # Functions
 
-# Generates a formatted timestamp string for logging purposes
+# Gets a formatted timestamp string for logging purposes
 #
 # Returns:
 #   Current date and time in 'YYYY-MM-DD HH:MM:SS' format
 #
-generates_timestamp() {
+get_timestamp() {
   date '+%Y-%m-%d %H:%M:%S'
 }
 
-# Writes an informational message to stdout with timestamp prefix
+# Logs an informational message to stdout with timestamp prefix
 #
 # Arguments:
 #   All arguments are concatenated and logged as the message
@@ -56,35 +56,26 @@ generates_timestamp() {
 # Output:
 #   [YYYY-MM-DD HH:MM:SS] message
 #
-writes_info_message() {
-  echo "[$(generates_timestamp)] $*"
+log_info() {
+  echo "[$(get_timestamp)] $*"
 }
 
-# Writes an writes_error_message message to stderr with timestamp and ERROR prefix
+# Logs an error message to stderr with timestamp and ERROR prefix
 #
 # Arguments:
-#   All arguments are concatenated and logged as the writes_error_message message
+#   All arguments are concatenated and logged as the error message
 #
 # Output:
 #   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
 #
-writes_error_to_stderr() {
-  echo "[$(generates_timestamp)] ERROR: $*" >&2
-}
-
-# Writes an writes_error_message message (wrapper for writes_error_to_stderr)
-#
-# Arguments:
-#   All arguments are passed to writes_error_to_stderr
-#
-writes_error_message() {
-  writes_error_to_stderr "$@"
+log_error() {
+  echo "[$(get_timestamp)] ERROR: $*" >&2
 }
 
 
 # Init
 
-writes_info_message "Vendanor AzDump ($0)"
+log_info "Vendanor AzDump ($0)"
 
 
 # Check commands
@@ -105,7 +96,7 @@ do
 done
 
 if ! [ "${cmds_missing}" = "" ]; then
-  writes_error_message "Missing \"${cmds_missing}\" commands."
+  log_error "Missing \"${cmds_missing}\" commands."
   exit 1
 fi
 
@@ -113,12 +104,12 @@ fi
 # Check parameters
 
 if [ "${SOURCE}" = "" ]; then
-  writes_error_message "Missing source parameter (-s)."
+  log_error "Missing source parameter (-s)."
   exit 1
 fi
 
 if [ "${DESTINATION}" = "" ]; then
-  writes_error_message "Missing destination parameter (-d)."
+  log_error "Missing destination parameter (-d)."
   exit 1
 fi
 
@@ -129,38 +120,38 @@ fi
 
 source_stripped=$(echo "${SOURCE}" | cut -d '?' -f 1)
 
-writes_info_message "Source: ${source_stripped}"
-writes_info_message "Destination: ${DESTINATION}"
-writes_info_message "Mirror (delete): ${DELETE_DESTINATION}"
+log_info "Source: ${source_stripped}"
+log_info "Destination: ${DESTINATION}"
+log_info "Mirror (delete): ${DELETE_DESTINATION}"
 
 
 # Validate source
 
 echo "${SOURCE}" | grep "^https:\/\/.*" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  writes_error_message "Invalid source. Source must start with https://"
+  log_error "Invalid source. Source must start with https://"
   exit 1
 fi
 
 
 # Create directory
 
-writes_info_message "Creating directory for destination ${DESTINATION}"
+log_info "Creating directory for destination ${DESTINATION}"
 
 mkdir -p "${DESTINATION}"
 if [ $? -ne 0 ]; then
-  writes_error_message "Could not create directory ${DESTINATION}"
+  log_error "Could not create directory ${DESTINATION}"
   exit 1
 fi
 
 
 # Check permissions
 
-writes_info_message "Checking permission for destination ${DESTINATION}"
+log_info "Checking permission for destination ${DESTINATION}"
 
 touch "${DESTINATION}/TEST_FILE"
 if [ $? -ne 0 ]; then
-  writes_error_message "Could not access ${DESTINATION}."
+  log_error "Could not access ${DESTINATION}."
   exit 1
 fi
 
@@ -169,14 +160,14 @@ rm -f "${DESTINATION}/TEST_FILE"
 
 # Run azcopy
 
-writes_info_message "Syncing source ${source_stripped} to destination ${DESTINATION}..."
+log_info "Syncing source ${source_stripped} to destination ${DESTINATION}..."
 
 azcopy sync --recursive --delete-destination="${DELETE_DESTINATION}" "${SOURCE}" "${DESTINATION}"
 result=$?
 
 if [ ${result} -ne 0 ]; then
-  writes_error_message "Sync from source ${source_stripped} to destination ${DESTINATION} failed."
+  log_error "Sync from source ${source_stripped} to destination ${DESTINATION} failed."
   exit ${result}
 fi
 
-writes_info_message "Sync completed successfully."
+log_info "Sync completed successfully."

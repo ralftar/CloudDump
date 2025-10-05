@@ -57,16 +57,16 @@ done
 
 # Functions
 
-# Generates a formatted timestamp string for logging purposes
+# Gets a formatted timestamp string for logging purposes
 #
 # Returns:
 #   Current date and time in 'YYYY-MM-DD HH:MM:SS' format
 #
-generates_timestamp() {
+get_timestamp() {
   date '+%Y-%m-%d %H:%M:%S'
 }
 
-# Writes an informational message to stdout with timestamp prefix
+# Logs an informational message to stdout with timestamp prefix
 #
 # Arguments:
 #   All arguments are concatenated and logged as the message
@@ -74,35 +74,26 @@ generates_timestamp() {
 # Output:
 #   [YYYY-MM-DD HH:MM:SS] message
 #
-writes_info_message() {
-  echo "[$(generates_timestamp)] $*"
+log_info() {
+  echo "[$(get_timestamp)] $*"
 }
 
-# Writes an writes_error_message message to stderr with timestamp and ERROR prefix
+# Logs an error message to stderr with timestamp and ERROR prefix
 #
 # Arguments:
-#   All arguments are concatenated and logged as the writes_error_message message
+#   All arguments are concatenated and logged as the error message
 #
 # Output:
 #   [YYYY-MM-DD HH:MM:SS] ERROR: message (sent to stderr)
 #
-writes_error_to_stderr() {
-  echo "[$(generates_timestamp)] ERROR: $*" >&2
-}
-
-# Writes an writes_error_message message (wrapper for writes_error_to_stderr)
-#
-# Arguments:
-#   All arguments are passed to writes_error_to_stderr
-#
-writes_error_message() {
-  writes_error_to_stderr "$@"
+log_error() {
+  echo "[$(get_timestamp)] ERROR: $*" >&2
 }
 
 
 # Init
 
-writes_info_message "Vendanor S3Dump ($0)"
+log_info "Vendanor S3Dump ($0)"
 
 
 # Check commands
@@ -123,7 +114,7 @@ do
 done
 
 if ! [ "${cmds_missing}" = "" ]; then
-  writes_error_message "Missing \"${cmds_missing}\" commands."
+  log_error "Missing \"${cmds_missing}\" commands."
   exit 1
 fi
 
@@ -131,12 +122,12 @@ fi
 # Check parameters
 
 if [ "${SOURCE}" = "" ]; then
-  writes_error_message "Missing source parameter (-s)."
+  log_error "Missing source parameter (-s)."
   exit 1
 fi
 
 if [ "${DESTINATION}" = "" ]; then
-  writes_error_message "Missing destination parameter (-d)."
+  log_error "Missing destination parameter (-d)."
   exit 1
 fi
 
@@ -145,12 +136,12 @@ if [ "${DELETE_DESTINATION}" != "true" ] && [ "${DELETE_DESTINATION}" != "false"
   DELETE_DESTINATION="true"
 fi
 
-writes_info_message "Source: ${SOURCE}"
-writes_info_message "Destination: ${DESTINATION}"
-writes_info_message "Mirror (delete): ${DELETE_DESTINATION}"
-writes_info_message "AWS Region: ${AWS_REGION_PARAM}"
+log_info "Source: ${SOURCE}"
+log_info "Destination: ${DESTINATION}"
+log_info "Mirror (delete): ${DELETE_DESTINATION}"
+log_info "AWS Region: ${AWS_REGION_PARAM}"
 if [ ! "${ENDPOINT_URL}" = "" ]; then
-  writes_info_message "Endpoint URL: ${ENDPOINT_URL}"
+  log_info "Endpoint URL: ${ENDPOINT_URL}"
 fi
 
 
@@ -158,29 +149,29 @@ fi
 
 echo "${SOURCE}" | grep "^s3:\/\/.*" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  writes_error_message "Invalid source. Source must start with s3://"
+  log_error "Invalid source. Source must start with s3://"
   exit 1
 fi
 
 
 # Create directory
 
-writes_info_message "Creating directory for destination ${DESTINATION}"
+log_info "Creating directory for destination ${DESTINATION}"
 
 mkdir -p "${DESTINATION}"
 if [ $? -ne 0 ]; then
-  writes_error_message "Could not create directory ${DESTINATION}"
+  log_error "Could not create directory ${DESTINATION}"
   exit 1
 fi
 
 
 # Check permissions
 
-writes_info_message "Checking permission for destination ${DESTINATION}"
+log_info "Checking permission for destination ${DESTINATION}"
 
 touch "${DESTINATION}/TEST_FILE"
 if [ $? -ne 0 ]; then
-  writes_error_message "Could not access ${DESTINATION}."
+  log_error "Could not access ${DESTINATION}."
   exit 1
 fi
 
@@ -201,7 +192,7 @@ fi
 
 # Run aws s3 sync
 
-writes_info_message "Syncing source ${SOURCE} to destination ${DESTINATION}..."
+log_info "Syncing source ${SOURCE} to destination ${DESTINATION}..."
 
 aws_cmd="aws s3 sync"
 
@@ -228,8 +219,8 @@ unset AWS_SECRET_ACCESS_KEY
 unset AWS_DEFAULT_REGION
 
 if [ ${result} -ne 0 ]; then
-  writes_error_message "Sync from source ${SOURCE} to destination ${DESTINATION} failed."
+  log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed."
   exit ${result}
 fi
 
-writes_info_message "Sync completed successfully."
+log_info "Sync completed successfully."
