@@ -42,7 +42,7 @@ jobs:
             
             # Update the install script
             sed -i "s/^azcopy_version=\".*\"$/azcopy_version=\"${latest_version}\"/" install_azcopy.sh
-            sed -i "s/^azcopy_date=\".*\"$/azcopy_date=\"${latest_date}\"/" install_azcopy.sh
+            sed -i "s/^azcopy_date=\"[^\"]*\"/azcopy_date=\"${latest_date}\"/" install_azcopy.sh
             
             echo "version=${latest_version}" >> $GITHUB_OUTPUT
             echo "date=${latest_date}" >> $GITHUB_OUTPUT
