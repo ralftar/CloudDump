@@ -93,8 +93,7 @@ cmds="which sed date touch mkdir rm aws"
 cmds_missing=
 for cmd in ${cmds}
 do
-  which "${cmd}" >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
+  if which "${cmd}" >/dev/null 2>&1; then
     continue
   fi
   if [ "${cmds_missing}" = "" ]; then
@@ -138,8 +137,7 @@ fi
 
 # Validate source
 
-echo "${SOURCE}" | grep "^s3:\/\/.*" >/dev/null 2>&1
-if [ $? -ne 0 ]; then
+if ! echo "${SOURCE}" | grep "^s3:\/\/.*" >/dev/null 2>&1; then
   error "Invalid source. Source must start with s3://"
   exit 1
 fi
@@ -149,8 +147,7 @@ fi
 
 print "Creating directory for destination ${DESTINATION}"
 
-mkdir -p "${DESTINATION}"
-if [ $? -ne 0 ]; then
+if ! mkdir -p "${DESTINATION}"; then
   error "Could not create directory ${DESTINATION}"
   exit 1
 fi
@@ -160,8 +157,7 @@ fi
 
 print "Checking permission for destination ${DESTINATION}"
 
-touch "${DESTINATION}/TEST_FILE"
-if [ $? -ne 0 ]; then
+if ! touch "${DESTINATION}/TEST_FILE"; then
   error "Could not access ${DESTINATION}."
   exit 1
 fi

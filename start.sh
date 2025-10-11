@@ -43,8 +43,7 @@ json_array_to_strlist() {
   count=$(jq -r "${1} | length" "${CONFIGFILE}")
   for ((i = 0; i < count; i++)); do
     local value
-    value=$(jq -r "${1}[${i}]" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "$value" = "" ] ; then
+    if ! value=$(jq -r "${1}[${i}]" "${CONFIGFILE}" | sed 's/^null$//g') || [ "$value" = "" ] ; then
       continue
     fi
     if [ "${output}" = "" ]; then
@@ -110,15 +109,14 @@ send_job_email() {
   local configuration="$8"
   
   local result_text
-  if [ ${result} -eq 0 ]; then
+  if [ "${result}" -eq 0 ]; then
     result_text="Success"
   else
     result_text="Failure"
   fi
   
   local scriptfilename
-  echo "${script}" | grep '\/' >/dev/null 2>&1
-  if [ $? -eq 0 ]; then
+  if echo "${script}" | grep '\/' >/dev/null 2>&1; then
     scriptfilename=$(echo "${script}" | sed 's/.*\///g')
   else
     scriptfilename="${script}"
@@ -129,10 +127,8 @@ send_job_email() {
   # Check mail command type
   local mailattachopt
   if [ "${MAIL}" = "mail" ]; then
-    "${MAIL}" -V >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
-      "${MAIL}" -V | grep "^mail (GNU Mailutils)" >/dev/null 2>&1
-      if [ $? -eq 0 ]; then
+    if "${MAIL}" -V >/dev/null 2>&1; then
+      if "${MAIL}" -V | grep "^mail (GNU Mailutils)" >/dev/null 2>&1; then
         mailattachopt="-A"
       else
         mailattachopt="-a"
@@ -151,7 +147,7 @@ send_job_email() {
   
   # Check for azcopy log files
   if [ -f "${logfile}" ]; then
-    azcopy_logfiles=$(grep '^Log file is located at: .*\.log$' ${logfile} | sed -e 's/Log file is located at: \(.*\)/\1/' | sed 's/\r$//' | tr '\n' ' ' | sed 's/ $//g')
+    azcopy_logfiles=$(grep '^Log file is located at: .*\.log$' "${logfile}" | sed -e 's/Log file is located at: \(.*\)/\1/' | sed 's/\r$//' | tr '\n' ' ' | sed 's/ $//g')
     if ! [ "${azcopy_logfiles}" = "" ]; then
       for azcopy_logfile in ${azcopy_logfiles}; do
         if [ ! "${azcopy_logfile}" = "" ] && [ -f "${azcopy_logfile}" ]; then
@@ -205,8 +201,7 @@ get_job_configuration() {
   job_idx=
   for ((i = 0; i < jobs; i++)); do
     local jobid_current
-    jobid_current=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "${jobid_current}" = "" ]; then
+    if ! jobid_current=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${jobid_current}" = "" ]; then
       continue
     fi
     if [ "${jobid_current}" = "${jobid}" ]; then
@@ -377,8 +372,7 @@ cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh ssh
 cmds_missing=
 for cmd in ${cmds}
 do
-  which "${cmd}" >/dev/null 2>&1
-  if [ $? -eq 0 ] ; then
+  if which "${cmd}" >/dev/null 2>&1; then
     continue
   fi
   if [ "${cmds_missing}" = "" ]; then
@@ -442,13 +436,11 @@ if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
     SMTPURL="smtps://${SMTPSERVER}:${SMTPPORT}"
   else
     SMTPURL="smtps://${SMTPUSER}:${SMTPPASS}@${SMTPSERVER}:${SMTPPORT}"
-    grep "^\[${SMTPSERVER}\]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}$" /etc/postfix/sasl_passwd >/dev/null
-    if [ $? -ne 0 ]; then
+    if ! grep "^\[${SMTPSERVER}\]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}$" /etc/postfix/sasl_passwd >/dev/null; then
       echo "[${SMTPSERVER}]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}" >> /etc/postfix/sasl_passwd || exit 1
     fi
   fi
-  grep "^set smtp_url=\"${SMTPURL}\"$" /etc/Muttrc >/dev/null
-  if [ $? -ne 0 ]; then
+  if ! grep "^set smtp_url=\"${SMTPURL}\"$" /etc/Muttrc >/dev/null; then
     echo "set smtp_url=\"${SMTPURL}\"" >> /etc/Muttrc || exit 1
   fi
 fi
@@ -470,12 +462,10 @@ fi
 mounts=$(jq -r ".settings.mount | length" "${CONFIGFILE}")
 if [ "${mounts}" -gt 0 ]; then
   for ((i = 0; i < mounts; i++)); do
-    path=$(jq -r ".settings.mount[${i}].path" "${CONFIGFILE}" | sed 's/^null$//g' | sed 's/\\/\//g')
-    if [ $? -ne 0 ] || [ "${path}" = "" ]; then
+    if ! path=$(jq -r ".settings.mount[${i}].path" "${CONFIGFILE}" | sed 's/^null$//g' | sed 's/\\/\//g') || [ "${path}" = "" ]; then
       continue
     fi
-    mountpoint=$(jq -r ".settings.mount[${i}].mountpoint" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "${mountpoint}" = "" ]; then
+    if ! mountpoint=$(jq -r ".settings.mount[${i}].mountpoint" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${mountpoint}" = "" ]; then
       continue
     fi
     username=$(jq -r ".settings.mount[${i}].username" "${CONFIGFILE}" | sed 's/^null$//g')
@@ -495,15 +485,13 @@ Mountpoint ${mountpoint}
 ${mount_summary}"
   fi
 
-    echo "${path}" | grep ':' >/dev/null 2>&1
-    if [ $? -eq 0 ]; then # SSH
+    if echo "${path}" | grep ':' >/dev/null 2>&1; then # SSH
       if [ ! "${privkey}" = "" ]; then
         mkdir -p "${HOME}/.ssh" || exit 1
         echo "${privkey}" >"${HOME}/.ssh/id_rsa" || exit 1
         chmod 600 "${HOME}/.ssh/id_rsa" || exit 1
       fi
-      echo "${path}" | grep '@' >/dev/null 2>&1
-      if [ $? -ne 0 ] && ! [ "${username}" = "" ]; then
+      if ! echo "${path}" | grep '@' >/dev/null 2>&1 && ! [ "${username}" = "" ]; then
         path="${username}@${path}"
       fi
       log "Mounting ${path} to ${mountpoint} using sshfs."
@@ -515,8 +503,7 @@ ${mount_summary}"
       fi
       continue
     fi
-    echo "${path}" | grep '^\/\/' >/dev/null 2>&1
-    if [ $? -eq 0 ]; then # SMB
+    if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
       # Extract host and share from path (//host/share)
       smb_host=$(echo "${path}" | sed 's|^//\([^/]*\)/.*|\1|')
       smb_share=$(echo "${path}" | sed 's|^//[^/]*/\(.*\)|\1|')
@@ -581,30 +568,26 @@ fi
 jobs_summary=""
 for ((i = 0; i < jobs; i++)); do
 
-  jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${jobid}" = "" ]; then
+  if ! jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${jobid}" = "" ]; then
     error "Missing job ID for job index ${i}."
     continue
   fi
 
-  type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${type}" = "" ]; then
+  if ! type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${type}" = "" ]; then
     error "Missing type for job ID ${jobid}."
     continue
   fi
   
   script="dump_${type}.sh"
 
-  crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g')
-  if [ $? -ne 0 ] || [ "${crontab}" = "" ]; then
+  if ! crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${crontab}" = "" ]; then
     error "Missing crontab for job ID ${jobid}."
     continue
   fi
 
   jobdebug=$(jq -r ".jobs[${i}].debug" "${CONFIGFILE}")
 
-  echo "${script}" | grep '^\/' >/dev/null 2>&1
-  if [ $? -eq 0 ]; then
+  if echo "${script}" | grep '^\/' >/dev/null 2>&1; then
     scriptfile="${script}"
   else
     scriptfile=$(which "${script}" 2>/dev/null)
@@ -788,17 +771,15 @@ while true; do
   for ((i = 0; i < jobs; i++)); do
     
     jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "${jobid}" = "" ]; then
+    if [ "${jobid}" = "" ]; then
       continue
     fi
     
-    type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "${type}" = "" ]; then
+    if ! type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${type}" = "" ]; then
       continue
     fi
     
-    crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g')
-    if [ $? -ne 0 ] || [ "${crontab}" = "" ]; then
+    if ! crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${crontab}" = "" ]; then
       continue
     fi
     
@@ -825,8 +806,7 @@ while true; do
         LOCKFILE=$(echo "${LOCKFILE}" | sed 's/\.//g')
         
         # Check if already running
-        lockfile -r 0 "${LOCKFILE}" >/dev/null 2>&1
-        if [ $? -ne 0 ]; then
+        if ! lockfile -r 0 "${LOCKFILE}" >/dev/null 2>&1; then
           log "Job ${jobid} already running, skipping."
         else
           # Create log file
