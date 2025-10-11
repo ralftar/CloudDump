@@ -18,29 +18,35 @@ jobs:
           fetch-depth: 0
       
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y wget
+        run: sudo apt-get update && sudo apt-get install -y wget jq
       
       - name: Check for AzCopy updates
         id: check
         run: |
-          cd tools
-          chmod +x azcopy-update.sh
-          ./azcopy-update.sh
+          # Fetch latest release info from GitHub API
+          latest_version=$(curl -s https://api.github.com/repos/Azure/azure-storage-azcopy/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          latest_date=$(date +%Y%m%d)
           
-          # Check if there are changes
-          if git diff --quiet install_azcopy; then
+          # Get current version from install script
+          current_version=$(grep '^azcopy_version=' install_azcopy.sh | sed -n 's/^azcopy_version="\(.*\)"$/\1/p')
+          
+          echo "Current version: ${current_version}"
+          echo "Latest version: ${latest_version}"
+          
+          # Check if update is needed
+          if [ "${current_version}" = "${latest_version}" ]; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "No updates needed"
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
             
-            # Extract version info for PR
-            azcopy_version=$(grep '^azcopy_version=' ../install_azcopy | sed -n 's/^azcopy_version="\(.*\)"$/\1/p')
-            azcopy_date=$(grep '^azcopy_date=' ../install_azcopy | sed -n 's/^azcopy_date="\(.*\)"$/\1/p')
+            # Update the install script
+            sed -i "s/^azcopy_version=\".*\"$/azcopy_version=\"${latest_version}\"/" install_azcopy.sh
+            sed -i "s/^azcopy_date=\".*\"$/azcopy_date=\"${latest_date}\"/" install_azcopy.sh
             
-            echo "version=${azcopy_version}" >> $GITHUB_OUTPUT
-            echo "date=${azcopy_date}" >> $GITHUB_OUTPUT
-            echo "Update available: ${azcopy_version} (${azcopy_date})"
+            echo "version=${latest_version}" >> $GITHUB_OUTPUT
+            echo "date=${latest_date}" >> $GITHUB_OUTPUT
+            echo "Update available: ${latest_version} (${latest_date})"
           fi
       
       - name: Close outdated azcopy PRs
