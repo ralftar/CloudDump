@@ -69,6 +69,10 @@ redact_sensitive() {
 # Signal handler for graceful shutdown
 shutdown_handler() {
   log "Received shutdown signal, exiting gracefully..."
+  # Clean up sensitive files
+  rm -f "${HOME}/.ssh/id_rsa" 2>/dev/null
+  rm -f /dev/shm/.smbcredentials 2>/dev/null
+  rm -f /dev/shm/smbnetfs.conf 2>/dev/null
   exit 0
 }
 
@@ -400,6 +404,38 @@ if [ ! -r "${CONFIGFILE}" ]; then
   exit 1
 fi
 
+# Validate configuration against JSON schema
+SCHEMAFILE="/usr/local/bin/config.schema.json"
+if [ -f "${SCHEMAFILE}" ]; then
+  log "Validating configuration against schema..."
+  if ! jq -e --argfile schema "${SCHEMAFILE}" --argfile config "${CONFIGFILE}" \
+    '$schema | . as $s | $config | . as $c | $s | 
+    # Check required settings
+    if .required then
+      .required[] as $r | 
+      if ($c.settings | has($r)) then empty else error("Missing required setting: \($r)") end
+    else empty end,
+    # Check required jobs
+    if ($c.jobs | length == 0) then error("At least one job is required") else empty end,
+    # Check job types
+    $c.jobs[] | 
+    if (.type | inside(["s3bucket", "azstorage", "pgsql"]) | not) then 
+      error("Invalid job type: \(.type)") 
+    else empty end,
+    # Check crontab format
+    $c.jobs[] | 
+    if (.crontab | test("^[0-9*/,-]+ +[0-9*/,-]+ +[0-9*/,-]+ +[0-9*/,-]+ +[0-9*/,-]+$") | not) then 
+      error("Invalid crontab format for job \(.id): \(.crontab)")
+    else empty end' >/dev/null 2>&1; then
+    log "Configuration validation passed."
+  else
+    error "Configuration validation failed. Please check your config.json against config.schema.json"
+    exit 1
+  fi
+else
+  log "Schema file not found, skipping validation (${SCHEMAFILE})"
+fi
+
 HOST=$(jq -r '.settings.HOST' "${CONFIGFILE}" | sed 's/^null$//g')
 DEBUG=$(jq -r '.settings.DEBUG' "${CONFIGFILE}")
 
@@ -425,8 +461,11 @@ postconf smtp_tls_security_level=encrypt || exit 1
 postconf smtp_sasl_security_options=noanonymous || exit 1
 
 touch /etc/postfix/relay || exit 1
+chmod 600 /etc/postfix/relay || exit 1
 touch /etc/postfix/sasl_passwd || exit 1
+chmod 600 /etc/postfix/sasl_passwd || exit 1
 touch /etc/Muttrc || exit 1
+chmod 600 /etc/Muttrc || exit 1
 
 if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
   log "SMTP server: $SMTPSERVER"
@@ -530,6 +569,7 @@ ${mount_summary}"
           
           # Create config file
           echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
+          chmod 600 /dev/shm/smbnetfs.conf || exit 1
           smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other || exit 1
         else
           # Mount without credentials for guest access

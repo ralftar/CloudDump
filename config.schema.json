@@ -1,0 +1,297 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ralftar/CloudDump/config.schema.json",
+  "title": "CloudDump Configuration",
+  "description": "Configuration schema for CloudDump backup orchestration tool",
+  "type": "object",
+  "required": ["settings", "jobs"],
+  "properties": {
+    "settings": {
+      "type": "object",
+      "required": ["HOST", "SMTPSERVER", "SMTPPORT", "MAILFROM", "MAILTO"],
+      "properties": {
+        "HOST": {
+          "type": "string",
+          "description": "Hostname identifier for this CloudDump instance",
+          "minLength": 1
+        },
+        "SMTPSERVER": {
+          "type": "string",
+          "description": "SMTP server hostname for sending email reports",
+          "minLength": 1
+        },
+        "SMTPPORT": {
+          "type": "string",
+          "description": "SMTP server port (typically 465 for SSL/TLS or 587 for STARTTLS)",
+          "pattern": "^[0-9]+$"
+        },
+        "SMTPUSER": {
+          "type": "string",
+          "description": "SMTP authentication username"
+        },
+        "SMTPPASS": {
+          "type": "string",
+          "description": "SMTP authentication password"
+        },
+        "MAILFROM": {
+          "type": "string",
+          "description": "Email address to send notifications from",
+          "format": "email"
+        },
+        "MAILTO": {
+          "type": "string",
+          "description": "Email address to send notifications to",
+          "format": "email"
+        },
+        "DEBUG": {
+          "type": "boolean",
+          "description": "Enable debug mode (set -x)",
+          "default": false
+        },
+        "mount": {
+          "type": "array",
+          "description": "Remote filesystems to mount (SSH or SMB)",
+          "items": {
+            "type": "object",
+            "required": ["path", "mountpoint"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Remote path - SSH format: user@host:/path, SMB format: //host/share",
+                "minLength": 1
+              },
+              "mountpoint": {
+                "type": "string",
+                "description": "Local mount point directory",
+                "minLength": 1
+              },
+              "username": {
+                "type": "string",
+                "description": "Username for authentication (optional for SSH if in path)"
+              },
+              "password": {
+                "type": "string",
+                "description": "Password for SMB authentication"
+              },
+              "privkey": {
+                "type": "string",
+                "description": "SSH private key content"
+              },
+              "port": {
+                "type": ["string", "integer"],
+                "description": "Port number (optional, defaults to 22 for SSH)"
+              }
+            }
+          }
+        }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "description": "Backup jobs to execute",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "id", "crontab"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Job type",
+            "enum": ["s3bucket", "azstorage", "pgsql"]
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique job identifier",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "crontab": {
+            "type": "string",
+            "description": "Cron schedule pattern (minute hour day month dow)",
+            "pattern": "^[0-9*/,-]+ +[0-9*/,-]+ +[0-9*/,-]+ +[0-9*/,-]+ +[0-9*/,-]+$"
+          },
+          "debug": {
+            "type": "boolean",
+            "description": "Enable debug mode for this job",
+            "default": false
+          },
+          "buckets": {
+            "type": "array",
+            "description": "S3 buckets to backup (for s3bucket type)",
+            "items": {
+              "type": "object",
+              "required": ["source", "destination"],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "S3 source path (s3://bucket/path)",
+                  "pattern": "^s3://.+"
+                },
+                "destination": {
+                  "type": "string",
+                  "description": "Local destination path",
+                  "minLength": 1
+                },
+                "delete_destination": {
+                  "type": "boolean",
+                  "description": "Delete files in destination that don't exist in source (mirror mode)",
+                  "default": true
+                },
+                "aws_access_key_id": {
+                  "type": "string",
+                  "description": "AWS access key ID"
+                },
+                "aws_secret_access_key": {
+                  "type": "string",
+                  "description": "AWS secret access key"
+                },
+                "aws_region": {
+                  "type": "string",
+                  "description": "AWS region",
+                  "default": "us-east-1"
+                },
+                "endpoint_url": {
+                  "type": "string",
+                  "description": "Custom S3 endpoint URL (for MinIO or S3-compatible storage)"
+                }
+              }
+            }
+          },
+          "blobstorages": {
+            "type": "array",
+            "description": "Azure blob storages to backup (for azstorage type)",
+            "items": {
+              "type": "object",
+              "required": ["source", "destination"],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "Azure blob storage URL with SAS token",
+                  "pattern": "^https://.+"
+                },
+                "destination": {
+                  "type": "string",
+                  "description": "Local destination path",
+                  "minLength": 1
+                },
+                "delete_destination": {
+                  "type": "boolean",
+                  "description": "Delete files in destination that don't exist in source (mirror mode)",
+                  "default": true
+                }
+              }
+            }
+          },
+          "servers": {
+            "type": "array",
+            "description": "PostgreSQL servers to backup (for pgsql type)",
+            "items": {
+              "type": "object",
+              "required": ["host", "port", "user", "pass", "backuppath"],
+              "properties": {
+                "host": {
+                  "type": "string",
+                  "description": "PostgreSQL server hostname",
+                  "minLength": 1
+                },
+                "port": {
+                  "type": "integer",
+                  "description": "PostgreSQL server port",
+                  "default": 5432,
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "user": {
+                  "type": "string",
+                  "description": "PostgreSQL username",
+                  "minLength": 1
+                },
+                "pass": {
+                  "type": "string",
+                  "description": "PostgreSQL password",
+                  "minLength": 1
+                },
+                "databases": {
+                  "type": "array",
+                  "description": "Specific databases to backup with table filters",
+                  "items": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^[a-zA-Z0-9_]+$": {
+                        "type": "object",
+                        "properties": {
+                          "tables_included": {
+                            "type": "array",
+                            "description": "Only backup these tables (empty = all tables)",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "tables_excluded": {
+                            "type": "array",
+                            "description": "Exclude these tables from backup",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "databases_excluded": {
+                  "type": "array",
+                  "description": "Databases to exclude from backup (if databases not specified)",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "backuppath": {
+                  "type": "string",
+                  "description": "Local path for database backups",
+                  "minLength": 1
+                },
+                "filenamedate": {
+                  "type": "boolean",
+                  "description": "Include timestamp in backup filename",
+                  "default": false
+                },
+                "compress": {
+                  "type": "boolean",
+                  "description": "Compress backup files with bzip2",
+                  "default": true
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "type": { "const": "s3bucket" } }
+            },
+            "then": {
+              "required": ["buckets"]
+            }
+          },
+          {
+            "if": {
+              "properties": { "type": { "const": "azstorage" } }
+            },
+            "then": {
+              "required": ["blobstorages"]
+            }
+          },
+          {
+            "if": {
+              "properties": { "type": { "const": "pgsql" } }
+            },
+            "then": {
+              "required": ["servers"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
