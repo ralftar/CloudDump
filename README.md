@@ -145,6 +145,103 @@ CloudDump runs as a single-process Docker container with a main loop that:
 
 This architecture ensures predictable resource usage and simplifies deployment and monitoring in containerized environments.
 
+## Troubleshooting
+
+### Container Won't Start
+
+**Check configuration file syntax:**
+```bash
+docker logs clouddump
+```
+
+Common issues:
+- Invalid JSON in config.json (use a JSON validator)
+- Missing required fields (HOST, SMTPSERVER, etc.)
+- Duplicate job IDs
+- Invalid cron patterns (must have exactly 5 fields)
+
+**Validate job configurations:**
+The container performs comprehensive validation at startup:
+- Job IDs must be unique
+- Job types must be 's3bucket', 'azstorage', or 'pgsql'
+- Required tools (aws, azcopy, pg_dump) must be available for each job type
+- Cron schedules must be valid 5-field patterns
+
+### Mount Failures
+
+**SSH mounts:**
+- Verify SSH connectivity: `ssh user@host`
+- Check private key format (should be valid RSA/ED25519 key)
+- Ensure StrictHostKeyChecking is appropriate for your environment
+
+**SMB mounts:**
+- Verify path format: `//hostname/sharename`
+- Check credentials (username/password)
+- Ensure network connectivity to SMB server
+
+### Jobs Not Running
+
+**Check cron schedule:**
+- Verify cron pattern syntax (minute hour day month day-of-week)
+- Remember: jobs run sequentially, so long-running jobs may delay others
+- Check logs for "catch-up execution" messages
+
+**Disk space issues:**
+- Container checks for minimum 100MB free space before operations
+- Monitor disk usage: `docker exec clouddump df -h`
+
+### Email Not Sending
+
+**Verify SMTP configuration:**
+- Check SMTP server, port, and credentials in config.json
+- Test from container: `docker exec clouddump mutt -s "Test" email@example.com < /dev/null`
+- Check postfix logs: `docker exec clouddump tail /var/log/postfix.log`
+
+**Common SMTP issues:**
+- Port 465 requires TLS/SSL
+- Some providers require app-specific passwords
+- Check firewall rules for outbound SMTP
+
+### Performance Issues
+
+**Large data transfers:**
+- Jobs run sequentially to avoid resource contention
+- Consider scheduling large jobs during off-peak hours
+- Monitor with: `docker stats clouddump`
+
+**Slow PostgreSQL dumps:**
+- Consider excluding large tables with `tables_excluded`
+- Use compression (`compress: true`) to reduce disk I/O
+- Verify network bandwidth to database server
+
+### Debugging
+
+**Enable debug mode:**
+```json
+{
+  "settings": {
+    "DEBUG": true
+  },
+  "jobs": [
+    {
+      "debug": true
+    }
+  ]
+}
+```
+
+**View detailed logs:**
+```bash
+# Follow logs in real-time
+docker logs -f clouddump
+
+# View last 100 lines
+docker logs --tail 100 clouddump
+
+# Check for errors only
+docker logs clouddump 2>&1 | grep ERROR
+```
+
 ## License
 
 This tool is released under the MIT License.

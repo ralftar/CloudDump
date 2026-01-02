@@ -181,32 +181,41 @@ fi
 
 log_info "Syncing source ${SOURCE} to destination ${DESTINATION}..."
 
-aws_cmd="aws s3 sync"
+sync_start_time=$(date +%s)
+
+# Build aws command with proper arguments (avoiding eval for security)
+aws_args=("s3" "sync")
 
 # Add endpoint URL for MinIO compatibility
 if [ ! "${ENDPOINT_URL}" = "" ]; then
-  aws_cmd="${aws_cmd} --endpoint-url \"${ENDPOINT_URL}\""
+  aws_args+=("--endpoint-url" "${ENDPOINT_URL}")
 fi
 
 # Add delete flag if needed
 if [ "${DELETE_DESTINATION}" = "true" ]; then
-  aws_cmd="${aws_cmd} --delete"
+  aws_args+=("--delete")
 fi
 
 # Add source and destination
-aws_cmd="${aws_cmd} \"${SOURCE}\" \"${DESTINATION}\""
+aws_args+=("${SOURCE}" "${DESTINATION}")
 
-# Execute the command
-eval "${aws_cmd}"
-result=$?
+# Execute the command with proper error handling
+result=0
+aws "${aws_args[@]}" || result=$?
 
-# Unset AWS credentials
+# Unset AWS credentials (always cleanup, even on error)
 unset AWS_ACCESS_KEY_ID
 unset AWS_SECRET_ACCESS_KEY
 unset AWS_DEFAULT_REGION
 
+# Calculate and log statistics
+sync_end_time=$(date +%s)
+sync_duration=$((sync_end_time - sync_start_time))
+
+log_info "Sync operation completed in ${sync_duration} seconds"
+
 if [ ${result} -ne 0 ]; then
-  log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed."
+  log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed with exit code ${result}."
   exit ${result}
 fi
 
