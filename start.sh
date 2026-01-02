@@ -111,8 +111,10 @@ converts_json_array_to_string() {
 removes_sensitive_data() {
   local text_to_redact="$1"
   # Redact common sensitive field patterns (password, key, token, secret)
+  # shellcheck disable=SC2001 # Complex regex with case-insensitive flag and alternation requires sed
   text_to_redact=$(echo "${text_to_redact}" | sed 's/\(password\|pass\|key\|token\|secret\)[[:space:]]*[:=][[:space:]]*[^[:space:]]*/\1: [REDACTED]/gi')
   # Redact Azure SAS token parameters from URLs
+  # shellcheck disable=SC2001 # Complex URL parameter regex with alternation requires sed
   text_to_redact=$(echo "${text_to_redact}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\)=[^&?]*/\?[REDACTED]/g')
   echo "${text_to_redact}"
 }
@@ -612,8 +614,12 @@ ${mount_summary}"
     fi
     if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
       # Extract host and share from path (//host/share)
-      smb_host=$(echo "${path}" | sed 's|^//\([^/]*\)/.*|\1|')
-      smb_share=$(echo "${path}" | sed 's|^//[^/]*/\(.*\)|\1|')
+      # Remove leading //
+      path_without_slashes="${path#//}"
+      # Extract host (everything before the first /)
+      smb_host="${path_without_slashes%%/*}"
+      # Extract share (everything after the first /)
+      smb_share="${path_without_slashes#*/}"
       
       log_info "Mounting ${path} to ${mountpoint} using smbnetfs."
       
@@ -829,7 +835,7 @@ matches_cron_pattern() {
     # Step values: */N means "every N units" (e.g., */5 for every 5 minutes)
     if echo "${pattern_field}" | grep -q '^\*/[0-9]\+$'; then
       local step_value
-      step_value=$(echo "${pattern_field}" | sed 's|^\*/||')
+      step_value="${pattern_field#\*/}"
       [ $((time_value % step_value)) -eq 0 ] && return 0
       return 1
     fi
