@@ -146,12 +146,28 @@ validates_safe_string() {
 #
 removes_sensitive_data() {
   local text_to_redact="$1"
-  # Redact common sensitive field patterns (password, key, token, secret)
+  
+  # Redact common sensitive field patterns (password, key, token, secret, credential)
+  # Handles formats: "field: value", "field=value", "field = value", "field : value"
   # shellcheck disable=SC2001 # Complex regex with case-insensitive flag and alternation requires sed
-  text_to_redact=$(echo "${text_to_redact}" | sed 's/\(password\|pass\|key\|token\|secret\)[[:space:]]*[:=][[:space:]]*[^[:space:]]*/\1: [REDACTED]/gi')
-  # Redact Azure SAS token parameters from URLs
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/\(password\|pass\|passwd\|pwd\|key\|token\|secret\|credential\|cred\)[[:space:]]*[:=][[:space:]]*[^[:space:],]*/\1: [REDACTED]/gi')
+  
+  # Redact AWS-style credentials (looking for patterns like AKIA...)
+  # shellcheck disable=SC2001 # Complex AWS key pattern requires sed
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/AKIA[A-Z0-9]\{16\}/[REDACTED_AWS_KEY]/g')
+  
+  # Redact long base64-like strings that might be secrets (40+ characters of base64)
+  # shellcheck disable=SC2001 # Complex base64 pattern requires sed
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/[A-Za-z0-9+/]\{40,\}=*/[REDACTED_LONG_STRING]/g')
+  
+  # Redact Azure SAS token parameters from URLs (more comprehensive)
   # shellcheck disable=SC2001 # Complex URL parameter regex with alternation requires sed
-  text_to_redact=$(echo "${text_to_redact}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\)=[^&?]*/\?[REDACTED]/g')
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\|sr\|sv\)=[^&?]*/\?[REDACTED_SAS]/g')
+  
+  # Redact connection strings (format: key1=value1;key2=value2)
+  # shellcheck disable=SC2001 # Complex connection string pattern with case-insensitive flag requires sed
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/\(AccountKey\|SharedAccessKey\|Password\)[[:space:]]*=[^;]*/\1=[REDACTED]/gi')
+  
   echo "${text_to_redact}"
 }
 
@@ -925,6 +941,36 @@ for ((i = 0; i < jobs; i++)); do
     validation_errors=$((validation_errors + 1))
     continue
   fi
+  
+  # Validate that required tools are available for job type
+  case "${type}" in
+    s3bucket)
+      if ! which aws >/dev/null 2>&1; then
+        log_error "Job ${jobid} requires 'aws' command but it's not installed."
+        validation_errors=$((validation_errors + 1))
+        continue
+      fi
+      ;;
+    azstorage)
+      if ! which azcopy >/dev/null 2>&1; then
+        log_error "Job ${jobid} requires 'azcopy' command but it's not installed."
+        validation_errors=$((validation_errors + 1))
+        continue
+      fi
+      ;;
+    pgsql)
+      if ! which pg_dump >/dev/null 2>&1; then
+        log_error "Job ${jobid} requires 'pg_dump' command but it's not installed."
+        validation_errors=$((validation_errors + 1))
+        continue
+      fi
+      if ! which psql >/dev/null 2>&1; then
+        log_error "Job ${jobid} requires 'psql' command but it's not installed."
+        validation_errors=$((validation_errors + 1))
+        continue
+      fi
+      ;;
+  esac
 
   job_summary="ID: ${jobid}
 Script: ${script}
