@@ -111,10 +111,10 @@ converts_json_array_to_string() {
 removes_sensitive_data() {
   local text_to_redact="$1"
   # Redact common sensitive field patterns (password, key, token, secret)
-  # shellcheck disable=SC2001
+  # shellcheck disable=SC2001 # Complex regex with case-insensitive flag and alternation requires sed
   text_to_redact=$(echo "${text_to_redact}" | sed 's/\(password\|pass\|key\|token\|secret\)[[:space:]]*[:=][[:space:]]*[^[:space:]]*/\1: [REDACTED]/gi')
   # Redact Azure SAS token parameters from URLs
-  # shellcheck disable=SC2001
+  # shellcheck disable=SC2001 # Complex URL parameter regex with alternation requires sed
   text_to_redact=$(echo "${text_to_redact}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\)=[^&?]*/\?[REDACTED]/g')
   echo "${text_to_redact}"
 }
