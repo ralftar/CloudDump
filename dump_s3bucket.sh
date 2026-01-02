@@ -193,6 +193,10 @@ fi
 
 log_info "Syncing source ${SOURCE} to destination ${DESTINATION}..."
 
+# Capture start time and initial file count for statistics
+sync_start_time=$(date +%s)
+initial_file_count=$(find "${DESTINATION}" -type f 2>/dev/null | wc -l || echo "0")
+
 # Build aws command with proper arguments (avoiding eval for security)
 aws_args=("s3" "sync")
 
@@ -217,6 +221,14 @@ aws "${aws_args[@]}" || result=$?
 unset AWS_ACCESS_KEY_ID
 unset AWS_SECRET_ACCESS_KEY
 unset AWS_DEFAULT_REGION
+
+# Calculate and log statistics
+sync_end_time=$(date +%s)
+sync_duration=$((sync_end_time - sync_start_time))
+final_file_count=$(find "${DESTINATION}" -type f 2>/dev/null | wc -l || echo "0")
+
+log_info "Sync operation completed in ${sync_duration} seconds"
+log_info "Files in destination: ${final_file_count} (was ${initial_file_count})"
 
 if [ ${result} -ne 0 ]; then
   log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed with exit code ${result}."

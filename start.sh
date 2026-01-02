@@ -374,6 +374,268 @@ retrieves_job_configuration_by_id() {
 }
 
 
+# Configures and starts SMTP/mail services
+#
+# Sets up Postfix and Mutt for sending email notifications. Configures
+# SMTP server settings, credentials, and TLS options from the configuration file.
+#
+# Global Variables Used:
+#   CONFIGFILE - Path to JSON configuration file
+#   SMTPSERVER, SMTPPORT, SMTPUSER, SMTPPASS - Set from config
+#   MAILFROM, MAILTO - Set from config
+#
+# Returns:
+#   0 on success, exits with error code 1 on failure
+#
+configures_email_services() {
+  log_info "Configuring email services..."
+  
+  SMTPSERVER=$(jq -r '.settings.SMTPSERVER' "${CONFIGFILE}" | sed 's/^null$//g')
+  SMTPPORT=$(jq -r '.settings.SMTPPORT' "${CONFIGFILE}" | sed 's/^null$//g')
+  SMTPUSER=$(jq -r '.settings.SMTPUSER' "${CONFIGFILE}" | sed 's/^null$//g')
+  SMTPPASS=$(jq -r '.settings.SMTPPASS' "${CONFIGFILE}" | sed 's/^null$//g')
+  MAILFROM=$(jq -r '.settings.MAILFROM' "${CONFIGFILE}" | sed 's/^null$//g')
+  MAILTO=$(jq -r '.settings.MAILTO' "${CONFIGFILE}" | sed 's/^null$//g')
+  
+  postconf maillog_file=/var/log/postfix.log || exit 1
+  postconf inet_interfaces=127.0.0.1 || exit 1
+  postconf relayhost="[${SMTPSERVER}]:${SMTPPORT}" || exit 1
+  postconf smtp_sasl_auth_enable=yes || exit 1
+  postconf smtp_sasl_password_maps=lmdb:/etc/postfix/sasl_passwd || exit 1
+  postconf smtp_tls_wrappermode=yes || exit 1
+  postconf smtp_tls_security_level=encrypt || exit 1
+  postconf smtp_sasl_security_options=noanonymous || exit 1
+  
+  touch /etc/postfix/relay || exit 1
+  chmod 600 /etc/postfix/relay || exit 1
+  touch /etc/postfix/sasl_passwd || exit 1
+  chmod 600 /etc/postfix/sasl_passwd || exit 1
+  touch /etc/Muttrc || exit 1
+  
+  if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
+    log_info "SMTP server: $SMTPSERVER"
+    log_info "SMTP port: $SMTPPORT"
+    log_info "SMTP username: $SMTPUSER"
+    if [ "$SMTPUSER" = "" ] && [ "$SMTPPASS" = "" ]; then
+      SMTPURL="smtps://${SMTPSERVER}:${SMTPPORT}"
+    else
+      SMTPURL="smtps://${SMTPUSER}:${SMTPPASS}@${SMTPSERVER}:${SMTPPORT}"
+      if ! grep "^\[${SMTPSERVER}\]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}$" /etc/postfix/sasl_passwd >/dev/null; then
+        echo "[${SMTPSERVER}]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}" >> /etc/postfix/sasl_passwd || exit 1
+      fi
+    fi
+    if ! grep "^set smtp_url=\"${SMTPURL}\"$" /etc/Muttrc >/dev/null; then
+      echo "set smtp_url=\"${SMTPURL}\"" >> /etc/Muttrc || exit 1
+    fi
+  fi
+  
+  postmap /etc/postfix/relay || exit 1
+  postmap lmdb:/etc/postfix/sasl_passwd || exit 1
+  
+  # Start postfix if not already running
+  if ! pgrep -x master >/dev/null 2>&1; then
+    /usr/sbin/postfix start || exit 1
+  else
+    log_info "Postfix already running, reloading configuration..."
+    /usr/sbin/postfix reload || exit 1
+  fi
+  
+  log_info "Email services configured successfully."
+}
+
+
+# Mounts remote filesystems based on configuration
+#
+# Processes mount configurations and sets up SSH (sshfs) or SMB (smbnetfs) mounts.
+# Handles authentication via passwords or private keys. Creates necessary directories
+# and validates mount success.
+#
+# Global Variables Used:
+#   CONFIGFILE - Path to JSON configuration file
+#   mounts_summary - Set with summary of mounted paths
+#
+# Returns:
+#   0 on success, exits with error code 1 on failure
+#
+configures_mounts() {
+  log_info "Configuring mounts..."
+  
+  local mounts
+  mounts=$(jq -r ".settings.mount | length" "${CONFIGFILE}")
+  
+  if [ "${mounts}" -gt 0 ]; then
+    for ((i = 0; i < mounts; i++)); do
+      if ! path=$(jq -r ".settings.mount[${i}].path" "${CONFIGFILE}" | sed 's/^null$//g' | sed 's/\\/\//g') || [ "${path}" = "" ]; then
+        continue
+      fi
+      if ! mountpoint=$(jq -r ".settings.mount[${i}].mountpoint" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${mountpoint}" = "" ]; then
+        continue
+      fi
+      username=$(jq -r ".settings.mount[${i}].username" "${CONFIGFILE}" | sed 's/^null$//g')
+      privkey=$(jq -r ".settings.mount[${i}].privkey" "${CONFIGFILE}" | sed 's/^null$//g')
+      password=$(jq -r ".settings.mount[${i}].password" "${CONFIGFILE}" | sed 's/^null$//g')
+      port=$(jq -r ".settings.mount[${i}].port" "${CONFIGFILE}" | sed 's/^null$//g')
+
+      mount_summary="
+Path: ${path}
+Mountpoint ${mountpoint}
+"
+
+    if [ "${mounts_summary}" = "" ]; then
+      mounts_summary="${mount_summary}"
+    else
+      mounts_summary="${mounts_summary}
+${mount_summary}"
+    fi
+
+      if echo "${path}" | grep ':' >/dev/null 2>&1; then # SSH
+        if [ ! "${privkey}" = "" ]; then
+          mkdir -p "${HOME}/.ssh" || exit 1
+          # Add cleanup trap
+          trap 'rm -f "${HOME}/.ssh/id_rsa"' EXIT
+          echo "${privkey}" >"${HOME}/.ssh/id_rsa" || exit 1
+          chmod 600 "${HOME}/.ssh/id_rsa" || exit 1
+        fi
+        if ! echo "${path}" | grep '@' >/dev/null 2>&1 && ! [ "${username}" = "" ]; then
+          path="${username}@${path}"
+        fi
+        log_info "Mounting ${path} to ${mountpoint} using sshfs."
+        mkdir -p "${mountpoint}" || exit 1
+        if [ "${port}" = "" ]; then
+          if ! sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}"; then
+            log_error "Failed to mount SSH path ${path} to ${mountpoint}"
+            exit 1
+          fi
+        else
+          if ! sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}"; then
+            log_error "Failed to mount SSH path ${path} to ${mountpoint} on port ${port}"
+            exit 1
+          fi
+        fi
+        log_info "Successfully mounted ${path} to ${mountpoint}"
+        continue
+      fi
+      if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
+        # Extract host and share from path (//host/share)
+        # Remove leading //
+        path_without_slashes="${path#//}"
+        # Extract host (everything before the first /)
+        smb_host="${path_without_slashes%%/*}"
+        # Extract share (everything after the first /)
+        smb_share="${path_without_slashes#*/}"
+        
+        log_info "Mounting ${path} to ${mountpoint} using smbnetfs."
+        
+        # Use a single shared smbnetfs root for all mounts
+        smbnetfs_root="/tmp/smbnetfs"
+        
+        # Mount smbnetfs if not already mounted
+        if [ ! -d "${smbnetfs_root}/${smb_host}" ]; then
+          mkdir -p "${smbnetfs_root}" || exit 1
+          
+          # Create credentials file if username is provided
+          if [ ! "${username}" = "" ]; then
+            mkdir -p /dev/shm || exit 1
+            smbcredentials="/dev/shm/.smbcredentials"
+            # Add cleanup trap
+            trap 'rm -f "${smbcredentials}" /dev/shm/smbnetfs.conf' EXIT
+            if [ "${password}" = "" ]; then
+              echo -e "${username}\n" > "${smbcredentials}"
+            else
+              echo -e "${username}\n${password}" > "${smbcredentials}"
+            fi
+            chmod 600 "${smbcredentials}" || exit 1
+            
+            # Create config file
+            echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
+            if ! smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other; then
+              log_error "Failed to mount smbnetfs at ${smbnetfs_root} with credentials"
+              exit 1
+            fi
+          else
+            # Mount without credentials for guest access
+            if ! smbnetfs "${smbnetfs_root}" -o allow_other; then
+              log_error "Failed to mount smbnetfs at ${smbnetfs_root} for guest access"
+              exit 1
+            fi
+          fi
+          
+          sleep 2
+        fi
+        
+        # Verify the share is accessible before creating symlink
+        if [ ! -d "${smbnetfs_root}/${smb_host}/${smb_share}" ]; then
+          log_error "SMB share ${path} is not accessible at ${smbnetfs_root}/${smb_host}/${smb_share}"
+          exit 1
+        fi
+        
+        # Create a symlink to the actual share path
+        if ! ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}"; then
+          log_error "Failed to create symlink from ${smbnetfs_root}/${smb_host}/${smb_share} to ${mountpoint}"
+          exit 1
+        fi
+        
+        log_info "Successfully mounted ${path} to ${mountpoint}"
+        continue
+      fi
+      log_error "Invalid path ${path} for mountpoint ${mountpoint}."
+      log_error "Syntax is \"user@host:/path\" for SSH, or \"//host/path\" for SMB."
+      exit 1
+    done
+  fi
+  
+  log_info "Mounts configured successfully."
+}
+
+
+# Retrieves and formats job configuration by job identifier
+#
+# Searches for a job by its unique ID in the configuration file and returns
+# its formatted configuration for use in email reports.
+#
+# Arguments:
+#   $1 - job_identifier: The unique ID of the job to retrieve
+#
+# Returns:
+#   Formatted job configuration via stdout, or empty string if not found
+#   Exit code 0 on success, 1 if job not found
+#
+# Example:
+#   config=$(retrieves_job_configuration_by_id "backup1")
+#
+retrieves_job_configuration_by_id() {
+  local job_identifier="$1"
+  
+  # Determine total number of jobs in configuration
+  local total_jobs job_array_index
+  total_jobs=$(jq -r ".jobs | length" "${CONFIGFILE}")
+  if [ "${total_jobs}" = "" ] || [ -z "${total_jobs}" ] || ! [ "${total_jobs}" -eq "${total_jobs}" ] 2>/dev/null; then
+    echo ""
+    return 1
+  fi
+
+  job_array_index=
+  for ((i = 0; i < total_jobs; i++)); do
+    local current_job_id
+    if ! current_job_id=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${current_job_id}" = "" ]; then
+      continue
+    fi
+    if [ "${current_job_id}" = "${job_identifier}" ]; then
+      job_array_index="${i}"
+      break
+    fi
+  done
+
+  if [ "${job_array_index}" = "" ]; then
+    echo ""
+    return 1
+  fi
+
+  # Format and return the job's configuration
+  formats_job_configuration_for_display "${job_array_index}"
+}
+
+
 # Helper function to execute s3bucket job
 execute_s3bucket_job() {
   local job_idx="$1"
@@ -561,180 +823,11 @@ log_info "Host: $HOST"
 
 
 # Setup postfix and mutt
-SMTPSERVER=$(jq -r '.settings.SMTPSERVER' "${CONFIGFILE}" | sed 's/^null$//g')
-SMTPPORT=$(jq -r '.settings.SMTPPORT' "${CONFIGFILE}" | sed 's/^null$//g')
-SMTPUSER=$(jq -r '.settings.SMTPUSER' "${CONFIGFILE}" | sed 's/^null$//g')
-SMTPPASS=$(jq -r '.settings.SMTPPASS' "${CONFIGFILE}" | sed 's/^null$//g')
-MAILFROM=$(jq -r '.settings.MAILFROM' "${CONFIGFILE}" | sed 's/^null$//g')
-MAILTO=$(jq -r '.settings.MAILTO' "${CONFIGFILE}" | sed 's/^null$//g')
-
-postconf maillog_file=/var/log/postfix.log || exit 1
-postconf inet_interfaces=127.0.0.1 || exit 1
-postconf relayhost="[${SMTPSERVER}]:${SMTPPORT}" || exit 1
-postconf smtp_sasl_auth_enable=yes || exit 1
-postconf smtp_sasl_password_maps=lmdb:/etc/postfix/sasl_passwd || exit 1
-postconf smtp_tls_wrappermode=yes || exit 1
-postconf smtp_tls_security_level=encrypt || exit 1
-postconf smtp_sasl_security_options=noanonymous || exit 1
-
-touch /etc/postfix/relay || exit 1
-chmod 600 /etc/postfix/relay || exit 1
-touch /etc/postfix/sasl_passwd || exit 1
-chmod 600 /etc/postfix/sasl_passwd || exit 1
-touch /etc/Muttrc || exit 1
-
-if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
-  log_info "SMTP server: $SMTPSERVER"
-  log_info "SMTP port: $SMTPPORT"
-  log_info "SMTP username: $SMTPUSER"
-  if [ "$SMTPUSER" = "" ] && [ "$SMTPPASS" = "" ]; then
-    SMTPURL="smtps://${SMTPSERVER}:${SMTPPORT}"
-  else
-    SMTPURL="smtps://${SMTPUSER}:${SMTPPASS}@${SMTPSERVER}:${SMTPPORT}"
-    if ! grep "^\[${SMTPSERVER}\]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}$" /etc/postfix/sasl_passwd >/dev/null; then
-      echo "[${SMTPSERVER}]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}" >> /etc/postfix/sasl_passwd || exit 1
-    fi
-  fi
-  if ! grep "^set smtp_url=\"${SMTPURL}\"$" /etc/Muttrc >/dev/null; then
-    echo "set smtp_url=\"${SMTPURL}\"" >> /etc/Muttrc || exit 1
-  fi
-fi
-
-postmap /etc/postfix/relay || exit 1
-postmap lmdb:/etc/postfix/sasl_passwd || exit 1
-
-# Start postfix if not already running
-if ! pgrep -x master >/dev/null 2>&1; then
-  /usr/sbin/postfix start || exit 1
-else
-  log_info "Postfix already running, reloading configuration..."
-  /usr/sbin/postfix reload || exit 1
-fi
+configures_email_services
 
 
 # Mount
-
-mounts=$(jq -r ".settings.mount | length" "${CONFIGFILE}")
-if [ "${mounts}" -gt 0 ]; then
-  for ((i = 0; i < mounts; i++)); do
-    if ! path=$(jq -r ".settings.mount[${i}].path" "${CONFIGFILE}" | sed 's/^null$//g' | sed 's/\\/\//g') || [ "${path}" = "" ]; then
-      continue
-    fi
-    if ! mountpoint=$(jq -r ".settings.mount[${i}].mountpoint" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${mountpoint}" = "" ]; then
-      continue
-    fi
-    username=$(jq -r ".settings.mount[${i}].username" "${CONFIGFILE}" | sed 's/^null$//g')
-    privkey=$(jq -r ".settings.mount[${i}].privkey" "${CONFIGFILE}" | sed 's/^null$//g')
-    password=$(jq -r ".settings.mount[${i}].password" "${CONFIGFILE}" | sed 's/^null$//g')
-    port=$(jq -r ".settings.mount[${i}].port" "${CONFIGFILE}" | sed 's/^null$//g')
-
-    mount_summary="
-Path: ${path}
-Mountpoint ${mountpoint}
-"
-
-  if [ "${mounts_summary}" = "" ]; then
-    mounts_summary="${mount_summary}"
-  else
-    mounts_summary="${mounts_summary}
-${mount_summary}"
-  fi
-
-    if echo "${path}" | grep ':' >/dev/null 2>&1; then # SSH
-      if [ ! "${privkey}" = "" ]; then
-        mkdir -p "${HOME}/.ssh" || exit 1
-        # Add cleanup trap
-        trap 'rm -f "${HOME}/.ssh/id_rsa"' EXIT
-        echo "${privkey}" >"${HOME}/.ssh/id_rsa" || exit 1
-        chmod 600 "${HOME}/.ssh/id_rsa" || exit 1
-      fi
-      if ! echo "${path}" | grep '@' >/dev/null 2>&1 && ! [ "${username}" = "" ]; then
-        path="${username}@${path}"
-      fi
-      log_info "Mounting ${path} to ${mountpoint} using sshfs."
-      mkdir -p "${mountpoint}" || exit 1
-      if [ "${port}" = "" ]; then
-        if ! sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}"; then
-          log_error "Failed to mount SSH path ${path} to ${mountpoint}"
-          exit 1
-        fi
-      else
-        if ! sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}"; then
-          log_error "Failed to mount SSH path ${path} to ${mountpoint} on port ${port}"
-          exit 1
-        fi
-      fi
-      log_info "Successfully mounted ${path} to ${mountpoint}"
-      continue
-    fi
-    if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
-      # Extract host and share from path (//host/share)
-      # Remove leading //
-      path_without_slashes="${path#//}"
-      # Extract host (everything before the first /)
-      smb_host="${path_without_slashes%%/*}"
-      # Extract share (everything after the first /)
-      smb_share="${path_without_slashes#*/}"
-      
-      log_info "Mounting ${path} to ${mountpoint} using smbnetfs."
-      
-      # Use a single shared smbnetfs root for all mounts
-      smbnetfs_root="/tmp/smbnetfs"
-      
-      # Mount smbnetfs if not already mounted
-      if [ ! -d "${smbnetfs_root}/${smb_host}" ]; then
-        mkdir -p "${smbnetfs_root}" || exit 1
-        
-        # Create credentials file if username is provided
-        if [ ! "${username}" = "" ]; then
-          mkdir -p /dev/shm || exit 1
-          smbcredentials="/dev/shm/.smbcredentials"
-          # Add cleanup trap
-          trap 'rm -f "${smbcredentials}" /dev/shm/smbnetfs.conf' EXIT
-          if [ "${password}" = "" ]; then
-            echo -e "${username}\n" > "${smbcredentials}"
-          else
-            echo -e "${username}\n${password}" > "${smbcredentials}"
-          fi
-          chmod 600 "${smbcredentials}" || exit 1
-          
-          # Create config file
-          echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
-          if ! smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other; then
-            log_error "Failed to mount smbnetfs at ${smbnetfs_root} with credentials"
-            exit 1
-          fi
-        else
-          # Mount without credentials for guest access
-          if ! smbnetfs "${smbnetfs_root}" -o allow_other; then
-            log_error "Failed to mount smbnetfs at ${smbnetfs_root} for guest access"
-            exit 1
-          fi
-        fi
-        
-        sleep 2
-      fi
-      
-      # Verify the share is accessible before creating symlink
-      if [ ! -d "${smbnetfs_root}/${smb_host}/${smb_share}" ]; then
-        log_error "SMB share ${path} is not accessible at ${smbnetfs_root}/${smb_host}/${smb_share}"
-        exit 1
-      fi
-      
-      # Create a symlink to the actual share path
-      if ! ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}"; then
-        log_error "Failed to create symlink from ${smbnetfs_root}/${smb_host}/${smb_share} to ${mountpoint}"
-        exit 1
-      fi
-      
-      log_info "Successfully mounted ${path} to ${mountpoint}"
-      continue
-    fi
-    log_error "Invalid path ${path} for mountpoint ${mountpoint}."
-    log_error "Syntax is \"user@host:/path\" for SSH, or \"//host/path\" for SMB."
-    exit 1
-  done
-fi
+configures_mounts
 
 
 # Read and validate jobs configuration
