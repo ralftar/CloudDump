@@ -28,7 +28,7 @@ jobs:
           # Run shellcheck on each script and capture output
           for script in *.sh; do
             echo "### \`$script\`" >> shellcheck-results.txt
-            output=$(shellcheck -s bash --exclude=SC2181,SC2230,SC2086,SC2001,SC2317 "$script" 2>&1)
+            output=$(shellcheck -s bash --exclude=SC2230,SC2317 "$script" 2>&1)
             if [ $? -eq 0 ]; then
               echo "✅ No issues found" >> shellcheck-results.txt
             else
