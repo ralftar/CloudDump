@@ -145,6 +145,18 @@ fi
 rm -f "${DESTINATION}/TEST_FILE"
 
 
+# Check available disk space
+
+log_info "Checking available disk space for destination ${DESTINATION}"
+
+available_space=$(df -k "${DESTINATION}" | tail -1 | awk '{print $4}')
+if [ "${available_space}" -lt 102400 ]; then
+  log_error "Insufficient disk space at ${DESTINATION}. Available: ${available_space}KB (minimum 100MB required)"
+  exit 1
+fi
+log_info "Available disk space: $((available_space / 1024))MB"
+
+
 # Run azcopy
 
 log_info "Syncing source ${source_stripped} to destination ${DESTINATION}..."

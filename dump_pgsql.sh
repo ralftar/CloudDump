@@ -186,6 +186,18 @@ fi
 rm -f "${BACKUPPATH}/TEST_FILE"
 
 
+# Check available disk space
+
+log_info "Checking available disk space for backuppath ${BACKUPPATH}"
+
+available_space=$(df -k "${BACKUPPATH}" | tail -1 | awk '{print $4}')
+if [ "${available_space}" -lt 102400 ]; then
+  log_error "Insufficient disk space at ${BACKUPPATH}. Available: ${available_space}KB (minimum 100MB required)"
+  exit 1
+fi
+log_info "Available disk space: $((available_space / 1024))MB"
+
+
 # Get list of all databases from server
 
 log_info "Querying server for list of databases..."

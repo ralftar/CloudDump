@@ -165,6 +165,18 @@ fi
 rm -f "${DESTINATION}/TEST_FILE"
 
 
+# Check available disk space
+
+log_info "Checking available disk space for destination ${DESTINATION}"
+
+available_space=$(df -k "${DESTINATION}" | tail -1 | awk '{print $4}')
+if [ "${available_space}" -lt 102400 ]; then
+  log_error "Insufficient disk space at ${DESTINATION}. Available: ${available_space}KB (minimum 100MB required)"
+  exit 1
+fi
+log_info "Available disk space: $((available_space / 1024))MB"
+
+
 # Set AWS credentials
 if [ ! "${AWS_ACCESS_KEY_ID_PARAM}" = "" ]; then
   export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID_PARAM}"
@@ -181,32 +193,33 @@ fi
 
 log_info "Syncing source ${SOURCE} to destination ${DESTINATION}..."
 
-aws_cmd="aws s3 sync"
+# Build aws command with proper arguments (avoiding eval for security)
+aws_args=("s3" "sync")
 
 # Add endpoint URL for MinIO compatibility
 if [ ! "${ENDPOINT_URL}" = "" ]; then
-  aws_cmd="${aws_cmd} --endpoint-url \"${ENDPOINT_URL}\""
+  aws_args+=("--endpoint-url" "${ENDPOINT_URL}")
 fi
 
 # Add delete flag if needed
 if [ "${DELETE_DESTINATION}" = "true" ]; then
-  aws_cmd="${aws_cmd} --delete"
+  aws_args+=("--delete")
 fi
 
 # Add source and destination
-aws_cmd="${aws_cmd} \"${SOURCE}\" \"${DESTINATION}\""
+aws_args+=("${SOURCE}" "${DESTINATION}")
 
-# Execute the command
-eval "${aws_cmd}"
-result=$?
+# Execute the command with proper error handling
+result=0
+aws "${aws_args[@]}" || result=$?
 
-# Unset AWS credentials
+# Unset AWS credentials (always cleanup, even on error)
 unset AWS_ACCESS_KEY_ID
 unset AWS_SECRET_ACCESS_KEY
 unset AWS_DEFAULT_REGION
 
 if [ ${result} -ne 0 ]; then
-  log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed."
+  log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed with exit code ${result}."
   exit ${result}
 fi
 

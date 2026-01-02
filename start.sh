@@ -93,6 +93,42 @@ converts_json_array_to_string() {
   echo "${output_string}"
 }
 
+# Validates that a string contains only safe characters
+#
+# Checks if the input string contains potentially dangerous characters
+# that could be used for command injection or path traversal attacks.
+# This is a defense-in-depth measure alongside proper quoting.
+#
+# Arguments:
+#   $1 - input_string: The string to validate
+#   $2 - field_name: Name of the field being validated (for error messages)
+#
+# Returns:
+#   0 if string is safe, 1 if it contains dangerous characters
+#
+# Example:
+#   validates_safe_string "${jobid}" "job ID"
+#
+validates_safe_string() {
+  local input_string="$1"
+  local field_name="$2"
+  
+  # Check for command injection characters: ; & | $ ` \ newline
+  # Allow forward slash for paths, but not in excessive repetition
+  if echo "${input_string}" | grep -qE '[;&|$`\\]|^[[:space:]]*$'; then
+    log_error "Invalid characters detected in ${field_name}: ${input_string}"
+    return 1
+  fi
+  
+  # Check for excessive path traversal attempts (more than 2 consecutive ../)
+  if echo "${input_string}" | grep -qE '(\.\./){3,}'; then
+    log_error "Suspicious path traversal pattern in ${field_name}: ${input_string}"
+    return 1
+  fi
+  
+  return 0
+}
+
 # Removes sensitive information from text for safe logging and display
 #
 # Redacts passwords, keys, tokens, secrets, and Azure SAS token parameters
@@ -235,6 +271,7 @@ sends_job_completion_email() {
   local email_attachments="${mail_attachment_option} ${log_file_path}"
   
   # Locate and attach any azcopy log files referenced in the main log
+  local azcopy_log_files_to_cleanup=""
   if [ -f "${log_file_path}" ]; then
     local azcopy_log_files
     azcopy_log_files=$(grep '^Log file is located at: .*\.log$' "${log_file_path}" | sed -e 's/Log file is located at: \(.*\)/\1/' | sed 's/\r$//' | tr '\n' ' ' | sed 's/ $//g')
@@ -242,6 +279,7 @@ sends_job_completion_email() {
       for azcopy_log_file in ${azcopy_log_files}; do
         if [ ! "${azcopy_log_file}" = "" ] && [ -f "${azcopy_log_file}" ]; then
           email_attachments="${email_attachments} ${mail_attachment_option} ${azcopy_log_file}"
+          azcopy_log_files_to_cleanup="${azcopy_log_files_to_cleanup} ${azcopy_log_file}"
         fi
       done
     fi
@@ -275,6 +313,16 @@ Vendanor CloudDump v${VERSION}
   else
     # shellcheck disable=SC2086
     echo "${email_message}" | "${MAIL}" -r "${MAILFROM} <${MAILFROM}>" -s "[${result_status_text}] CloudDump ${HOST}: ${job_identifier}" ${email_attachments} "${MAILTO}"
+  fi
+  
+  # Clean up azcopy log files after email is sent
+  if [ ! "${azcopy_log_files_to_cleanup}" = "" ]; then
+    for azcopy_log_file in ${azcopy_log_files_to_cleanup}; do
+      if [ -f "${azcopy_log_file}" ]; then
+        rm -f "${azcopy_log_file}"
+        log_debug "Cleaned up azcopy log file: ${azcopy_log_file}"
+      fi
+    done
   fi
 }
 
@@ -606,10 +654,17 @@ ${mount_summary}"
       log_info "Mounting ${path} to ${mountpoint} using sshfs."
       mkdir -p "${mountpoint}" || exit 1
       if [ "${port}" = "" ]; then
-        sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}" || exit 1
+        if ! sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}"; then
+          log_error "Failed to mount SSH path ${path} to ${mountpoint}"
+          exit 1
+        fi
       else
-        sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}" || exit 1
+        if ! sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}"; then
+          log_error "Failed to mount SSH path ${path} to ${mountpoint} on port ${port}"
+          exit 1
+        fi
       fi
+      log_info "Successfully mounted ${path} to ${mountpoint}"
       continue
     fi
     if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
@@ -645,18 +700,34 @@ ${mount_summary}"
           
           # Create config file
           echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
-          smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other || exit 1
+          if ! smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other; then
+            log_error "Failed to mount smbnetfs at ${smbnetfs_root} with credentials"
+            exit 1
+          fi
         else
           # Mount without credentials for guest access
-          smbnetfs "${smbnetfs_root}" -o allow_other || exit 1
+          if ! smbnetfs "${smbnetfs_root}" -o allow_other; then
+            log_error "Failed to mount smbnetfs at ${smbnetfs_root} for guest access"
+            exit 1
+          fi
         fi
         
         sleep 2
       fi
       
-      # Create a symlink to the actual share path
-      ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}" || exit 1
+      # Verify the share is accessible before creating symlink
+      if [ ! -d "${smbnetfs_root}/${smb_host}/${smb_share}" ]; then
+        log_error "SMB share ${path} is not accessible at ${smbnetfs_root}/${smb_host}/${smb_share}"
+        exit 1
+      fi
       
+      # Create a symlink to the actual share path
+      if ! ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}"; then
+        log_error "Failed to create symlink from ${smbnetfs_root}/${smb_host}/${smb_share} to ${mountpoint}"
+        exit 1
+      fi
+      
+      log_info "Successfully mounted ${path} to ${mountpoint}"
       continue
     fi
     log_error "Invalid path ${path} for mountpoint ${mountpoint}."
@@ -679,17 +750,45 @@ if [ "${jobs}" -eq 0 ]; then
   exit 1
 fi
 
-# Build job summary for startup email
+# Validate for duplicate job IDs
+log_info "Validating job configuration..."
+declare -A seen_job_ids
+validation_errors=0
+
+# Build job summary and validate configurations
 jobs_summary=""
 for ((i = 0; i < jobs; i++)); do
 
   if ! jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${jobid}" = "" ]; then
     log_error "Missing job ID for job index ${i}."
+    validation_errors=$((validation_errors + 1))
     continue
   fi
+  
+  # Validate job ID for safe characters
+  if ! validates_safe_string "${jobid}" "job ID"; then
+    validation_errors=$((validation_errors + 1))
+    continue
+  fi
+  
+  # Check for duplicate job IDs
+  if [ -n "${seen_job_ids[${jobid}]}" ]; then
+    log_error "Duplicate job ID detected: ${jobid}"
+    validation_errors=$((validation_errors + 1))
+    continue
+  fi
+  seen_job_ids[${jobid}]=1
 
   if ! type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${type}" = "" ]; then
     log_error "Missing type for job ID ${jobid}."
+    validation_errors=$((validation_errors + 1))
+    continue
+  fi
+  
+  # Validate job type
+  if [ "${type}" != "s3bucket" ] && [ "${type}" != "azstorage" ] && [ "${type}" != "pgsql" ]; then
+    log_error "Invalid job type '${type}' for job ID ${jobid}. Must be 's3bucket', 'azstorage', or 'pgsql'."
+    validation_errors=$((validation_errors + 1))
     continue
   fi
   
@@ -697,6 +796,15 @@ for ((i = 0; i < jobs; i++)); do
 
   if ! crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${crontab}" = "" ]; then
     log_error "Missing crontab for job ID ${jobid}."
+    validation_errors=$((validation_errors + 1))
+    continue
+  fi
+  
+  # Validate crontab format (basic check for 5 fields)
+  crontab_field_count=$(echo "${crontab}" | awk '{print NF}')
+  if [ "${crontab_field_count}" -ne 5 ]; then
+    log_error "Invalid crontab format for job ID ${jobid}. Expected 5 fields, got ${crontab_field_count}."
+    validation_errors=$((validation_errors + 1))
     continue
   fi
 
@@ -707,19 +815,22 @@ for ((i = 0; i < jobs; i++)); do
   else
     scriptfile=$(which "${script}" 2>/dev/null)
     if [ "${scriptfile}" = "" ]; then
-      log_error "Missing scriptfile ${script}."
-      exit 1
+      log_error "Missing scriptfile ${script} for job ID ${jobid}."
+      validation_errors=$((validation_errors + 1))
+      continue
     fi
   fi
 
   if ! [ -f "${scriptfile}" ]; then
-    log_error "Missing scriptfile ${scriptfile}."
-    exit 1
+    log_error "Missing scriptfile ${scriptfile} for job ID ${jobid}."
+    validation_errors=$((validation_errors + 1))
+    continue
   fi
 
   if ! [ -x "${scriptfile}" ]; then
-    log_error "Scriptfile ${scriptfile} not executable."
-    exit 1
+    log_error "Scriptfile ${scriptfile} not executable for job ID ${jobid}."
+    validation_errors=$((validation_errors + 1))
+    continue
   fi
 
   job_summary="ID: ${jobid}
@@ -736,6 +847,14 @@ ${job_summary}"
   fi
 
 done
+
+# Exit if there were validation errors
+if [ "${validation_errors}" -gt 0 ]; then
+  log_error "Found ${validation_errors} configuration validation error(s). Please fix the configuration and restart."
+  exit 1
+fi
+
+log_info "Job configuration validation successful. All ${jobs} job(s) are valid."
 
 
 # Send startup e-mail
@@ -794,6 +913,12 @@ log_info "Startup email sent."
 # Ranges (1-5) and lists (1,3,5) are intentionally not supported as they are not used
 # in any documented configurations for this application.
 #
+# Implementation Notes:
+#   - Uses standard cron format: minute hour day-of-month month day-of-week
+#   - Day-of-week: 0=Sunday, 1=Monday, ..., 6=Saturday (converted from date's 1-7 format)
+#   - All five fields must match for the pattern to match
+#   - Step values (*/N) check if the current value is divisible by N (e.g., */5 means 0,5,10,15,...)
+#
 # Arguments:
 #   $1 - cron_pattern: Standard 5-field cron pattern (minute hour day month day-of-week)
 #   $2 - unix_timestamp: Unix timestamp (seconds since epoch) to evaluate
@@ -804,6 +929,7 @@ log_info "Startup email sent."
 #
 # Example:
 #   matches_cron_pattern "*/5 * * * *" "1704067200"  # Returns 0 if minute is divisible by 5
+#   matches_cron_pattern "0 2 * * *" "1704067200"    # Returns 0 if time is 02:00
 #
 matches_cron_pattern() {
   local cron_pattern="$1"
@@ -861,6 +987,14 @@ matches_cron_pattern() {
 # matched at any point between the last run and the current time. This ensures that
 # jobs scheduled during periods when other jobs were running will still execute.
 #
+# Implementation Details:
+#   - Jobs are executed sequentially, so if Job A is running when Job B's schedule hits,
+#     Job B will be delayed until Job A completes.
+#   - This function checks every minute from the last run until now to see if the cron
+#     pattern matched at any point, ensuring Job B runs despite the delay.
+#   - Minutes are checked at their boundary (HH:MM:00) to avoid partial-second issues.
+#   - The check starts from the minute AFTER the last run to avoid double-execution.
+#
 # The function looks backward in time, minute by minute, from the last execution
 # to the current minute, checking if any of those minutes match the cron pattern.
 #
@@ -873,6 +1007,9 @@ matches_cron_pattern() {
 #   1 (failure) if the job should not run yet
 #
 # Example:
+#   # Job with */5 schedule last ran at 10:05:30, now it's 10:12:00
+#   # Function will check: 10:06, 10:07, 10:08, 10:09, 10:10, 10:11, 10:12
+#   # It will match at 10:10 and return 0 (should run)
 #   determines_job_execution_needed "*/5 * * * *" "1704067200"
 #
 determines_job_execution_needed() {
