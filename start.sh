@@ -93,42 +93,6 @@ converts_json_array_to_string() {
   echo "${output_string}"
 }
 
-# Validates that a string contains only safe characters
-#
-# Checks if the input string contains potentially dangerous characters
-# that could be used for command injection or path traversal attacks.
-# This is a defense-in-depth measure alongside proper quoting.
-#
-# Arguments:
-#   $1 - input_string: The string to validate
-#   $2 - field_name: Name of the field being validated (for error messages)
-#
-# Returns:
-#   0 if string is safe, 1 if it contains dangerous characters
-#
-# Example:
-#   validates_safe_string "${jobid}" "job ID"
-#
-validates_safe_string() {
-  local input_string="$1"
-  local field_name="$2"
-  
-  # Check for command injection characters: ; & | $ ` \ newline
-  # Allow forward slash for paths, but not in excessive repetition
-  if echo "${input_string}" | grep -qE '[;&|$`\\]|^[[:space:]]*$'; then
-    log_error "Invalid characters detected in ${field_name}: ${input_string}"
-    return 1
-  fi
-  
-  # Check for excessive path traversal attempts (more than 2 consecutive ../)
-  if echo "${input_string}" | grep -qE '(\.\./){3,}'; then
-    log_error "Suspicious path traversal pattern in ${field_name}: ${input_string}"
-    return 1
-  fi
-  
-  return 0
-}
-
 # Removes sensitive information from text for safe logging and display
 #
 # Redacts passwords, keys, tokens, secrets, and Azure SAS token parameters
@@ -874,12 +838,6 @@ for ((i = 0; i < jobs; i++)); do
 
   if ! jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${jobid}" = "" ]; then
     log_error "Missing job ID for job index ${i}."
-    validation_errors=$((validation_errors + 1))
-    continue
-  fi
-  
-  # Validate job ID for safe characters
-  if ! validates_safe_string "${jobid}" "job ID"; then
     validation_errors=$((validation_errors + 1))
     continue
   fi

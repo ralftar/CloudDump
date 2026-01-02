@@ -165,18 +165,6 @@ fi
 rm -f "${DESTINATION}/TEST_FILE"
 
 
-# Check available disk space
-
-log_info "Checking available disk space for destination ${DESTINATION}"
-
-available_space=$(df -k "${DESTINATION}" | tail -1 | awk '{print $4}')
-if [ "${available_space}" -lt 102400 ]; then
-  log_error "Insufficient disk space at ${DESTINATION}. Available: ${available_space}KB (minimum 100MB required)"
-  exit 1
-fi
-log_info "Available disk space: $((available_space / 1024))MB"
-
-
 # Set AWS credentials
 if [ ! "${AWS_ACCESS_KEY_ID_PARAM}" = "" ]; then
   export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID_PARAM}"
@@ -193,10 +181,7 @@ fi
 
 log_info "Syncing source ${SOURCE} to destination ${DESTINATION}..."
 
-# Capture start time and initial file count for statistics
-# Note: file counting may be slow for very large directories (10k+ files)
 sync_start_time=$(date +%s)
-initial_file_count=$(find "${DESTINATION}" -type f 2>/dev/null | wc -l || echo "0")
 
 # Build aws command with proper arguments (avoiding eval for security)
 aws_args=("s3" "sync")
@@ -226,11 +211,8 @@ unset AWS_DEFAULT_REGION
 # Calculate and log statistics
 sync_end_time=$(date +%s)
 sync_duration=$((sync_end_time - sync_start_time))
-# Note: file counting may be slow for very large directories (10k+ files)
-final_file_count=$(find "${DESTINATION}" -type f 2>/dev/null | wc -l || echo "0")
 
 log_info "Sync operation completed in ${sync_duration} seconds"
-log_info "Files in destination: ${final_file_count} (was ${initial_file_count})"
 
 if [ ${result} -ne 0 ]; then
   log_error "Sync from source ${SOURCE} to destination ${DESTINATION} failed with exit code ${result}."
