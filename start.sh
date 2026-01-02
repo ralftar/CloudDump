@@ -518,11 +518,15 @@ ${mount_summary}"
         log_info "Mounting ${path} to ${mountpoint} using sshfs."
         mkdir -p "${mountpoint}" || exit 1
         if [ "${port}" = "" ]; then
+          # Note: StrictHostKeyChecking=no is used for automated mounting
+          # For production, consider using accept-new or managing known_hosts
           if ! sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}"; then
             log_error "Failed to mount SSH path ${path} to ${mountpoint}"
             exit 1
           fi
         else
+          # Note: StrictHostKeyChecking=no is used for automated mounting
+          # For production, consider using accept-new or managing known_hosts
           if ! sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}"; then
             log_error "Failed to mount SSH path ${path} to ${mountpoint} on port ${port}"
             exit 1
@@ -565,13 +569,13 @@ ${mount_summary}"
             # Create config file
             echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
             if ! smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other; then
-              log_error "Failed to mount smbnetfs at ${smbnetfs_root} with credentials"
+              log_error "Failed to mount smbnetfs at ${smbnetfs_root} with credentials for SMB path ${path}"
               exit 1
             fi
           else
             # Mount without credentials for guest access
             if ! smbnetfs "${smbnetfs_root}" -o allow_other; then
-              log_error "Failed to mount smbnetfs at ${smbnetfs_root} for guest access"
+              log_error "Failed to mount smbnetfs at ${smbnetfs_root} for guest access to SMB path ${path}"
               exit 1
             fi
           fi

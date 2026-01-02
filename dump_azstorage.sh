@@ -162,6 +162,7 @@ log_info "Available disk space: $((available_space / 1024))MB"
 log_info "Syncing source ${source_stripped} to destination ${DESTINATION}..."
 
 # Capture start time and initial file count for statistics
+# Note: file counting may be slow for very large directories (10k+ files)
 sync_start_time=$(date +%s)
 initial_file_count=$(find "${DESTINATION}" -type f 2>/dev/null | wc -l || echo "0")
 
@@ -171,6 +172,7 @@ result=$?
 # Calculate and log statistics
 sync_end_time=$(date +%s)
 sync_duration=$((sync_end_time - sync_start_time))
+# Note: file counting may be slow for very large directories (10k+ files)
 final_file_count=$(find "${DESTINATION}" -type f 2>/dev/null | wc -l || echo "0")
 
 log_info "Sync operation completed in ${sync_duration} seconds"
