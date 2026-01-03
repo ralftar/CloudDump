@@ -8,7 +8,7 @@ awscli_url="https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${awscli_versio
 awscli_filename="awscliv2.zip"
 
 # Install unzip if needed
-which unzip >/dev/null 2>&1 || apt-get update && apt-get install -y unzip
+which unzip >/dev/null 2>&1 || (apt-get update && apt-get install -y unzip)
 
 # Download AWS CLI
 curl -f -L -o "/tmp/${awscli_filename}" "${awscli_url}"
