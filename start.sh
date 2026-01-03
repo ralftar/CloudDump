@@ -438,8 +438,6 @@ execute_pgsql_job() {
 
 # Init
 
-mkdir -p /persistent-data/logs
-
 log_info "Vendanor CloudDump v${VERSION} Start ($0)"
 
 # Set up signal handlers
@@ -495,7 +493,7 @@ SMTPPASS=$(jq -r '.settings.SMTPPASS' "${CONFIGFILE}" | sed 's/^null$//g')
 MAILFROM=$(jq -r '.settings.MAILFROM' "${CONFIGFILE}" | sed 's/^null$//g')
 MAILTO=$(jq -r '.settings.MAILTO' "${CONFIGFILE}" | sed 's/^null$//g')
 
-postconf maillog_file=/var/log/postfix.log || exit 1
+postconf maillog_file=/dev/stdout || exit 1
 postconf inet_interfaces=127.0.0.1 || exit 1
 postconf relayhost="[${SMTPSERVER}]:${SMTPPORT}" || exit 1
 postconf smtp_sasl_auth_enable=yes || exit 1
