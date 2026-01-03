@@ -1,8 +1,22 @@
-FROM opensuse/leap:15.6
+FROM debian:12
 
-RUN zypper -n --gpg-auto-import-keys ref && \
-    zypper -n --gpg-auto-import-keys up && \
-    zypper -n --gpg-auto-import-keys in openssh sshfs smbnetfs which bc tar gzip bzip2 curl jq procmail mutt cyrus-sasl-plain postfix postgresql
+RUN apt-get update && \
+    apt-get install -y \
+    openssh-client \
+    sshfs \
+    smbnetfs \
+    bc \
+    tar \
+    gzip \
+    bzip2 \
+    curl \
+    jq \
+    procmail \
+    mutt \
+    libsasl2-modules \
+    postfix \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY /VERSION /VERSION
 COPY /dump_*.sh /install_*.sh /start.sh /usr/local/bin/
