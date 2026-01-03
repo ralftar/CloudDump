@@ -12,7 +12,7 @@ While CloudDump can be a useful component of a disaster recovery or backup regim
 - **Stdout Logging**: All logs go to stdout for proper container log management
 - **Email Reports**: Email reports with temporary log files attached for each job execution
 - **Mount Support**: Support for SSH (sshfs) and SMB (smbnetfs) mounts without requiring elevated privileges
-- **OpenSUSE Leap**: Built on OpenSUSE Leap 15.6
+- **Debian**: Built on Debian 12 (Bookworm)
 
 ## Running
 

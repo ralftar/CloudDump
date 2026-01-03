@@ -5,7 +5,6 @@
 
 
 CONFIGFILE="/config/config.json"
-MAIL="mutt"
 
 VERSION=$(head -n 1 /VERSION)
 
@@ -213,26 +212,7 @@ sends_job_completion_email() {
   
   log_info "Sending e-mail to ${MAILTO} from ${MAILFROM} for job ${job_identifier}."
   
-  # Determine the correct attachment option flag based on mail command type
-  local mail_attachment_option
-  if [ "${MAIL}" = "mail" ]; then
-    if "${MAIL}" -V >/dev/null 2>&1; then
-      if "${MAIL}" -V | grep "^mail (GNU Mailutils)" >/dev/null 2>&1; then
-        mail_attachment_option="-A"
-      else
-        mail_attachment_option="-a"
-      fi
-    else
-      mail_attachment_option="-A"
-    fi
-  elif [ "${MAIL}" = "mutt" ]; then
-    mail_attachment_option="-a"
-  else
-    log_info "Unknown mail command: ${MAIL}"
-    return 1
-  fi
-  
-  local email_attachments="${mail_attachment_option} ${log_file_path}"
+  local email_attachments="-a ${log_file_path}"
   
   # Locate and attach any azcopy log files referenced in the main log
   if [ -f "${log_file_path}" ]; then
@@ -241,7 +221,7 @@ sends_job_completion_email() {
     if ! [ "${azcopy_log_files}" = "" ]; then
       for azcopy_log_file in ${azcopy_log_files}; do
         if [ ! "${azcopy_log_file}" = "" ] && [ -f "${azcopy_log_file}" ]; then
-          email_attachments="${email_attachments} ${mail_attachment_option} ${azcopy_log_file}"
+          email_attachments="${email_attachments} -a ${azcopy_log_file}"
         fi
       done
     fi
@@ -269,13 +249,8 @@ For more information consult the attached logs.
 Vendanor CloudDump v${VERSION}
 "
   
-  if [ "${MAIL}" = "mutt" ]; then
-    # shellcheck disable=SC2086
-    echo "${email_message}" | EMAIL="${MAILFROM} <${MAILFROM}>" "${MAIL}" -s "[${result_status_text}] CloudDump ${HOST}: ${job_identifier}" ${email_attachments} "${MAILTO}"
-  else
-    # shellcheck disable=SC2086
-    echo "${email_message}" | "${MAIL}" -r "${MAILFROM} <${MAILFROM}>" -s "[${result_status_text}] CloudDump ${HOST}: ${job_identifier}" ${email_attachments} "${MAILTO}"
-  fi
+  # shellcheck disable=SC2086
+  echo "${email_message}" | EMAIL="${MAILFROM} <${MAILFROM}>" mutt -s "[${result_status_text}] CloudDump ${HOST}: ${job_identifier}" ${email_attachments} "${MAILTO}"
 }
 
 # Retrieves and formats job configuration by job identifier
@@ -473,7 +448,7 @@ trap 'handles_shutdown_signal' SIGTERM SIGINT
 
 # Check commands
 
-cmds="which grep sed cut cp chmod mkdir bc jq mail mutt postconf postmap ssh sshfs smbnetfs"
+cmds="which grep sed cut cp chmod mkdir bc jq mutt postconf postmap ssh sshfs smbnetfs"
 cmds_missing=
 for cmd in ${cmds}
 do
@@ -778,11 +753,7 @@ ${jobs_summary}
 
 Vendanor CloudDump v${VERSION}"
 
-if [ "${MAIL}" = "mutt" ]; then
-  echo "${mail_body}" | EMAIL="${MAILFROM} <${MAILFROM}>" ${MAIL} -s "[Started] CloudDump ${HOST}" "${MAILTO}"
-else
-  echo "${mail_body}" | ${MAIL} -r "${MAILFROM} <${MAILFROM}>" -s "[Started] CloudDump ${HOST}" "${MAILTO}"
-fi
+echo "${mail_body}" | EMAIL="${MAILFROM} <${MAILFROM}>" mutt -s "[Started] CloudDump ${HOST}" "${MAILTO}"
 
 log_info "Startup email sent."
 
