@@ -12,7 +12,6 @@ RUN apt-get update && \
     bzip2 \
     curl \
     jq \
-    procmail \
     mutt \
     libsasl2-modules \
     postfix \
