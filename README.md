@@ -145,6 +145,63 @@ CloudDump runs as a single-process Docker container with a main loop that:
 
 This architecture ensures predictable resource usage and simplifies deployment and monitoring in containerized environments.
 
+## Troubleshooting
+
+### Container Won't Start
+
+- **Missing config file**: Ensure `config.json` is mounted at `/config/config.json`. Check that the mount path is correct and the file is readable.
+- **Missing required commands**: The startup script checks for required system commands. Check container logs for "Missing ... commands" errors.
+- **Invalid JSON**: Validate your `config.json` with `jq . config.json` before mounting.
+
+### Mount Failures
+
+- **SSH mounts**: Ensure the SSH key is valid and the remote host is reachable. Check that the path format is `user@host:/path` or `host:/path` (with username configured separately).
+- **SMB mounts**: Ensure the path format is `//host/share`. Verify credentials are correct. The container uses `smbnetfs` which requires FUSE support — ensure the container has the necessary privileges.
+- **Permission denied**: Verify the mount credentials and that the remote share allows access from the container's network.
+
+### Jobs Not Running
+
+- **Check cron syntax**: CloudDump supports `*`, exact values (e.g., `5`), and step values (e.g., `*/15`). Ranges (`1-5`) and lists (`1,3,5`) are not supported.
+- **Catch-up execution**: If a job was scheduled while another was running, it will catch up on the next check cycle. Jobs run sequentially, not in parallel.
+- **Missing tools**: S3 jobs require `aws`, Azure Storage jobs require `azcopy`, and PostgreSQL jobs require `pg_dump` and `psql`. Check logs for tool-related errors.
+
+### Email Not Sending
+
+- **SMTP configuration**: Verify `SMTPSERVER`, `SMTPPORT`, `SMTPUSER`, and `SMTPPASS` in your config. CloudDump uses SMTPS (port 465) with SASL authentication.
+- **Postfix errors**: Check container logs for postfix-related errors at startup.
+- **Firewall**: Ensure the container can reach the SMTP server on the configured port.
+
+### Performance Issues
+
+- **Long sync times**: Check the email reports for job duration. For S3, consider using `endpoint_url` for closer S3-compatible endpoints. For Azure, ensure the container is in the same region as the storage account.
+- **Disk space**: Ensure the backup destination has sufficient space. Failed syncs may leave partial data.
+
+### Debugging
+
+Enable debug mode for detailed logging:
+
+```json
+{
+  "settings": {
+    "DEBUG": true
+  }
+}
+```
+
+Per-job debugging can also be enabled:
+
+```json
+{
+  "jobs": [
+    {
+      "debug": true
+    }
+  ]
+}
+```
+
+Setting `DEBUG` to `true` in settings enables bash trace mode (`set -x`) for the main script and verbose logging. Per-job `debug` enables trace mode for individual dump scripts.
+
 ## License
 
 This tool is released under the MIT License.

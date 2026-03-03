@@ -94,7 +94,7 @@ converts_json_array_to_string() {
 
 # Removes sensitive information from text for safe logging and display
 #
-# Redacts passwords, keys, tokens, secrets, and Azure SAS token parameters
+# Redacts passwords, keys, tokens, secrets, credentials, AWS key IDs, Azure connection strings, and SAS token parameters
 # from text to prevent exposure in logs and emails.
 #
 # Arguments:
@@ -109,12 +109,17 @@ converts_json_array_to_string() {
 #
 removes_sensitive_data() {
   local text_to_redact="$1"
-  # Redact common sensitive field patterns (password, key, token, secret)
+  # Redact common sensitive field patterns (password, key, token, secret, credential)
   # shellcheck disable=SC2001 # Complex regex with case-insensitive flag and alternation requires sed
-  text_to_redact=$(echo "${text_to_redact}" | sed 's/\(password\|pass\|key\|token\|secret\)[[:space:]]*[:=][[:space:]]*[^[:space:]]*/\1: [REDACTED]/gi')
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/\(password\|pass\|passwd\|pwd\|key\|token\|secret\|credential\|cred\)[[:space:]]*[:=][[:space:]]*[^[:space:],]*/\1: [REDACTED]/gi')
+  # Redact AWS access key IDs (AKIA prefix followed by 16 alphanumeric characters)
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/AKIA[A-Z0-9]\{16\}/[REDACTED_AWS_KEY]/g')
+  # Redact Azure connection string secrets (AccountKey and SharedAccessKey values)
+  # shellcheck disable=SC2001 # Complex regex with alternation requires sed
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/\(AccountKey\|SharedAccessKey\)=[^;]*/\1=[REDACTED]/gi')
   # Redact Azure SAS token parameters from URLs
   # shellcheck disable=SC2001 # Complex URL parameter regex with alternation requires sed
-  text_to_redact=$(echo "${text_to_redact}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\)=[^&?]*/\?[REDACTED]/g')
+  text_to_redact=$(echo "${text_to_redact}" | sed 's/\?[^?]*\(sig\|se\|st\|sp\|sr\|sv\)=[^&?]*/\?[REDACTED]/g')
   echo "${text_to_redact}"
 }
 
@@ -215,6 +220,7 @@ sends_job_completion_email() {
   local email_attachments="-a ${log_file_path}"
   
   # Locate and attach any azcopy log files referenced in the main log
+  local azcopy_log_files_to_cleanup=""
   if [ -f "${log_file_path}" ]; then
     local azcopy_log_files
     azcopy_log_files=$(grep '^Log file is located at: .*\.log$' "${log_file_path}" | sed -e 's/Log file is located at: \(.*\)/\1/' | sed 's/\r$//' | tr '\n' ' ' | sed 's/ $//g')
@@ -222,13 +228,14 @@ sends_job_completion_email() {
       for azcopy_log_file in ${azcopy_log_files}; do
         if [ ! "${azcopy_log_file}" = "" ] && [ -f "${azcopy_log_file}" ]; then
           email_attachments="${email_attachments} -a ${azcopy_log_file}"
+          azcopy_log_files_to_cleanup="${azcopy_log_files_to_cleanup} ${azcopy_log_file}"
         fi
       done
     fi
   fi
-  
+
   email_attachments="${email_attachments} --"
-  
+
   local email_message
   email_message="CloudDump ${HOST}
 
@@ -251,6 +258,14 @@ Vendanor CloudDump v${VERSION}
   
   # shellcheck disable=SC2086
   echo "${email_message}" | EMAIL="${MAILFROM} <${MAILFROM}>" mutt -s "[${result_status_text}] CloudDump ${HOST}: ${job_identifier}" ${email_attachments} "${MAILTO}"
+
+  # Clean up azcopy log files after they have been attached to the email
+  if [ ! "${azcopy_log_files_to_cleanup}" = "" ]; then
+    for azcopy_log_file in ${azcopy_log_files_to_cleanup}; do
+      log_debug "Cleaning up azcopy log file: ${azcopy_log_file}"
+      rm -f "${azcopy_log_file}"
+    done
+  fi
 }
 
 # Retrieves and formats job configuration by job identifier
@@ -330,10 +345,10 @@ execute_s3bucket_job() {
     endpoint_url=$(jq -r ".jobs[${job_idx}].buckets[${bucket_idx}].endpoint_url" "${CONFIGFILE}" | sed 's/^null$//g')
     
     if [ "${jobdebug}" = "true" ]; then
-      /bin/bash -x dump_s3bucket.sh "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
+      /bin/bash -x dump_s3bucket.sh -s "${source}" -d "${destination}" -m "${delete_destination}" -a "${aws_access_key_id}" -k "${aws_secret_access_key}" -r "${aws_region}" -e "${endpoint_url}" >> "${logfile}" 2>&1
       bucket_result=$?
     else
-      /bin/bash dump_s3bucket.sh "${source}" "${destination}" "${delete_destination}" "${aws_access_key_id}" "${aws_secret_access_key}" "${aws_region}" "${endpoint_url}" >> "${logfile}" 2>&1
+      /bin/bash dump_s3bucket.sh -s "${source}" -d "${destination}" -m "${delete_destination}" -a "${aws_access_key_id}" -k "${aws_secret_access_key}" -r "${aws_region}" -e "${endpoint_url}" >> "${logfile}" 2>&1
       bucket_result=$?
     fi
     
@@ -370,10 +385,10 @@ execute_azstorage_job() {
     delete_destination=$(jq -r ".jobs[${job_idx}].blobstorages[${bs_idx}].delete_destination" "${CONFIGFILE}" | sed 's/^null$//g')
     
     if [ "${jobdebug}" = "true" ]; then
-      /bin/bash -x dump_azstorage.sh "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
+      /bin/bash -x dump_azstorage.sh -s "${source}" -d "${destination}" -m "${delete_destination}" >> "${logfile}" 2>&1
       bs_result=$?
     else
-      /bin/bash dump_azstorage.sh "${source}" "${destination}" "${delete_destination}" >> "${logfile}" 2>&1
+      /bin/bash dump_azstorage.sh -s "${source}" -d "${destination}" -m "${delete_destination}" >> "${logfile}" 2>&1
       bs_result=$?
     fi
     
@@ -485,158 +500,199 @@ log_info "CONFIGURATION:"
 log_info "Host: $HOST"
 
 
-# Setup postfix and mutt
-SMTPSERVER=$(jq -r '.settings.SMTPSERVER' "${CONFIGFILE}" | sed 's/^null$//g')
-SMTPPORT=$(jq -r '.settings.SMTPPORT' "${CONFIGFILE}" | sed 's/^null$//g')
-SMTPUSER=$(jq -r '.settings.SMTPUSER' "${CONFIGFILE}" | sed 's/^null$//g')
-SMTPPASS=$(jq -r '.settings.SMTPPASS' "${CONFIGFILE}" | sed 's/^null$//g')
-MAILFROM=$(jq -r '.settings.MAILFROM' "${CONFIGFILE}" | sed 's/^null$//g')
-MAILTO=$(jq -r '.settings.MAILTO' "${CONFIGFILE}" | sed 's/^null$//g')
+# Configures postfix and mutt for sending email reports
+#
+# Reads SMTP settings from the configuration file and sets up postfix
+# for relaying email through the configured SMTP server. Also configures
+# mutt as the mail user agent with the appropriate SMTP URL.
+#
+# Sets global variables: SMTPSERVER, SMTPPORT, SMTPUSER, SMTPPASS, MAILFROM, MAILTO
+#
+configures_email_services() {
+  SMTPSERVER=$(jq -r '.settings.SMTPSERVER' "${CONFIGFILE}" | sed 's/^null$//g')
+  SMTPPORT=$(jq -r '.settings.SMTPPORT' "${CONFIGFILE}" | sed 's/^null$//g')
+  SMTPUSER=$(jq -r '.settings.SMTPUSER' "${CONFIGFILE}" | sed 's/^null$//g')
+  SMTPPASS=$(jq -r '.settings.SMTPPASS' "${CONFIGFILE}" | sed 's/^null$//g')
+  MAILFROM=$(jq -r '.settings.MAILFROM' "${CONFIGFILE}" | sed 's/^null$//g')
+  MAILTO=$(jq -r '.settings.MAILTO' "${CONFIGFILE}" | sed 's/^null$//g')
 
-postconf maillog_file=/dev/stdout || exit 1
-postconf inet_interfaces=127.0.0.1 || exit 1
-postconf relayhost="[${SMTPSERVER}]:${SMTPPORT}" || exit 1
-postconf smtp_sasl_auth_enable=yes || exit 1
-postconf smtp_sasl_password_maps=lmdb:/etc/postfix/sasl_passwd || exit 1
-postconf smtp_tls_wrappermode=yes || exit 1
-postconf smtp_tls_security_level=encrypt || exit 1
-postconf smtp_sasl_security_options=noanonymous || exit 1
+  postconf maillog_file=/dev/stdout || exit 1
+  postconf inet_interfaces=127.0.0.1 || exit 1
+  postconf relayhost="[${SMTPSERVER}]:${SMTPPORT}" || exit 1
+  postconf smtp_sasl_auth_enable=yes || exit 1
+  postconf smtp_sasl_password_maps=lmdb:/etc/postfix/sasl_passwd || exit 1
+  postconf smtp_tls_wrappermode=yes || exit 1
+  postconf smtp_tls_security_level=encrypt || exit 1
+  postconf smtp_sasl_security_options=noanonymous || exit 1
 
-touch /etc/postfix/relay || exit 1
-chmod 600 /etc/postfix/relay || exit 1
-touch /etc/postfix/sasl_passwd || exit 1
-chmod 600 /etc/postfix/sasl_passwd || exit 1
-touch /etc/Muttrc || exit 1
+  touch /etc/postfix/relay || exit 1
+  chmod 600 /etc/postfix/relay || exit 1
+  touch /etc/postfix/sasl_passwd || exit 1
+  chmod 600 /etc/postfix/sasl_passwd || exit 1
+  touch /etc/Muttrc || exit 1
 
-if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
-  log_info "SMTP server: $SMTPSERVER"
-  log_info "SMTP port: $SMTPPORT"
-  log_info "SMTP username: $SMTPUSER"
-  if [ "$SMTPUSER" = "" ] && [ "$SMTPPASS" = "" ]; then
-    SMTPURL="smtps://${SMTPSERVER}:${SMTPPORT}"
+  if ! [ "${SMTPSERVER}" = "" ] && ! [ "${SMTPPORT}" = "" ]; then
+    log_info "SMTP server: $SMTPSERVER"
+    log_info "SMTP port: $SMTPPORT"
+    log_info "SMTP username: $SMTPUSER"
+    if [ "$SMTPUSER" = "" ] && [ "$SMTPPASS" = "" ]; then
+      SMTPURL="smtps://${SMTPSERVER}:${SMTPPORT}"
+    else
+      SMTPURL="smtps://${SMTPUSER}:${SMTPPASS}@${SMTPSERVER}:${SMTPPORT}"
+      if ! grep "^\[${SMTPSERVER}\]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}$" /etc/postfix/sasl_passwd >/dev/null; then
+        echo "[${SMTPSERVER}]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}" >> /etc/postfix/sasl_passwd || exit 1
+      fi
+    fi
+    if ! grep "^set smtp_url=\"${SMTPURL}\"$" /etc/Muttrc >/dev/null; then
+      echo "set smtp_url=\"${SMTPURL}\"" >> /etc/Muttrc || exit 1
+    fi
+  fi
+
+  postmap /etc/postfix/relay || exit 1
+  postmap lmdb:/etc/postfix/sasl_passwd || exit 1
+
+  # Start postfix if not already running
+  if ! pgrep -x master >/dev/null 2>&1; then
+    /usr/sbin/postfix start || exit 1
   else
-    SMTPURL="smtps://${SMTPUSER}:${SMTPPASS}@${SMTPSERVER}:${SMTPPORT}"
-    if ! grep "^\[${SMTPSERVER}\]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}$" /etc/postfix/sasl_passwd >/dev/null; then
-      echo "[${SMTPSERVER}]:${SMTPPORT} ${SMTPUSER}:${SMTPPASS}" >> /etc/postfix/sasl_passwd || exit 1
-    fi
+    log_info "Postfix already running, reloading configuration..."
+    /usr/sbin/postfix reload || exit 1
   fi
-  if ! grep "^set smtp_url=\"${SMTPURL}\"$" /etc/Muttrc >/dev/null; then
-    echo "set smtp_url=\"${SMTPURL}\"" >> /etc/Muttrc || exit 1
-  fi
-fi
+}
 
-postmap /etc/postfix/relay || exit 1
-postmap lmdb:/etc/postfix/sasl_passwd || exit 1
+# Configures SSH and SMB mounts from the configuration file
+#
+# Reads mount definitions from the JSON config and sets up either sshfs
+# (for paths containing ':') or smbnetfs (for paths starting with '//').
+# Builds the mounts_summary variable for inclusion in the startup email.
+#
+# Sets global variable: mounts_summary
+#
+configures_mounts() {
+  local mounts
+  mounts=$(jq -r ".settings.mount | length" "${CONFIGFILE}")
+  if [ "${mounts}" -gt 0 ]; then
+    for ((i = 0; i < mounts; i++)); do
+      local path mountpoint username privkey password port
+      if ! path=$(jq -r ".settings.mount[${i}].path" "${CONFIGFILE}" | sed 's/^null$//g' | sed 's/\\/\//g') || [ "${path}" = "" ]; then
+        continue
+      fi
+      if ! mountpoint=$(jq -r ".settings.mount[${i}].mountpoint" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${mountpoint}" = "" ]; then
+        continue
+      fi
+      username=$(jq -r ".settings.mount[${i}].username" "${CONFIGFILE}" | sed 's/^null$//g')
+      privkey=$(jq -r ".settings.mount[${i}].privkey" "${CONFIGFILE}" | sed 's/^null$//g')
+      password=$(jq -r ".settings.mount[${i}].password" "${CONFIGFILE}" | sed 's/^null$//g')
+      port=$(jq -r ".settings.mount[${i}].port" "${CONFIGFILE}" | sed 's/^null$//g')
 
-# Start postfix if not already running
-if ! pgrep -x master >/dev/null 2>&1; then
-  /usr/sbin/postfix start || exit 1
-else
-  log_info "Postfix already running, reloading configuration..."
-  /usr/sbin/postfix reload || exit 1
-fi
-
-
-# Mount
-
-mounts=$(jq -r ".settings.mount | length" "${CONFIGFILE}")
-if [ "${mounts}" -gt 0 ]; then
-  for ((i = 0; i < mounts; i++)); do
-    if ! path=$(jq -r ".settings.mount[${i}].path" "${CONFIGFILE}" | sed 's/^null$//g' | sed 's/\\/\//g') || [ "${path}" = "" ]; then
-      continue
-    fi
-    if ! mountpoint=$(jq -r ".settings.mount[${i}].mountpoint" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${mountpoint}" = "" ]; then
-      continue
-    fi
-    username=$(jq -r ".settings.mount[${i}].username" "${CONFIGFILE}" | sed 's/^null$//g')
-    privkey=$(jq -r ".settings.mount[${i}].privkey" "${CONFIGFILE}" | sed 's/^null$//g')
-    password=$(jq -r ".settings.mount[${i}].password" "${CONFIGFILE}" | sed 's/^null$//g')
-    port=$(jq -r ".settings.mount[${i}].port" "${CONFIGFILE}" | sed 's/^null$//g')
-
-    mount_summary="
+      local mount_summary
+      mount_summary="
 Path: ${path}
 Mountpoint ${mountpoint}
 "
 
-  if [ "${mounts_summary}" = "" ]; then
-    mounts_summary="${mount_summary}"
-  else
-    mounts_summary="${mounts_summary}
-${mount_summary}"
-  fi
-
-    if echo "${path}" | grep ':' >/dev/null 2>&1; then # SSH
-      if [ ! "${privkey}" = "" ]; then
-        mkdir -p "${HOME}/.ssh" || exit 1
-        # Add cleanup trap
-        trap 'rm -f "${HOME}/.ssh/id_rsa"' EXIT
-        echo "${privkey}" >"${HOME}/.ssh/id_rsa" || exit 1
-        chmod 600 "${HOME}/.ssh/id_rsa" || exit 1
-      fi
-      if ! echo "${path}" | grep '@' >/dev/null 2>&1 && ! [ "${username}" = "" ]; then
-        path="${username}@${path}"
-      fi
-      log_info "Mounting ${path} to ${mountpoint} using sshfs."
-      mkdir -p "${mountpoint}" || exit 1
-      if [ "${port}" = "" ]; then
-        sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}" || exit 1
+      if [ "${mounts_summary}" = "" ]; then
+        mounts_summary="${mount_summary}"
       else
-        sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}" || exit 1
+        mounts_summary="${mounts_summary}
+${mount_summary}"
       fi
-      continue
-    fi
-    if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
-      # Extract host and share from path (//host/share)
-      # Remove leading //
-      path_without_slashes="${path#//}"
-      # Extract host (everything before the first /)
-      smb_host="${path_without_slashes%%/*}"
-      # Extract share (everything after the first /)
-      smb_share="${path_without_slashes#*/}"
-      
-      log_info "Mounting ${path} to ${mountpoint} using smbnetfs."
-      
-      # Use a single shared smbnetfs root for all mounts
-      smbnetfs_root="/tmp/smbnetfs"
-      
-      # Mount smbnetfs if not already mounted
-      if [ ! -d "${smbnetfs_root}/${smb_host}" ]; then
-        mkdir -p "${smbnetfs_root}" || exit 1
-        
-        # Create credentials file if username is provided
-        if [ ! "${username}" = "" ]; then
-          mkdir -p /dev/shm || exit 1
-          smbcredentials="/dev/shm/.smbcredentials"
+
+      if echo "${path}" | grep ':' >/dev/null 2>&1; then # SSH
+        if [ ! "${privkey}" = "" ]; then
+          mkdir -p "${HOME}/.ssh" || exit 1
           # Add cleanup trap
-          trap 'rm -f "${smbcredentials}" /dev/shm/smbnetfs.conf' EXIT
-          if [ "${password}" = "" ]; then
-            echo -e "${username}\n" > "${smbcredentials}"
-          else
-            echo -e "${username}\n${password}" > "${smbcredentials}"
-          fi
-          chmod 600 "${smbcredentials}" || exit 1
-          
-          # Create config file
-          echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
-          smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other || exit 1
-        else
-          # Mount without credentials for guest access
-          smbnetfs "${smbnetfs_root}" -o allow_other || exit 1
+          trap 'rm -f "${HOME}/.ssh/id_rsa"' EXIT
+          echo "${privkey}" >"${HOME}/.ssh/id_rsa" || exit 1
+          chmod 600 "${HOME}/.ssh/id_rsa" || exit 1
         fi
-        
-        sleep 2
+        if ! echo "${path}" | grep '@' >/dev/null 2>&1 && ! [ "${username}" = "" ]; then
+          path="${username}@${path}"
+        fi
+        log_info "Mounting ${path} to ${mountpoint} using sshfs."
+        mkdir -p "${mountpoint}" || exit 1
+        if [ "${port}" = "" ]; then
+          if ! sshfs -v -o StrictHostKeyChecking=no "${path}" "${mountpoint}"; then
+            log_error "Failed to mount ${path} to ${mountpoint} using sshfs."
+            exit 1
+          fi
+        else
+          if ! sshfs -v -o StrictHostKeyChecking=no -p "${port}" "${path}" "${mountpoint}"; then
+            log_error "Failed to mount ${path} to ${mountpoint} using sshfs on port ${port}."
+            exit 1
+          fi
+        fi
+        log_info "Successfully mounted ${path} to ${mountpoint}."
+        continue
       fi
-      
-      # Create a symlink to the actual share path
-      ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}" || exit 1
-      
-      continue
-    fi
-    log_error "Invalid path ${path} for mountpoint ${mountpoint}."
-    log_error "Syntax is \"user@host:/path\" for SSH, or \"//host/path\" for SMB."
-    exit 1
-  done
-fi
+      if echo "${path}" | grep '^\/\/' >/dev/null 2>&1; then # SMB
+        # Extract host and share from path (//host/share)
+        local path_without_slashes smb_host smb_share smbnetfs_root
+        # Remove leading //
+        path_without_slashes="${path#//}"
+        # Extract host (everything before the first /)
+        smb_host="${path_without_slashes%%/*}"
+        # Extract share (everything after the first /)
+        smb_share="${path_without_slashes#*/}"
+
+        log_info "Mounting ${path} to ${mountpoint} using smbnetfs."
+
+        # Use a single shared smbnetfs root for all mounts
+        smbnetfs_root="/tmp/smbnetfs"
+
+        # Mount smbnetfs if not already mounted
+        if [ ! -d "${smbnetfs_root}/${smb_host}" ]; then
+          mkdir -p "${smbnetfs_root}" || exit 1
+
+          # Create credentials file if username is provided
+          if [ ! "${username}" = "" ]; then
+            local smbcredentials
+            mkdir -p /dev/shm || exit 1
+            smbcredentials="/dev/shm/.smbcredentials"
+            # Add cleanup trap
+            trap 'rm -f "${smbcredentials}" /dev/shm/smbnetfs.conf' EXIT
+            if [ "${password}" = "" ]; then
+              echo -e "${username}\n" > "${smbcredentials}"
+            else
+              echo -e "${username}\n${password}" > "${smbcredentials}"
+            fi
+            chmod 600 "${smbcredentials}" || exit 1
+
+            # Create config file
+            echo "auth ${smbcredentials}" > /dev/shm/smbnetfs.conf || exit 1
+            if ! smbnetfs "${smbnetfs_root}" -o config=/dev/shm/smbnetfs.conf,allow_other; then
+              log_error "Failed to mount smbnetfs at ${smbnetfs_root} for ${path}."
+              exit 1
+            fi
+          else
+            # Mount without credentials for guest access
+            if ! smbnetfs "${smbnetfs_root}" -o allow_other; then
+              log_error "Failed to mount smbnetfs at ${smbnetfs_root} for ${path} (guest access)."
+              exit 1
+            fi
+          fi
+
+          sleep 2
+        fi
+
+        # Create a symlink to the actual share path
+        ln -sf "${smbnetfs_root}/${smb_host}/${smb_share}" "${mountpoint}" || exit 1
+
+        log_info "Successfully mounted ${path} to ${mountpoint}."
+        continue
+      fi
+      log_error "Invalid path ${path} for mountpoint ${mountpoint}."
+      log_error "Syntax is \"user@host:/path\" for SSH, or \"//host/path\" for SMB."
+      exit 1
+    done
+  fi
+}
+
+# Setup postfix and mutt
+configures_email_services
+
+# Mount
+configures_mounts
 
 
 # Read and validate jobs configuration
@@ -652,26 +708,81 @@ if [ "${jobs}" -eq 0 ]; then
   exit 1
 fi
 
-# Build job summary for startup email
+# Build job summary for startup email and validate configuration
 jobs_summary=""
+declare -A seen_job_ids
+validation_errors=0
 for ((i = 0; i < jobs; i++)); do
 
   if ! jobid=$(jq -r ".jobs[${i}].id" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${jobid}" = "" ]; then
     log_error "Missing job ID for job index ${i}."
+    validation_errors=$((validation_errors + 1))
     continue
   fi
 
+  # Check for duplicate job IDs
+  if [ -n "${seen_job_ids[${jobid}]+x}" ]; then
+    log_error "Duplicate job ID '${jobid}' at index ${i} (first seen at index ${seen_job_ids[${jobid}]})."
+    validation_errors=$((validation_errors + 1))
+  fi
+  seen_job_ids[${jobid}]="${i}"
+
   if ! type=$(jq -r ".jobs[${i}].type" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${type}" = "" ]; then
     log_error "Missing type for job ID ${jobid}."
+    validation_errors=$((validation_errors + 1))
     continue
   fi
-  
+
+  # Validate job type against allowlist
+  case "${type}" in
+    s3bucket|azstorage|pgsql) ;;
+    *)
+      log_error "Invalid job type '${type}' for job ID ${jobid}. Must be one of: s3bucket, azstorage, pgsql."
+      validation_errors=$((validation_errors + 1))
+      continue
+      ;;
+  esac
+
   script="dump_${type}.sh"
 
   if ! crontab=$(jq -r ".jobs[${i}].crontab" "${CONFIGFILE}" | sed 's/^null$//g') || [ "${crontab}" = "" ]; then
     log_error "Missing crontab for job ID ${jobid}."
+    validation_errors=$((validation_errors + 1))
     continue
   fi
+
+  # Validate cron pattern has exactly 5 fields
+  cron_field_count=$(echo "${crontab}" | wc -w)
+  if [ "${cron_field_count}" -ne 5 ]; then
+    log_error "Invalid crontab '${crontab}' for job ID ${jobid}: expected 5 fields, got ${cron_field_count}."
+    validation_errors=$((validation_errors + 1))
+  fi
+
+  # Validate required tools per job type
+  case "${type}" in
+    s3bucket)
+      if ! which aws >/dev/null 2>&1; then
+        log_error "Required tool 'aws' not found for job ID ${jobid} (type: ${type})."
+        validation_errors=$((validation_errors + 1))
+      fi
+      ;;
+    azstorage)
+      if ! which azcopy >/dev/null 2>&1; then
+        log_error "Required tool 'azcopy' not found for job ID ${jobid} (type: ${type})."
+        validation_errors=$((validation_errors + 1))
+      fi
+      ;;
+    pgsql)
+      if ! which pg_dump >/dev/null 2>&1; then
+        log_error "Required tool 'pg_dump' not found for job ID ${jobid} (type: ${type})."
+        validation_errors=$((validation_errors + 1))
+      fi
+      if ! which psql >/dev/null 2>&1; then
+        log_error "Required tool 'psql' not found for job ID ${jobid} (type: ${type})."
+        validation_errors=$((validation_errors + 1))
+      fi
+      ;;
+  esac
 
   jobdebug=$(jq -r ".jobs[${i}].debug" "${CONFIGFILE}")
 
@@ -681,18 +792,21 @@ for ((i = 0; i < jobs; i++)); do
     scriptfile=$(which "${script}" 2>/dev/null)
     if [ "${scriptfile}" = "" ]; then
       log_error "Missing scriptfile ${script}."
-      exit 1
+      validation_errors=$((validation_errors + 1))
+      continue
     fi
   fi
 
   if ! [ -f "${scriptfile}" ]; then
     log_error "Missing scriptfile ${scriptfile}."
-    exit 1
+    validation_errors=$((validation_errors + 1))
+    continue
   fi
 
   if ! [ -x "${scriptfile}" ]; then
     log_error "Scriptfile ${scriptfile} not executable."
-    exit 1
+    validation_errors=$((validation_errors + 1))
+    continue
   fi
 
   job_summary="ID: ${jobid}
@@ -709,6 +823,13 @@ ${job_summary}"
   fi
 
 done
+
+if [ ${validation_errors} -gt 0 ]; then
+  log_error "Configuration validation failed with ${validation_errors} error(s). Exiting."
+  exit 1
+fi
+
+log_info "All ${jobs} job(s) passed configuration validation."
 
 
 # Send startup e-mail
@@ -763,6 +884,13 @@ log_info "Startup email sent."
 # Ranges (1-5) and lists (1,3,5) are intentionally not supported as they are not used
 # in any documented configurations for this application.
 #
+# Implementation notes:
+#   - Time components are extracted using date formatting with no-pad (%-M, %-H, etc.)
+#     to avoid leading-zero comparison issues
+#   - Day of week uses %u (1=Monday..7=Sunday) then converts 7→0 for cron compatibility
+#     where 0=Sunday and 6=Saturday
+#   - Step values (*/N) use modulo arithmetic: value % step == 0
+#
 # Arguments:
 #   $1 - cron_pattern: Standard 5-field cron pattern (minute hour day month day-of-week)
 #   $2 - unix_timestamp: Unix timestamp (seconds since epoch) to evaluate
@@ -771,8 +899,10 @@ log_info "Startup email sent."
 #   0 (success) if the timestamp matches the cron pattern
 #   1 (failure) if the timestamp does not match
 #
-# Example:
-#   matches_cron_pattern "*/5 * * * *" "1704067200"  # Returns 0 if minute is divisible by 5
+# Examples:
+#   matches_cron_pattern "*/5 * * * *" "1704067200"  # Every 5 minutes
+#   matches_cron_pattern "0 2 * * *" "1704067200"    # Daily at 2:00 AM
+#   matches_cron_pattern "30 1 * * 0" "1704067200"   # Sundays at 1:30 AM
 #
 matches_cron_pattern() {
   local cron_pattern="$1"
@@ -830,7 +960,14 @@ matches_cron_pattern() {
 # matched at any point between the last run and the current time. This ensures that
 # jobs scheduled during periods when other jobs were running will still execute.
 #
-# The function looks backward in time, minute by minute, from the last execution
+# Catch-up algorithm:
+#   1. If last_run is 0 (first run), only check the current minute
+#   2. Otherwise, iterate forward minute-by-minute from (last_run + 1 minute) to now
+#   3. Return success on the first minute that matches the cron pattern
+#   4. This means a job scheduled for e.g. "0 3 * * *" (3 AM) that couldn't run at
+#      3:00 because another job was executing will still trigger when checked at 3:05
+#
+# The function looks forward in time, minute by minute, from the last execution
 # to the current minute, checking if any of those minutes match the cron pattern.
 #
 # Arguments:
@@ -841,8 +978,9 @@ matches_cron_pattern() {
 #   0 (success) if the job should run now
 #   1 (failure) if the job should not run yet
 #
-# Example:
+# Examples:
 #   determines_job_execution_needed "*/5 * * * *" "1704067200"
+#   determines_job_execution_needed "0 2 * * *" "0"  # First run, check if it's 2:00 AM now
 #
 determines_job_execution_needed() {
   local cron_pattern="$1"

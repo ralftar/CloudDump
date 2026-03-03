@@ -149,12 +149,17 @@ rm -f "${DESTINATION}/TEST_FILE"
 
 log_info "Syncing source ${source_stripped} to destination ${DESTINATION}..."
 
+sync_start_time=$(date +%s)
+
 azcopy sync --recursive --delete-destination="${DELETE_DESTINATION}" "${SOURCE}" "${DESTINATION}"
 result=$?
 
+sync_end_time=$(date +%s)
+sync_duration=$((sync_end_time - sync_start_time))
+
 if [ ${result} -ne 0 ]; then
-  log_error "Sync from source ${source_stripped} to destination ${DESTINATION} failed."
+  log_error "Sync from source ${source_stripped} to destination ${DESTINATION} failed after ${sync_duration} seconds."
   exit ${result}
 fi
 
-log_info "Sync completed successfully."
+log_info "Sync completed successfully in ${sync_duration} seconds."
