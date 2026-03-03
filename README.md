@@ -1,4 +1,4 @@
-# Vendanor CloudDump 📥 [![Publish Status](https://github.com/vendanor/CloudDump/workflows/Publish/badge.svg)](https://github.com/vendanor/CloudDump/actions)
+# Vendanor CloudDump :inbox_tray: [![Publish Status](https://github.com/vendanor/CloudDump/workflows/Publish/badge.svg)](https://github.com/vendanor/CloudDump/actions)
 
 CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages, S3 buckets (including MinIO), and PostgreSQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
 
@@ -16,7 +16,7 @@ While CloudDump can be a useful component of a disaster recovery or backup regim
 
 ## Running
 
-```docker 
+```docker
 docker run \
   --name "clouddump"  \
   --mount type=bind,source=config.json,target=/config/config.json,readonly \
@@ -110,7 +110,7 @@ docker run \
         }
       ]
     }
-       
+
 ### MinIO Configuration Example
 
 For MinIO or other S3-compatible storage, use the `endpoint_url` parameter:
@@ -135,13 +135,17 @@ For MinIO or other S3-compatible storage, use the `endpoint_url` parameter:
 
 ## Architecture
 
-CloudDump runs as a single-process Docker container with a main loop that:
+CloudDump runs as a single-process Docker container with a Python orchestrator (`start.py`) that:
 
 1. Checks every minute for jobs that match their cron schedule
 2. Executes matching jobs sequentially (one at a time)
 3. Looks backward in time from the last run to determine if a job should have run (catch-up execution)
 4. Logs all output to stdout for container log management
 5. Creates temporary log files that are attached to email reports and then deleted
+6. Sends email reports directly via `smtplib` (SMTP over SSL)
+7. Forwards SIGTERM to running child processes for graceful shutdown
+
+External tools invoked by subprocess: `aws`, `azcopy`, `pg_dump`, `psql`, `sshfs`, `smbnetfs`, `bzip2`.
 
 This architecture ensures predictable resource usage and simplifies deployment and monitoring in containerized environments.
 
@@ -150,8 +154,8 @@ This architecture ensures predictable resource usage and simplifies deployment a
 ### Container Won't Start
 
 - **Missing config file**: Ensure `config.json` is mounted at `/config/config.json`. Check that the mount path is correct and the file is readable.
-- **Missing required commands**: The startup script checks for required system commands. Check container logs for "Missing ... commands" errors.
-- **Invalid JSON**: Validate your `config.json` with `jq . config.json` before mounting.
+- **Invalid JSON**: Validate your `config.json` with `python3 -m json.tool config.json` before mounting.
+- **Missing required tools**: The startup script validates that required tools (`aws`, `azcopy`, `pg_dump`, `psql`) are available for each configured job type. Check container logs for errors.
 
 ### Mount Failures
 
@@ -167,8 +171,7 @@ This architecture ensures predictable resource usage and simplifies deployment a
 
 ### Email Not Sending
 
-- **SMTP configuration**: Verify `SMTPSERVER`, `SMTPPORT`, `SMTPUSER`, and `SMTPPASS` in your config. CloudDump uses SMTPS (port 465) with SASL authentication.
-- **Postfix errors**: Check container logs for postfix-related errors at startup.
+- **SMTP configuration**: Verify `SMTPSERVER`, `SMTPPORT`, `SMTPUSER`, and `SMTPPASS` in your config. CloudDump uses SMTPS (port 465) via Python's `smtplib`.
 - **Firewall**: Ensure the container can reach the SMTP server on the configured port.
 
 ### Performance Issues
@@ -178,7 +181,7 @@ This architecture ensures predictable resource usage and simplifies deployment a
 
 ### Debugging
 
-Enable debug mode for detailed logging:
+Enable debug mode for verbose logging:
 
 ```json
 {
@@ -188,19 +191,7 @@ Enable debug mode for detailed logging:
 }
 ```
 
-Per-job debugging can also be enabled:
-
-```json
-{
-  "jobs": [
-    {
-      "debug": true
-    }
-  ]
-}
-```
-
-Setting `DEBUG` to `true` in settings enables bash trace mode (`set -x`) for the main script and verbose logging. Per-job `debug` enables trace mode for individual dump scripts.
+Setting `DEBUG` to `true` enables debug-level log output from the Python orchestrator.
 
 ## License
 
