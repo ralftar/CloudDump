@@ -25,8 +25,6 @@ jobs:
         run: |
           # Fetch latest release info from GitHub API
           latest_version=$(curl -s https://api.github.com/repos/Azure/azure-storage-azcopy/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          latest_date=$(date +%Y%m%d)
-          
           # Get current version from install script
           current_version=$(grep '^azcopy_version=' install_azcopy.sh | sed -n 's/^azcopy_version="\(.*\)"$/\1/p')
           
@@ -42,11 +40,8 @@ jobs:
             
             # Update the install script
             sed -i "s/^azcopy_version=\".*\"$/azcopy_version=\"${latest_version}\"/" install_azcopy.sh
-            sed -i "s/^azcopy_date=\".*\"$/azcopy_date=\"${latest_date}\"/" install_azcopy.sh
-            
             echo "version=${latest_version}" >> $GITHUB_OUTPUT
-            echo "date=${latest_date}" >> $GITHUB_OUTPUT
-            echo "Update available: ${latest_version} (${latest_date})"
+            echo "Update available: ${latest_version}"
           fi
       
       - name: Close outdated azcopy PRs
@@ -73,7 +68,6 @@ jobs:
             This PR updates AzCopy to the latest version.
             
             **New Version:** ${{ steps.check.outputs.version }}
-            **Release Date:** ${{ steps.check.outputs.date }}
             
             **Source:** https://github.com/Azure/azure-storage-azcopy/releases
             
