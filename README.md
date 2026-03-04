@@ -24,7 +24,33 @@ hardware you own.
 
 CloudDump runs as a single Docker container. Point it at your cloud
 resources, tell it when to sync, and forget about it. If something breaks,
-you get an email.
+you get an email. Consider setting up a dead-man switch (e.g.
+[Healthchecks.io](https://healthchecks.io)) that alerts you when expected
+emails *stop arriving* — a silent failure is worse than a loud one.
+
+## Disaster recovery
+
+CloudDump can be a key component in your disaster recovery plan. Critically,
+CloudDump *pulls* data from the cloud — the cloud provider has no knowledge
+of your local copy. This means a compromised or malfunctioning cloud
+environment cannot delete, encrypt, or tamper with data it doesn't know
+exists. The dependency flows one way: your backup depends on the cloud being
+reachable, but the cloud has zero control over what you already have.
+
+A typical DR setup:
+
+1. **CloudDump syncs** your S3 buckets, Azure blobs, and databases to local
+   storage on a schedule.
+2. **A proper backup tool** (Restic, Borg, Veeam, etc.) snapshots the local
+   copy with versioning and retention.
+3. **Monitoring** — CloudDump emails you on every run. Pair this with a
+   dead-man switch so you are alerted if reports stop arriving entirely.
+4. **Regular restore drills** — periodically verify that you can actually
+   restore from the local copy.
+
+This gives you defense in depth: CloudDump handles the "get the data out of
+the cloud" step, your backup tool handles versioning and retention, and the
+dead-man switch ensures the whole pipeline is still running.
 
 ## Quick start
 
@@ -39,7 +65,7 @@ you get an email.
     "SMTPUSER": "alerts@example.com",
     "SMTPPASS": "smtp-password",
     "MAILFROM": "alerts@example.com",
-    "MAILTO": "ops@example.com"
+    "MAILTO": "ops@example.com, oncall@example.com"
   },
   "jobs": [
     {
@@ -108,11 +134,14 @@ That's it. CloudDump will sync your S3 bucket to `/backup/s3` every day at
 | `SMTPUSER` | No | SMTP username |
 | `SMTPPASS` | No | SMTP password |
 | `MAILFROM` | No | Sender address |
-| `MAILTO` | No | Recipient address |
+| `MAILTO` | No | Recipient address(es) — comma-separated or JSON array |
 | `DEBUG` | No | Enable debug logging (`true`/`false`) |
 | `mount` | No | Array of SSH/SMB mount definitions |
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
+`MAILTO` accepts multiple recipients as a comma-separated string
+(`"ops@example.com, oncall@example.com"`) or a JSON array
+(`["ops@example.com", "oncall@example.com"]`).
 
 ### Job fields
 

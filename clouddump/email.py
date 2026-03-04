@@ -27,9 +27,15 @@ def send_email(settings, subject, body, attachments=None):
         log.warning("Email not configured, skipping.")
         return
 
+    # Support multiple recipients: comma-separated string or list.
+    if isinstance(mail_to, list):
+        recipients = [r.strip() for r in mail_to if r.strip()]
+    else:
+        recipients = [r.strip() for r in mail_to.split(",") if r.strip()]
+
     msg = MIMEMultipart()
     msg["From"] = f"{mail_from} <{mail_from}>"
-    msg["To"] = mail_to
+    msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
@@ -44,12 +50,12 @@ def send_email(settings, subject, body, attachments=None):
             part["Content-Disposition"] = f'attachment; filename="{name}"'
             msg.attach(part)
 
-    log.info("Sending email to %s from %s.", mail_to, mail_from)
+    log.info("Sending email to %s from %s.", ", ".join(recipients), mail_from)
     try:
         with smtplib.SMTP_SSL(smtp_server, int(smtp_port)) as srv:
             if smtp_user and smtp_pass:
                 srv.login(smtp_user, smtp_pass)
-            srv.sendmail(mail_from, mail_to, msg.as_string())
+            srv.sendmail(mail_from, recipients, msg.as_string())
     except Exception as exc:
         log.error("Failed to send email: %s", exc, exc_info=True)
 
