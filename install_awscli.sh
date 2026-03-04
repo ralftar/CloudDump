@@ -3,7 +3,6 @@
 set -e  # Exit immediately if a command fails
 
 awscli_version="2.22.19"
-awscli_date="20250116"  # Used for version tracking
 awscli_url="https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${awscli_version}.zip"
 awscli_filename="awscliv2.zip"
 

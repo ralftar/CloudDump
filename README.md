@@ -1,198 +1,280 @@
-# Vendanor CloudDump :inbox_tray: [![Publish Status](https://github.com/vendanor/CloudDump/workflows/Publish/badge.svg)](https://github.com/vendanor/CloudDump/actions)
+# 🌩️ CloudDump
 
-CloudDump is a fully dockerized tool that schedules and executes data dumps from Azure blob storages, S3 buckets (including MinIO), and PostgreSQL databases. Jobs are run sequentially according to cron schedules, with email reports generated for each job. SMB and SSH shares can be mounted and used as backup destinations.
+[![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-While CloudDump can be a useful component of a disaster recovery or backup regime (e.g. from cloud to on premises), it should not be used as a standalone backup tool, as it offers limited or no backup history, retention policies, and archival features. The tool is designed to create a current-state backup, which can then be fed into other tools for fully featured file-level backups.
+**Keep a copy of your cloud data somewhere you control.**
 
-## Features
+The cloud is just someone else's computer. CloudDump pulls your persistent
+data — S3 buckets, Azure Blob Storage, PostgreSQL databases — down to
+on-premises storage, another cloud, or wherever you want. On a schedule,
+unattended, with email notifications when things succeed or fail.
 
-- **Sequential Job Execution**: Jobs run in sequence, not in parallel, ensuring predictable resource usage
-- **Cron-based Scheduling**: Standard cron patterns for job scheduling (e.g., `*/5 * * * *` for every 5 minutes)
-- **Catch-up Execution**: If a scheduled time is missed while jobs are running, the job will run when checked to catch up on missed schedules
-- **Stdout Logging**: All logs go to stdout for proper container log management
-- **Email Reports**: Email reports with temporary log files attached for each job execution
-- **Mount Support**: Support for SSH (sshfs) and SMB (smbnetfs) mounts without requiring elevated privileges
-- **Debian**: Built on Debian 12 (Bookworm)
+CloudDump is **not** a backup system. There is no rotation, no versioning,
+no retention policies. It gives you a current-state copy of your data,
+synced on a cron schedule. What you do with that copy — feed it into
+Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
 
-## Running
+## Why
 
-```docker
-docker run \
-  --name "clouddump"  \
-  --mount type=bind,source=config.json,target=/config/config.json,readonly \
-  --volume /clouddump/:/mnt/clouddump \
-  -d --restart always \
-  ghcr.io/vendanor/clouddump:latest
-```
+You store data in S3 or Azure. Your databases run in the cloud. That's
+fine — until a provider has an outage, a misconfigured IAM policy deletes
+your bucket, or you just want to sleep better knowing there's a copy on
+hardware you own.
 
+CloudDump runs as a single Docker container. Point it at your cloud
+resources, tell it when to sync, and forget about it. If something breaks,
+you get an email.
 
-### config.json example
+## Quick start
 
-    {
-      "settings": {
-        "HOST": "host.domain.dom",
-        "SMTPSERVER": "smtp.domain.dom",
-        "SMTPPORT": "465",
-        "SMTPUSER": "username",
-        "SMTPPASS": "password",
-        "MAILFROM": "user@domain.dom",
-        "MAILTO": "user@domain.dom",
-        "DEBUG": false,
-        "mount": [
-          {
-            "path": "host:/share",
-            "mountpoint": "/mnt/smb",
-            "username": "user",
-            "password": "pass",
-            "privkey": ""
-          }
-        ]
-      },
-      "jobs": [
-        {
-          "type": "azstorage",
-          "id": "azdump1",
-          "crontab": "*/5 * * * *",
-          "debug": false,
-          "blobstorages": [
-            {
-              "source": "https://example.blob.core.windows.net/test?etc",
-              "destination": "/azdump/azdump1",
-              "delete_destination": true
-            }
-          ]
-        },
-        {
-          "type": "s3bucket",
-          "id": "s3dump1",
-          "crontab": "0 2 * * *",
-          "debug": false,
-          "buckets": [
-            {
-              "source": "s3://my-bucket/path",
-              "destination": "/s3dump/s3dump1",
-              "delete_destination": false,
-              "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
-              "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-              "aws_region": "us-east-1",
-              "endpoint_url": ""
-            }
-          ]
-        },
-        {
-          "type": "pgsql",
-          "id": "pgdump1",
-          "crontab": "* * * * *",
-          "debug": false,
-          "servers": [
-            {
-              "host": "example.azure.com",
-              "port": 5432,
-              "user": "username",
-              "pass": "password",
-              "databases": [
-                {
-                  "mydb": {
-                    "tables_included": [],
-                    "tables_excluded": [
-                      "table1",
-                      "table2"
-                    ]
-                  }
-                }
-              ],
-              "databases_excluded": [],
-              "backuppath": "/pgdump",
-              "filenamedate": true,
-              "compress": true
-            }
-          ]
-        }
-      ]
-    }
-
-### MinIO Configuration Example
-
-For MinIO or other S3-compatible storage, use the `endpoint_url` parameter:
-
-    {
-      "type": "s3bucket",
-      "id": "miniodump1",
-      "crontab": "0 3 * * *",
-      "debug": false,
-      "buckets": [
-        {
-          "source": "s3://my-bucket/path",
-          "destination": "/s3dump/miniodump1",
-          "delete_destination": false,
-          "aws_access_key_id": "minioadmin",
-          "aws_secret_access_key": "minioadmin",
-          "aws_region": "us-east-1",
-          "endpoint_url": "https://minio.example.com:9000"
-        }
-      ]
-    }
-
-## Architecture
-
-CloudDump runs as a single-process Docker container with a Python orchestrator (`start.py`) that:
-
-1. Checks every minute for jobs that match their cron schedule
-2. Executes matching jobs sequentially (one at a time)
-3. Looks backward in time from the last run to determine if a job should have run (catch-up execution)
-4. Logs all output to stdout for container log management
-5. Creates temporary log files that are attached to email reports and then deleted
-6. Sends email reports directly via `smtplib` (SMTP over SSL)
-7. Forwards SIGTERM to running child processes for graceful shutdown
-
-External tools invoked by subprocess: `aws`, `azcopy`, `pg_dump`, `psql`, `sshfs`, `smbnetfs`, `bzip2`.
-
-This architecture ensures predictable resource usage and simplifies deployment and monitoring in containerized environments.
-
-## Troubleshooting
-
-### Container Won't Start
-
-- **Missing config file**: Ensure `config.json` is mounted at `/config/config.json`. Check that the mount path is correct and the file is readable.
-- **Invalid JSON**: Validate your `config.json` with `python3 -m json.tool config.json` before mounting.
-- **Missing required tools**: The startup script validates that required tools (`aws`, `azcopy`, `pg_dump`, `psql`) are available for each configured job type. Check container logs for errors.
-
-### Mount Failures
-
-- **SSH mounts**: Ensure the SSH key is valid and the remote host is reachable. Check that the path format is `user@host:/path` or `host:/path` (with username configured separately).
-- **SMB mounts**: Ensure the path format is `//host/share`. Verify credentials are correct. The container uses `smbnetfs` which requires FUSE support — ensure the container has the necessary privileges.
-- **Permission denied**: Verify the mount credentials and that the remote share allows access from the container's network.
-
-### Jobs Not Running
-
-- **Check cron syntax**: CloudDump supports `*`, exact values (e.g., `5`), and step values (e.g., `*/15`). Ranges (`1-5`) and lists (`1,3,5`) are not supported.
-- **Catch-up execution**: If a job was scheduled while another was running, it will catch up on the next check cycle. Jobs run sequentially, not in parallel.
-- **Missing tools**: S3 jobs require `aws`, Azure Storage jobs require `azcopy`, and PostgreSQL jobs require `pg_dump` and `psql`. Check logs for tool-related errors.
-
-### Email Not Sending
-
-- **SMTP configuration**: Verify `SMTPSERVER`, `SMTPPORT`, `SMTPUSER`, and `SMTPPASS` in your config. CloudDump uses SMTPS (port 465) via Python's `smtplib`.
-- **Firewall**: Ensure the container can reach the SMTP server on the configured port.
-
-### Performance Issues
-
-- **Long sync times**: Check the email reports for job duration. For S3, consider using `endpoint_url` for closer S3-compatible endpoints. For Azure, ensure the container is in the same region as the storage account.
-- **Disk space**: Ensure the backup destination has sufficient space. Failed syncs may leave partial data.
-
-### Debugging
-
-Enable debug mode for verbose logging:
+**1. Create a config file**
 
 ```json
 {
   "settings": {
-    "DEBUG": true
-  }
+    "HOST": "myserver",
+    "SMTPSERVER": "smtp.example.com",
+    "SMTPPORT": "465",
+    "SMTPUSER": "alerts@example.com",
+    "SMTPPASS": "smtp-password",
+    "MAILFROM": "alerts@example.com",
+    "MAILTO": "ops@example.com"
+  },
+  "jobs": [
+    {
+      "type": "s3bucket",
+      "id": "prod-assets",
+      "crontab": "0 3 * * *",
+      "buckets": [
+        {
+          "source": "s3://my-bucket",
+          "destination": "/mnt/clouddump/s3",
+          "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+          "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+          "aws_region": "eu-west-1"
+        }
+      ]
+    }
+  ]
 }
 ```
 
-Setting `DEBUG` to `true` enables debug-level log output from the Python orchestrator.
+**2. Run the container**
+
+```sh
+docker run -d --restart always \
+  --name clouddump \
+  --mount type=bind,source=$(pwd)/config.json,target=/config/config.json,readonly \
+  --volume /backup:/mnt/clouddump \
+  ghcr.io/ralftar/clouddump:latest
+```
+
+That's it. CloudDump will sync your S3 bucket to `/backup/s3` every day at
+03:00 and email you the result.
+
+## Supported sources
+
+| Source | Job type | Tool used | Auth |
+|--------|----------|-----------|------|
+| AWS S3 | `s3bucket` | AWS CLI | Access key + secret |
+| S3-compatible (MinIO, etc.) | `s3bucket` | AWS CLI | Access key + secret + `endpoint_url` |
+| Azure Blob Storage | `azstorage` | AzCopy | SAS token in source URL |
+| PostgreSQL | `pgsql` | pg_dump / psql | Host, port, user, password |
+
+## Features
+
+- **Cron scheduling** — standard 5-field cron patterns (`0 3 * * *`, `*/15 * * * *`)
+- **Catch-up execution** — if a scheduled run is missed because another job is
+  still running, it fires as soon as the slot opens (within a 60-minute window)
+- **Retry & timeout** — configurable per job (default: 3 attempts, 1-week timeout)
+- **Email reports** — success/failure notifications with log file attached
+- **Mount support** — SSH (`sshfs`) and SMB (`smbnetfs`) destinations without
+  elevated privileges
+- **Credential redaction** — passwords, keys, and tokens are scrubbed from logs
+  and emails automatically
+- **Health check** — built-in Docker `HEALTHCHECK` via heartbeat file
+- **Graceful shutdown** — SIGTERM forwarded to child processes
+
+## Configuration reference
+
+### Settings
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `HOST` | No | Hostname shown in email subjects |
+| `SMTPSERVER` | No | SMTP server (SSL, port 465) |
+| `SMTPPORT` | No | SMTP port |
+| `SMTPUSER` | No | SMTP username |
+| `SMTPPASS` | No | SMTP password |
+| `MAILFROM` | No | Sender address |
+| `MAILTO` | No | Recipient address |
+| `DEBUG` | No | Enable debug logging (`true`/`false`) |
+| `mount` | No | Array of SSH/SMB mount definitions |
+
+Email is optional. If SMTP is not configured, CloudDump runs silently.
+
+### Job fields
+
+| Key | Required | Default | Description |
+|-----|----------|---------|-------------|
+| `id` | Yes | — | Unique job identifier |
+| `type` | Yes | — | `s3bucket`, `azstorage`, or `pgsql` |
+| `crontab` | Yes | — | 5-field cron pattern |
+| `timeout` | No | `604800` (7 days) | Job timeout in seconds |
+| `retries` | No | `3` | Number of attempts on failure |
+
+Plus type-specific fields (`buckets`, `blobstorages`, `servers`) — see examples below.
+
+### S3 bucket
+
+```json
+{
+  "type": "s3bucket",
+  "id": "my-s3-job",
+  "crontab": "0 2 * * *",
+  "buckets": [
+    {
+      "source": "s3://bucket-name/optional-prefix",
+      "destination": "/mnt/clouddump/s3",
+      "delete_destination": false,
+      "aws_access_key_id": "AKIA...",
+      "aws_secret_access_key": "...",
+      "aws_region": "us-east-1",
+      "endpoint_url": ""
+    }
+  ]
+}
+```
+
+Set `endpoint_url` for S3-compatible storage like MinIO:
+
+```json
+"endpoint_url": "https://minio.example.com:9000"
+```
+
+### Azure Blob Storage
+
+```json
+{
+  "type": "azstorage",
+  "id": "my-azure-job",
+  "crontab": "*/5 * * * *",
+  "blobstorages": [
+    {
+      "source": "https://account.blob.core.windows.net/container?sv=...&sig=...",
+      "destination": "/mnt/clouddump/azure",
+      "delete_destination": true
+    }
+  ]
+}
+```
+
+The source URL includes the SAS token for authentication.
+
+### PostgreSQL
+
+```json
+{
+  "type": "pgsql",
+  "id": "my-pg-job",
+  "crontab": "0 4 * * *",
+  "servers": [
+    {
+      "host": "db.example.com",
+      "port": 5432,
+      "user": "backup_user",
+      "pass": "password",
+      "databases": [
+        { "mydb": { "tables_included": [], "tables_excluded": ["large_logs"] } }
+      ],
+      "databases_excluded": ["template0", "template1"],
+      "backuppath": "/mnt/clouddump/pg",
+      "filenamedate": true,
+      "compress": true
+    }
+  ]
+}
+```
+
+- `databases`: explicit list with per-database table filters. If empty, all
+  databases are dumped (except `databases_excluded`).
+- `compress`: bzip2 compression of dump files.
+- `filenamedate`: append timestamp to dump filenames.
+
+### Mounts
+
+```json
+"mount": [
+  {
+    "path": "user@host:/remote/path",
+    "mountpoint": "/mnt/ssh-target",
+    "privkey": "/config/id_rsa"
+  },
+  {
+    "path": "//server/share",
+    "mountpoint": "/mnt/smb-target",
+    "username": "user",
+    "password": "pass"
+  }
+]
+```
+
+Mounts are set up at startup before any jobs run. Use them as backup
+destinations in your job configs.
+
+## Architecture
+
+CloudDump is a single-process Python application in a Debian 12 container.
+
+```
+config.json ──> [Orchestrator] ──> aws s3 sync
+                     │          ──> azcopy sync
+                     │          ──> pg_dump / psql
+                     │
+                     ├── cron scheduler (check every 60s)
+                     ├── sequential job execution
+                     ├── signal forwarding (SIGTERM → child)
+                     └── email reports (SMTPS)
+```
+
+Jobs run one at a time. If job B is scheduled while job A is still running,
+job B fires as soon as A finishes (within a 60-minute catch-up window). This
+keeps resource usage predictable and avoids conflicts on shared destinations.
+
+### Bundled tools
+
+| Tool | Version |
+|------|---------|
+| AWS CLI | 2.22.19 |
+| AzCopy | 10.32.1 |
+| PostgreSQL client | 15 |
+
+## Troubleshooting
+
+**Container won't start** — Verify `config.json` is valid JSON and mounted at
+`/config/config.json`. CloudDump validates all jobs at startup and logs errors
+to stdout.
+
+**Jobs not running** — Check your cron syntax. Supported: `*`, `*/N`, exact
+values. Not supported: ranges (`1-5`), lists (`1,3,5`). Check container logs
+for scheduling messages.
+
+**Email not working** — CloudDump uses SMTPS (SSL on port 465). Verify the
+container can reach your SMTP server. Check logs for `Failed to send email`
+messages.
+
+**Mount failures** — SSH mounts need a valid key and reachable host. SMB mounts
+need FUSE support in the container runtime. Check logs for mount errors at
+startup.
+
+**Debug mode** — Set `"DEBUG": true` in settings for verbose logging.
+
+## Contributing
+
+Contributions are welcome. Please open an issue first to discuss what you'd
+like to change.
 
 ## License
 
-This tool is released under the MIT License.
+[MIT](LICENSE) — Copyright (c) 2023 VENDANOR AS
