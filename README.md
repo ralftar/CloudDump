@@ -10,6 +10,8 @@ data — S3 buckets, Azure Blob Storage, PostgreSQL databases — down to
 on-premises storage, another cloud, or wherever you want. On a schedule,
 unattended, with email notifications when things succeed or fail.
 
+## Not a backup system
+
 CloudDump is **not** a backup system. There is no rotation, no versioning,
 no retention policies. It gives you a current-state copy of your data,
 synced on a cron schedule. What you do with that copy — feed it into
@@ -24,33 +26,27 @@ hardware you own.
 
 CloudDump runs as a single Docker container. Point it at your cloud
 resources, tell it when to sync, and forget about it. If something breaks,
-you get an email. Consider setting up a dead-man switch (e.g.
-[Healthchecks.io](https://healthchecks.io)) that alerts you when expected
-emails *stop arriving* — a silent failure is worse than a loud one.
+you get an email.
 
 ## Disaster recovery
 
 CloudDump can be a key component in your disaster recovery plan. Critically,
-CloudDump *pulls* data from the cloud — the cloud provider has no knowledge
-of your local copy. This means a compromised or malfunctioning cloud
-environment cannot delete, encrypt, or tamper with data it doesn't know
-exists. The dependency flows one way: your backup depends on the cloud being
-reachable, but the cloud has zero control over what you already have.
+it *pulls* data from the cloud — the cloud provider has no knowledge of your
+local copy. This means a compromised or malfunctioning cloud environment
+cannot delete, encrypt, or tamper with data it doesn't know exists. The
+dependency flows one way: your copy depends on the cloud being reachable,
+but the cloud has zero control over what you already have.
 
 A typical DR setup:
 
-1. **CloudDump syncs** your S3 buckets, Azure blobs, and databases to local
-   storage on a schedule.
-2. **A proper backup tool** (Restic, Borg, Veeam, etc.) snapshots the local
-   copy with versioning and retention.
-3. **Monitoring** — CloudDump emails you on every run. Pair this with a
-   dead-man switch so you are alerted if reports stop arriving entirely.
+1. **CloudDump** syncs cloud data to local storage on a schedule.
+2. **A backup tool** (Restic, Borg, Veeam, etc.) snapshots the local copy
+   with versioning and retention.
+3. **A dead-man switch** (e.g. [Healthchecks.io](https://healthchecks.io))
+   alerts you when expected emails *stop arriving* — a silent failure is
+   worse than a loud one.
 4. **Regular restore drills** — periodically verify that you can actually
    restore from the local copy.
-
-This gives you defense in depth: CloudDump handles the "get the data out of
-the cloud" step, your backup tool handles versioning and retention, and the
-dead-man switch ensures the whole pipeline is still running.
 
 ## Quick start
 
