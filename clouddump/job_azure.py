@@ -10,7 +10,7 @@ def run_az_sync(blobstorage, logfile_path):
     """Sync an Azure Blob Storage container to a local directory using ``azcopy sync``."""
     source = cfg(blobstorage, "source")
     destination = cfg(blobstorage, "destination")
-    delete = cfg(blobstorage, "delete_destination", "true")
+    delete = str(cfg(blobstorage, "delete_destination", "true")).lower() == "true"
 
     if not source or not destination:
         log.error("Missing source or destination for Azure blobstorage.")
@@ -20,18 +20,15 @@ def run_az_sync(blobstorage, logfile_path):
         log.error("Invalid source. Must start with https://")
         return 1
 
-    if str(delete) not in ("true", "false"):
-        delete = "true"
-
     source_stripped = source.split("?")[0]
     os.makedirs(destination, exist_ok=True)
 
     log.debug("Source: %s", source_stripped)
     log.debug("Destination: %s", destination)
-    log.debug("Mirror (delete): %s", delete)
+    log.debug("Mirror (delete): %s", "true" if delete else "false")
     log.debug("Syncing source %s to destination %s...", source_stripped, destination)
 
-    cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={delete}", source, destination]
+    cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={'true' if delete else 'false'}", source, destination]
 
     t0 = time.time()
     with open(logfile_path, "a") as logf:

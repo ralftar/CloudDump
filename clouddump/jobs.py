@@ -5,6 +5,12 @@ from clouddump.job_s3 import run_s3_sync
 from clouddump.job_azure import run_az_sync
 from clouddump.job_pgsql import run_pg_dump
 
+_RUNNERS = {
+    "s3bucket": ("buckets", run_s3_sync),
+    "azstorage": ("blobstorages", run_az_sync),
+    "pgsql": ("servers", run_pg_dump),
+}
+
 
 def execute_job(job, logfile_path):
     """Dispatch a job to the appropriate runner by type. Returns exit code.
@@ -14,41 +20,20 @@ def execute_job(job, logfile_path):
     """
     job_type = cfg(job, "type")
 
-    if job_type == "s3bucket":
-        buckets = cfg(job, "buckets", [])
-        if not buckets:
-            log.error("No buckets configured.")
-            return 1
-        rc = 0
-        for bucket in buckets:
-            r = run_s3_sync(bucket, logfile_path)
-            if r != 0:
-                rc = r
-        return rc
+    entry = _RUNNERS.get(job_type)
+    if entry is None:
+        log.error("Unknown job type %s.", job_type)
+        return 1
 
-    elif job_type == "azstorage":
-        blobstorages = cfg(job, "blobstorages", [])
-        if not blobstorages:
-            log.error("No blobstorages configured.")
-            return 1
-        rc = 0
-        for bs in blobstorages:
-            r = run_az_sync(bs, logfile_path)
-            if r != 0:
-                rc = r
-        return rc
+    key, runner = entry
+    targets = cfg(job, key, [])
+    if not targets:
+        log.error("No %s configured.", key)
+        return 1
 
-    elif job_type == "pgsql":
-        servers = cfg(job, "servers", [])
-        if not servers:
-            log.error("No servers configured.")
-            return 1
-        rc = 0
-        for server in servers:
-            r = run_pg_dump(server, logfile_path)
-            if r != 0:
-                rc = r
-        return rc
-
-    log.error("Unknown job type %s.", job_type)
-    return 1
+    rc = 0
+    for target in targets:
+        r = runner(target, logfile_path)
+        if r != 0:
+            rc = r
+    return rc

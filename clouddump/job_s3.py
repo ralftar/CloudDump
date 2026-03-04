@@ -10,7 +10,7 @@ def run_s3_sync(bucket, logfile_path):
     """Sync a single S3 bucket to a local directory using ``aws s3 sync``."""
     source = cfg(bucket, "source")
     destination = cfg(bucket, "destination")
-    delete = cfg(bucket, "delete_destination", "true")
+    delete = str(cfg(bucket, "delete_destination", "true")).lower() == "true"
     key_id = cfg(bucket, "aws_access_key_id")
     secret = cfg(bucket, "aws_secret_access_key")
     region = cfg(bucket, "aws_region", "us-east-1")
@@ -24,14 +24,11 @@ def run_s3_sync(bucket, logfile_path):
         log.error("Invalid source %s. Must start with s3://", source)
         return 1
 
-    if str(delete) not in ("true", "false"):
-        delete = "true"
-
     os.makedirs(destination, exist_ok=True)
 
     log.debug("Source: %s", source)
     log.debug("Destination: %s", destination)
-    log.debug("Mirror (delete): %s", delete)
+    log.debug("Mirror (delete): %s", "true" if delete else "false")
     log.debug("AWS Region: %s", region)
     if endpoint:
         log.debug("Endpoint URL: %s", endpoint)
@@ -48,7 +45,7 @@ def run_s3_sync(bucket, logfile_path):
     cmd = ["aws", "s3", "sync"]
     if endpoint:
         cmd += ["--endpoint-url", endpoint]
-    if str(delete) == "true":
+    if delete:
         cmd.append("--delete")
     cmd += [source, destination]
 

@@ -57,7 +57,7 @@ def run_pg_dump(server, logfile_path):
     databases_excluded = cfg(server, "databases_excluded", [])
 
     if not host or not user or not password or not backuppath:
-        log.error(" Missing required pgsql parameters.")
+        log.error("Missing required pgsql parameters.")
         return 1
 
     os.makedirs(backuppath, exist_ok=True)
@@ -72,7 +72,7 @@ def run_pg_dump(server, logfile_path):
 
     all_dbs = _list_databases(host, port, user, password)
     if all_dbs is None:
-        log.error(" Failed to query database list from %s.", host)
+        log.error("Failed to query database list from %s.", host)
         return 1
 
     # Determine which databases to back up
@@ -93,7 +93,7 @@ def run_pg_dump(server, logfile_path):
         databases_to_backup = [db for db in all_dbs if db not in excluded_set]
 
     if not databases_to_backup:
-        log.error(" No databases to backup.")
+        log.error("No databases to backup.")
         return 1
 
     log.debug("Databases to backup: %s", " ".join(databases_to_backup))
@@ -129,12 +129,10 @@ def run_pg_dump(server, logfile_path):
                 rc = run_cmd(cmd, env=env, stdout=dump_out, stderr=logf)
 
             if rc != 0:
-                log.error(" pg_dump for %s on %s failed.", database, host)
+                log.error("pg_dump for %s on %s failed.", database, host)
                 _safe_remove(temp_file)
-            elif not os.path.isfile(temp_file):
-                log.error(" Backupfile %s missing for %s.", temp_file, database)
             elif os.path.getsize(temp_file) == 0:
-                log.error(" Backupfile %s is empty.", temp_file)
+                log.error("Backupfile %s is empty.", temp_file)
                 _safe_remove(temp_file)
             else:
                 dump_ok = True
@@ -145,7 +143,7 @@ def run_pg_dump(server, logfile_path):
                 time.sleep(30)
 
         if not dump_ok:
-            log.error(" pg_dump for %s failed after 3 attempts.", database)
+            log.error("pg_dump for %s failed after 3 attempts.", database)
             overall_result = 1
             continue
 
@@ -161,7 +159,7 @@ def run_pg_dump(server, logfile_path):
             log.debug("Compressing backupfile %s...", temp_file)
             rc = run_cmd(["bzip2", "-f", temp_file])
             if rc != 0:
-                log.error(" Compression of %s failed.", temp_file)
+                log.error("Compression of %s failed.", temp_file)
                 overall_result = 1
                 continue
             temp_file += ".bz2"
@@ -176,7 +174,7 @@ def run_pg_dump(server, logfile_path):
             try:
                 shutil.move(temp_file, final_file)
             except OSError as exc:
-                log.error(" Could not move %s to %s: %s", temp_file, final_file, exc)
+                log.error("Could not move %s to %s: %s", temp_file, final_file, exc)
                 overall_result = 1
                 continue
 
