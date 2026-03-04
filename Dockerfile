@@ -1,6 +1,7 @@
 FROM debian:12.13-slim
 
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     openssh-client \
@@ -12,13 +13,13 @@ RUN apt-get update && \
     curl \
     python3 \
     postgresql-client-15 \
+    awscli \
+    && curl -sSL -o /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
+    && dpkg -i /tmp/packages-microsoft-prod.deb \
+    && rm /tmp/packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends azcopy \
     && rm -rf /var/lib/apt/lists/*
-
-COPY install_*.sh /tmp/
-RUN chmod +x /tmp/install_*.sh \
-    && /tmp/install_azcopy.sh \
-    && /tmp/install_awscli.sh \
-    && rm /tmp/install_*.sh
 
 COPY clouddump/ /app/clouddump/
 WORKDIR /app

@@ -269,11 +269,11 @@ keeps resource usage predictable and avoids conflicts on shared destinations.
 
 ### Bundled tools
 
-| Tool | Version |
-|------|---------|
-| AWS CLI | 2.22.19 |
-| AzCopy | 10.32.1 |
-| PostgreSQL client | 15 |
+| Tool | Source |
+|------|--------|
+| AWS CLI | Debian apt (v1) |
+| AzCopy | Microsoft apt repo |
+| PostgreSQL client | Debian apt (v15) |
 
 ## Troubleshooting
 
