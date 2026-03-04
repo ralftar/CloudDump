@@ -1,28 +1,31 @@
-FROM debian:12
+FROM debian:12.13-slim
 
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     ca-certificates \
     openssh-client \
     sshfs \
     smbnetfs \
-    bc \
     tar \
     gzip \
     bzip2 \
     curl \
-    jq \
-    mutt \
-    libsasl2-modules \
-    postfix \
-    postgresql-client \
+    python3 \
+    postgresql-client-15 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY /VERSION /VERSION
-COPY /dump_*.sh /install_*.sh /start.sh /usr/local/bin/
-RUN chmod u+x /usr/local/bin/dump_*.sh /usr/local/bin/install_*.sh /usr/local/bin/start.sh
+COPY install_*.sh /tmp/
+RUN chmod +x /tmp/install_*.sh \
+    && /tmp/install_azcopy.sh \
+    && /tmp/install_awscli.sh \
+    && rm /tmp/install_*.sh
 
-RUN /usr/local/bin/install_azcopy.sh
-RUN /usr/local/bin/install_awscli.sh
+COPY clouddump/ /app/clouddump/
+WORKDIR /app
 
-CMD [ "/usr/local/bin/start.sh" ]
+ENV PYTHONUNBUFFERED=1
+
+HEALTHCHECK --interval=120s --timeout=5s --retries=2 \
+  CMD find /tmp/clouddump-heartbeat -mmin -3 | grep -q .
+
+CMD ["python3", "-m", "clouddump"]

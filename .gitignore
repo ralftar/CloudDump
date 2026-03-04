@@ -1,2 +1,5 @@
 /config
 /test
+__pycache__/
+.claude/
+*.exe.stackdump
