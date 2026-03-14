@@ -54,11 +54,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: docker/setup-buildx-action@v3
+
       - name: Build Docker image
         id: build
         run: |
           START=$SECONDS
-          docker build -t clouddump:ci-test .
+          docker buildx build --load --cache-from type=gha --cache-to type=gha,mode=max -t clouddump:ci-test .
           echo "build_time=$((SECONDS - START))s" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test bundled tools
@@ -108,6 +110,15 @@ jobs:
       run_time: ${{ steps.timing.outputs.run_time }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Pull compose images (cached by runner)
+        run: |
+          docker pull minio/minio &
+          docker pull postgres:15 &
+          docker pull axllent/mailpit &
+          docker pull atmoz/sftp &
+          docker pull minio/mc &
+          wait
 
       - name: Record start time
         id: timer

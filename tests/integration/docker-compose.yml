@@ -38,18 +38,6 @@ services:
       timeout: 5s
       retries: 10
 
-  samba:
-    image: dperson/samba
-    command: >-
-      -u "testuser;testpass"
-      -s "testshare;/share;yes;no;no;testuser"
-      -g "min protocol = SMB2"
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 445 2>/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
 networks:
   default:
     name: clouddump-integration

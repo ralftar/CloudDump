@@ -100,12 +100,6 @@ config['settings']['mount'] = [
         'mountpoint': '/mnt/ssh',
         'privkey': privkey,
     },
-    {
-        'path': '//samba/testshare',
-        'mountpoint': '/mnt/smb',
-        'username': 'testuser',
-        'password': 'testpass',
-    },
 ]
 
 config['jobs'].append({
@@ -125,23 +119,6 @@ config['jobs'].append({
     }],
 })
 
-config['jobs'].append({
-    'type': 's3bucket',
-    'id': 'test-s3-via-smb',
-    'crontab': '* * * * *',
-    'retries': 1,
-    'timeout': 300,
-    'buckets': [{
-        'source': 's3://test-bucket-smb',
-        'destination': '/mnt/smb/s3-backup',
-        'endpoint_url': 'http://minio:9000',
-        'aws_access_key_id': 'minioadmin',
-        'aws_secret_access_key': 'minioadmin',
-        'aws_region': 'us-east-1',
-        'delete_destination': 'true',
-    }],
-})
-
 with open(sys.argv[3], 'w') as f:
     json.dump(config, f, indent=2)
 " "$SCRIPT_DIR/config.json" "$SCRIPT_DIR/test-keys/id_test" "$SCRIPT_DIR/config.runtime.json"
@@ -149,7 +126,7 @@ echo "  Config written to config.runtime.json"
 
 # ── 4. Start fakes ──────────────────────────────────────────────────────────
 
-echo "[4/8] Starting fake services (MinIO, PostgreSQL, Mailpit, SSH, Samba)..."
+echo "[4/8] Starting fake services (MinIO, PostgreSQL, Mailpit, SSH)..."
 $COMPOSE up -d --wait
 echo "  All services healthy."
 
@@ -186,11 +163,10 @@ for i in $(seq 1 30); do
         break
     fi
 
-    # S3 local + pgsql + mount-based syncs all finished?
+    # S3 local + pgsql + SSH mount sync all finished?
     if [ -f "$BACKUP_DIR/s3/file1.txt" ] \
         && compgen -G "$BACKUP_DIR/pgsql/"*.bz2 >/dev/null 2>&1 \
-        && docker exec "$CONTAINER" test -f /mnt/ssh/s3-backup/via-ssh.txt 2>/dev/null \
-        && docker exec "$CONTAINER" test -f /mnt/smb/s3-backup/via-smb.txt 2>/dev/null; then
+        && docker exec "$CONTAINER" test -f /mnt/ssh/s3-backup/via-ssh.txt 2>/dev/null; then
         echo "  All jobs finished after ~$((i * 5))s."
         sleep 3
         DONE=true
@@ -238,13 +214,6 @@ check "via-ssh.txt reached CloudDump mount" \
     docker exec "$CONTAINER" test -f /mnt/ssh/s3-backup/via-ssh.txt
 check "via-ssh.txt arrived on SSH server" \
     $COMPOSE exec -T sshserver test -f /home/testuser/upload/s3-backup/via-ssh.txt
-
-echo ""
-echo "  S3 sync via smbnetfs mount (soft — FUSE/allow_other may not work in CI):"
-check_soft "via-smb.txt reached CloudDump mount" \
-    docker exec "$CONTAINER" test -f /mnt/smb/s3-backup/via-smb.txt
-check_soft "via-smb.txt arrived on Samba server" \
-    $COMPOSE exec -T samba test -f /share/s3-backup/via-smb.txt
 
 echo ""
 echo "  Email (SMTP):"

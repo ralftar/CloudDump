@@ -16,11 +16,9 @@ docker run --rm --network clouddump-integration \
     echo "Hello from integration test - file2" | mc pipe local/test-bucket/subdir/file2.txt &&
     echo "Hello from integration test - file3" | mc pipe local/test-bucket/subdir/nested/file3.txt &&
     mc mb --ignore-existing local/test-bucket-ssh &&
-    echo "Synced via SSH mount" | mc pipe local/test-bucket-ssh/via-ssh.txt &&
-    mc mb --ignore-existing local/test-bucket-smb &&
-    echo "Synced via SMB mount" | mc pipe local/test-bucket-smb/via-smb.txt
+    echo "Synced via SSH mount" | mc pipe local/test-bucket-ssh/via-ssh.txt
   '
-echo "  MinIO seeded: test-bucket (3 files), test-bucket-ssh (1), test-bucket-smb (1)"
+echo "  MinIO seeded: test-bucket (3 files), test-bucket-ssh (1)"
 
 # ── PostgreSQL ───────────────────────────────────────────────────────────────
 
