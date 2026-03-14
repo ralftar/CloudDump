@@ -29,7 +29,7 @@ services:
 
   sshserver:
     image: atmoz/sftp
-    command: testuser::1000:upload
+    command: testuser::1000::upload
     volumes:
       - ./test-keys/id_test.pub:/home/testuser/.ssh/keys/id_test.pub:ro
     healthcheck:
