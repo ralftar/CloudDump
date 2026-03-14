@@ -24,14 +24,13 @@ def send_email(settings, subject, body, attachments=None):
     mail_to = cfg(settings, "MAILTO")
 
     if not smtp_server or not smtp_port or not mail_to:
-        log.warning("Email not configured, skipping.")
-        return False
+        return None  # Not configured
 
     try:
         smtp_port = int(smtp_port)
     except (ValueError, TypeError):
         log.error("Invalid SMTP port '%s', skipping email.", smtp_port)
-        return False
+        return None
 
     # Support multiple recipients: comma-separated string or list.
     if isinstance(mail_to, list):

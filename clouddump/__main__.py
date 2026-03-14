@@ -101,10 +101,12 @@ def main():
         f"{jobs_summary}\n\n"
         f"CloudDump v{version}"
     )
-    if send_email(settings, f"[Started] CloudDump {host}", startup_body):
+    result = send_email(settings, f"[Started] CloudDump {host}", startup_body)
+    if result is True:
         log.info("Startup email sent.")
-    else:
-        log.info("Startup email skipped (SMTP not configured).")
+    elif result is None:
+        log.info("Email not configured, skipping.")
+    # result is False: send_email already logged the error
 
     # Set up mounts (after email, so operators are notified even on mount failure)
     setup_mounts(settings)
