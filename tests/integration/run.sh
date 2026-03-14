@@ -257,38 +257,13 @@ check "psql installed"           docker exec "$CONTAINER" psql --version
 echo ""
 echo "  Azure Blob Storage (azcopy → Azurite, direct):"
 
-# Generate a SAS URL for azcopy using Python (well-known Azurite credentials).
 # CloudDump's Azure runner requires https:// so we can't run it E2E against
-# Azurite on HTTP, but we CAN verify azcopy works against real blob storage.
-AZURITE_SAS=$(docker exec "$CONTAINER" python3 -c "
-import base64, hashlib, hmac, datetime, urllib.parse
+# Azurite on HTTP, but we CAN verify azcopy works against real blob storage
+# using the well-known Azurite connection string.
+AZURITE_CONN="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
 
-key = base64.b64decode(
-    'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq'
-    '/K1SZFPTOtr/KBHBeksoGMGw=='
-)
-expiry = (datetime.datetime.utcnow() + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-start  = (datetime.datetime.utcnow() - datetime.timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-perms  = 'rl'
-# Account SAS string-to-sign (ss=b covers Blob service)
-sts = '\n'.join([
-    'devstoreaccount1',  # account name
-    perms,               # sp
-    'b',                 # ss (blob)
-    'sco',               # srt (service, container, object)
-    start,               # st
-    expiry,              # se
-    '',                  # sip
-    'http,https',        # spr
-    '2020-10-02',        # sv
-    '',                  # sr (encryption scope - empty)
-])
-sig = base64.b64encode(hmac.new(key, sts.encode(), hashlib.sha256).digest()).decode()
-print(f'sv=2020-10-02&ss=b&srt=sco&sp={perms}&st={urllib.parse.quote(start)}&se={urllib.parse.quote(expiry)}&spr=http,https&sig={urllib.parse.quote(sig)}')
-")
-
-docker exec "$CONTAINER" azcopy sync \
-    "http://azurite:10000/devstoreaccount1/test-container?${AZURITE_SAS}" \
+docker exec -e AZURE_STORAGE_CONNECTION_STRING="$AZURITE_CONN" "$CONTAINER" \
+    azcopy sync "http://azurite:10000/devstoreaccount1/test-container" \
     "/backup/azure" --recursive >/dev/null 2>&1 || true
 
 check "blob1.txt synced via azcopy"         test -f "$BACKUP_DIR/azure/blob1.txt"
