@@ -50,12 +50,17 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
+    outputs:
+      build_time: ${{ steps.build.outputs.build_time }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Build Docker image
         id: build
-        run: docker build -t clouddump:ci-test .
+        run: |
+          START=$SECONDS
+          docker build -t clouddump:ci-test .
+          echo "build_time=$((SECONDS - START))s" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test bundled tools
         id: smoke
@@ -78,7 +83,8 @@ jobs:
               fi
             done
             echo ""
-            echo "**$PASS passed, $FAIL failed**"
+            echo ""
+            echo "$PASS passed, $FAIL failed"
           } | tee smoke-output.txt
 
       - name: Smoke test summary
@@ -99,14 +105,18 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
+    outputs:
+      run_time: ${{ steps.integration.outputs.run_time }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Run integration tests
         id: integration
         run: |
+          START=$SECONDS
           bash tests/integration/run.sh 2>&1 | tee integration-output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          echo "run_time=$((SECONDS - START))s" >> "$GITHUB_OUTPUT"
 
       - name: Integration test summary
         if: always()
@@ -141,7 +151,9 @@ jobs:
         env:
           UNIT_RESULT: ${{ needs.unit-tests.result }}
           DOCKER_RESULT: ${{ needs.docker-build.result }}
+          DOCKER_TIME: ${{ needs.docker-build.outputs.build_time }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+          INTEGRATION_TIME: ${{ needs.integration-tests.outputs.run_time }}
         run: |
           SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
           NOW=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
@@ -163,6 +175,9 @@ jobs:
           if [ -f integration-output.txt ]; then
             INTEGRATION_SUMMARY=$(grep -oE '[0-9]+ passed, [0-9]+ failed' integration-output.txt | tail -1)
           fi
+          if [ -n "$INTEGRATION_TIME" ] && [ -n "$INTEGRATION_SUMMARY" ]; then
+            INTEGRATION_SUMMARY="${INTEGRATION_SUMMARY} in ${INTEGRATION_TIME}"
+          fi
 
           # Extract "8 passed, 0 failed" from smoke output
           SMOKE_SUMMARY=""
@@ -170,6 +185,9 @@ jobs:
           if [ -f smoke-output.txt ]; then
             SMOKE_SUMMARY=$(grep -oE '[0-9]+ passed, [0-9]+ failed' smoke-output.txt | tail -1)
             SMOKE_BODY=$(cat smoke-output.txt)
+          fi
+          if [ -n "$DOCKER_TIME" ] && [ -n "$SMOKE_SUMMARY" ]; then
+            SMOKE_SUMMARY="${SMOKE_SUMMARY} (build ${DOCKER_TIME})"
           fi
 
           # Build comment
@@ -179,7 +197,7 @@ jobs:
             echo "| Test | Status | Details |"
             echo "|------|--------|---------|"
             echo "| Unit tests | ${UNIT_ICON} ${UNIT_RESULT} | ${UNIT_SUMMARY} |"
-            echo "| Docker build + smoke | ${DOCKER_ICON} ${DOCKER_RESULT} | ${SMOKE_SUMMARY:-Image build and tool verification} |"
+            echo "| Docker build + smoke | ${DOCKER_ICON} ${DOCKER_RESULT} | ${SMOKE_SUMMARY} |"
             echo "| Integration tests | ${INTEGRATION_ICON} ${INTEGRATION_RESULT} | ${INTEGRATION_SUMMARY} |"
             echo ""
             if [ -n "$SMOKE_BODY" ]; then
