@@ -111,7 +111,7 @@ jobs:
 
       - name: Record start time
         id: timer
-        run: echo "start=$SECONDS" >> "$GITHUB_OUTPUT"
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Run integration tests
         id: integration
@@ -122,7 +122,7 @@ jobs:
       - name: Record run time
         id: timing
         if: always()
-        run: echo "run_time=$(( SECONDS - ${{ steps.timer.outputs.start }} ))s" >> "$GITHUB_OUTPUT"
+        run: echo "run_time=$(( $(date +%s) - ${{ steps.timer.outputs.start }} ))s" >> "$GITHUB_OUTPUT"
 
       - name: Integration test summary
         if: always()
