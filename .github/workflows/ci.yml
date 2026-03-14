@@ -152,23 +152,23 @@ jobs:
           DOCKER_ICON=$(icon "$DOCKER_RESULT")
           INTEGRATION_ICON=$(icon "$INTEGRATION_RESULT")
 
-          # Extract test counts from pytest output (e.g. "90 passed in 0.27s")
+          # Extract "90 passed in 0.23s" without the surrounding === lines
           UNIT_SUMMARY=""
           if [ -f unit-output.txt ]; then
-            UNIT_SUMMARY=$(grep -oP '\d+ passed.*' unit-output.txt | tail -1)
+            UNIT_SUMMARY=$(grep -oE '[0-9]+ passed[^=]*' unit-output.txt | tail -1 | sed 's/ *$//')
           fi
 
-          # Extract integration pass/fail counts (e.g. "12 passed, 0 failed")
+          # Extract "12 passed, 0 failed" from integration output
           INTEGRATION_SUMMARY=""
           if [ -f integration-output.txt ]; then
-            INTEGRATION_SUMMARY=$(grep -oP '\d+ passed, \d+ failed' integration-output.txt | tail -1)
+            INTEGRATION_SUMMARY=$(grep -oE '[0-9]+ passed, [0-9]+ failed' integration-output.txt | tail -1)
           fi
 
-          # Extract smoke test counts (e.g. "8 passed, 0 failed")
+          # Extract "8 passed, 0 failed" from smoke output
           SMOKE_SUMMARY=""
           SMOKE_BODY=""
           if [ -f smoke-output.txt ]; then
-            SMOKE_SUMMARY=$(grep -oP '\d+ passed, \d+ failed' smoke-output.txt | tail -1)
+            SMOKE_SUMMARY=$(grep -oE '[0-9]+ passed, [0-9]+ failed' smoke-output.txt | tail -1)
             SMOKE_BODY=$(cat smoke-output.txt)
           fi
 
