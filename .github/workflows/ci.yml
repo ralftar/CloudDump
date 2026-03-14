@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: Run unit tests
+        id: unit
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_unit.py tests/test_runners.py -v --tb=short --junitxml=unit-results.xml 2>&1 | tee unit-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Unit test summary
+        if: always()
+        run: |
+          echo "## Unit Tests" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -20 unit-output.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            unit-results.xml
+            unit-output.txt
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        id: build
+        run: docker build -t clouddump:ci-test .
+
+      - name: Smoke test bundled tools
+        id: smoke
+        if: success()
+        run: |
+          set -o pipefail
+          {
+            echo "## Tool Smoke Tests"
+            echo ""
+            PASS=0
+            FAIL=0
+            for tool in "github-backup --help" "git --version" "aws --version" "azcopy --version" "pg_dump --version" "psql --version" "mysqldump --version" "mysql --version"; do
+              name=$(echo "$tool" | cut -d' ' -f1)
+              if docker run --rm clouddump:ci-test $tool >/dev/null 2>&1; then
+                echo "- :white_check_mark: \`$name\`"
+                PASS=$((PASS + 1))
+              else
+                echo "- :x: \`$name\`"
+                FAIL=$((FAIL + 1))
+              fi
+            done
+            echo ""
+            echo "**$PASS passed, $FAIL failed**"
+          } | tee smoke-output.txt
+
+      - name: Smoke test summary
+        if: always()
+        run: |
+          if [ -f smoke-output.txt ]; then
+            cat smoke-output.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: smoke-output.txt
+          if-no-files-found: ignore
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run integration tests
+        id: integration
+        run: |
+          bash tests/integration/run.sh 2>&1 | tee integration-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Integration test summary
+        if: always()
+        run: |
+          echo "## Integration Tests" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^\s*(PASS|FAIL|SKIP|===|WARNING)" integration-output.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: integration-output.txt
+
+  post-comment:
+    name: PR comment
+    needs: [unit-tests, docker-build, integration-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Build comment body
+        id: comment
+        env:
+          UNIT_RESULT: ${{ needs.unit-tests.result }}
+          DOCKER_RESULT: ${{ needs.docker-build.result }}
+          INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+        run: |
+          SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
+          NOW=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+          icon() { [ "$1" = "success" ] && echo ":white_check_mark:" || echo ":x:"; }
+
+          UNIT_ICON=$(icon "$UNIT_RESULT")
+          DOCKER_ICON=$(icon "$DOCKER_RESULT")
+          INTEGRATION_ICON=$(icon "$INTEGRATION_RESULT")
+
+          # Extract test counts from pytest output
+          UNIT_SUMMARY=""
+          if [ -f unit-output.txt ]; then
+            UNIT_SUMMARY=$(grep -E "^(FAILED|PASSED|ERROR|=)" unit-output.txt | tail -1)
+          fi
+
+          # Extract integration pass/fail counts
+          INTEGRATION_SUMMARY=""
+          if [ -f integration-output.txt ]; then
+            INTEGRATION_SUMMARY=$(grep -E "^=== Results:" integration-output.txt | tail -1)
+          fi
+
+          SMOKE_BODY=""
+          if [ -f smoke-output.txt ]; then
+            SMOKE_BODY=$(cat smoke-output.txt)
+          fi
+
+          # Build comment
+          {
+            echo "## CI Results"
+            echo ""
+            echo "| Test | Status | Details |"
+            echo "|------|--------|---------|"
+            echo "| Unit tests | ${UNIT_ICON} ${UNIT_RESULT} | ${UNIT_SUMMARY} |"
+            echo "| Docker build + smoke | ${DOCKER_ICON} ${DOCKER_RESULT} | Image build and tool verification |"
+            echo "| Integration tests | ${INTEGRATION_ICON} ${INTEGRATION_RESULT} | ${INTEGRATION_SUMMARY} |"
+            echo ""
+            if [ -n "$SMOKE_BODY" ]; then
+              echo "<details>"
+              echo "<summary>Tool smoke tests</summary>"
+              echo ""
+              echo "$SMOKE_BODY"
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+            if [ -f unit-output.txt ]; then
+              echo "<details>"
+              echo "<summary>Unit test output</summary>"
+              echo ""
+              echo '```'
+              cat unit-output.txt
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+            if [ -f integration-output.txt ]; then
+              echo "<details>"
+              echo "<summary>Integration test output</summary>"
+              echo ""
+              echo '```'
+              tail -80 integration-output.txt
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+            echo "---"
+            echo "*Last run: ${NOW} | Commit: \`${SHA}\` | [Action run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*"
+            echo ""
+            echo "<!-- ci-sticky-comment -->"
+          } > comment-body.txt
+
+      - name: Post or update sticky comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment-body.txt', 'utf8');
+            const marker = '<!-- ci-sticky-comment -->';
+            const prNumber = context.payload.pull_request.number;
+
+            // Find existing comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existing = comments.data.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+              console.log(`Updated comment ${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body,
+              });
+              console.log('Created new comment');
+            }
