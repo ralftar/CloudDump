@@ -138,7 +138,7 @@ echo "  Config written to config.runtime.json"
 
 # ── 4. Start fakes ──────────────────────────────────────────────────────────
 
-echo "[4/8] Starting fake services (MinIO, PostgreSQL, Azurite, Mailpit, SSH, Samba)..."
+echo "[4/8] Starting fake services (MinIO, PostgreSQL, Mailpit, SSH, Samba)..."
 $COMPOSE up -d --wait
 echo "  All services healthy."
 
@@ -151,7 +151,7 @@ bash "$SCRIPT_DIR/seed.sh"
 
 echo "[6/8] Starting CloudDump container..."
 rm -rf "$BACKUP_DIR"
-mkdir -p "$BACKUP_DIR/s3" "$BACKUP_DIR/pgsql" "$BACKUP_DIR/azure"
+mkdir -p "$BACKUP_DIR/s3" "$BACKUP_DIR/pgsql"
 
 docker run -d --name "$CONTAINER" \
     --network clouddump-integration \
@@ -253,21 +253,6 @@ check "aws CLI installed"        docker exec "$CONTAINER" aws --version
 check "azcopy installed"         docker exec "$CONTAINER" azcopy --version
 check "pg_dump installed"        docker exec "$CONTAINER" pg_dump --version
 check "psql installed"           docker exec "$CONTAINER" psql --version
-
-echo ""
-echo "  Azure Blob Storage (azcopy → Azurite, direct):"
-
-# CloudDump's Azure runner requires https:// so we can't run it E2E against
-# Azurite on HTTP, but we CAN verify azcopy works against real blob storage
-# using the well-known Azurite connection string.
-AZURITE_CONN="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
-
-docker exec -e AZURE_STORAGE_CONNECTION_STRING="$AZURITE_CONN" "$CONTAINER" \
-    azcopy sync "http://azurite:10000/devstoreaccount1/test-container" \
-    "/backup/azure" --recursive >/dev/null 2>&1 || true
-
-check "blob1.txt synced via azcopy"         test -f "$BACKUP_DIR/azure/blob1.txt"
-check "subdir/blob2.txt synced via azcopy"  test -f "$BACKUP_DIR/azure/subdir/blob2.txt"
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 

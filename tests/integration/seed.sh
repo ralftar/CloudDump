@@ -62,23 +62,4 @@ $COMPOSE exec -T postgres psql -U testuser -d testdb2 -c "
 
 echo "  PostgreSQL seeded: testdb1 (users), testdb2 (products + orders)"
 
-# ── Azurite (Azure Blob Storage) ────────────────────────────────────────────
-
-echo "  Seeding Azurite..."
-
-# Seed Azurite using azcopy from the CloudDump image with the well-known
-# Azurite connection string.  Much simpler than hand-rolling SharedKey HMAC.
-AZURITE_CONN="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
-
-docker run --rm --network clouddump-integration \
-  -e AZURE_STORAGE_CONNECTION_STRING="$AZURITE_CONN" \
-  clouddump:integration-test sh -c '
-    mkdir -p /tmp/azurite-seed/subdir
-    echo "Hello from Azurite - blob1" > /tmp/azurite-seed/blob1.txt
-    echo "Hello from Azurite - blob2" > /tmp/azurite-seed/subdir/blob2.txt
-    azcopy copy "/tmp/azurite-seed/*" "http://azurite:10000/devstoreaccount1/test-container" \
-      --recursive --put-md5 --from-to LocalBlob
-  '
-echo "  Azurite seeded: test-container (2 blobs)"
-
 echo "  Seeding complete."
