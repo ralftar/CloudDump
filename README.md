@@ -1,5 +1,6 @@
-# 🌩️ CloudDump
+# CloudDump 🌩️
 
+[![CI](https://github.com/ralftar/CloudDump/actions/workflows/ci.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions/workflows/ci.yml)
 [![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
