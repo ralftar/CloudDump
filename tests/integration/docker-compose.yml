@@ -42,7 +42,7 @@ services:
     image: mcr.microsoft.com/azure-storage/azurite
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 10000 2>/dev/null"]
+      test: ["CMD-SHELL", "node -e \"require('net').createConnection(10000,'localhost').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))\""]
       interval: 5s
       timeout: 5s
       retries: 5

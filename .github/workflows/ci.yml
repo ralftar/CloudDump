@@ -146,13 +146,6 @@ jobs:
         with:
           merge-multiple: true
 
-      - name: Debug artifacts
-        run: |
-          echo "=== Downloaded files ==="
-          ls -la *.txt 2>/dev/null || echo "No .txt files found"
-          echo "=== integration-output.txt tail ==="
-          tail -5 integration-output.txt 2>/dev/null || echo "File not found"
-
       - name: Build comment body
         id: comment
         env:
