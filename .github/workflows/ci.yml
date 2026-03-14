@@ -105,17 +105,24 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
     outputs:
-      run_time: ${{ steps.integration.outputs.run_time }}
+      run_time: ${{ steps.timing.outputs.run_time }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Record start time
+        id: timer
+        run: echo "start=$SECONDS" >> "$GITHUB_OUTPUT"
 
       - name: Run integration tests
         id: integration
         run: |
           set -o pipefail
-          START=$SECONDS
           bash tests/integration/run.sh 2>&1 | tee integration-output.txt
-          echo "run_time=$((SECONDS - START))s" >> "$GITHUB_OUTPUT"
+
+      - name: Record run time
+        id: timing
+        if: always()
+        run: echo "run_time=$(( SECONDS - ${{ steps.timer.outputs.start }} ))s" >> "$GITHUB_OUTPUT"
 
       - name: Integration test summary
         if: always()
