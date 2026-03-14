@@ -12,6 +12,17 @@ databases, GitHub organizations — down to on-premises storage, another
 cloud, or wherever you want. On a schedule, unattended, with email
 notifications when things succeed or fail.
 
+## Why
+
+You store data in S3 or Azure. Your databases run in the cloud. That's
+fine — until a provider has an outage, a misconfigured IAM policy deletes
+your bucket, or you just want to sleep better knowing there's a copy on
+hardware you own.
+
+CloudDump runs as a single Docker container. Point it at your cloud
+resources, tell it when to sync, and forget about it. If something breaks,
+you get an email.
+
 ## Supported sources
 
 | Source | Job type | Tool used | Auth |
@@ -22,6 +33,13 @@ notifications when things succeed or fail.
 | PostgreSQL | `pgsql` | pg_dump / psql | Host, port, user, password |
 | MySQL / MariaDB | `mysql` | mysqldump / mysql | Host, port, user, password |
 | GitHub organization | `github` | github-backup | Personal access token |
+
+## Not a backup system
+
+CloudDump is **not** a backup system. There is no rotation, no versioning,
+no retention policies. It gives you a current-state copy of your data,
+synced on a cron schedule. What you do with that copy — feed it into
+Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
 
 ## Features
 
@@ -36,24 +54,6 @@ notifications when things succeed or fail.
   and emails automatically
 - **Health check** — built-in Docker `HEALTHCHECK` via heartbeat file
 - **Graceful shutdown** — SIGTERM forwarded to child processes
-
-## Not a backup system
-
-CloudDump is **not** a backup system. There is no rotation, no versioning,
-no retention policies. It gives you a current-state copy of your data,
-synced on a cron schedule. What you do with that copy — feed it into
-Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
-
-## Why
-
-You store data in S3 or Azure. Your databases run in the cloud. That's
-fine — until a provider has an outage, a misconfigured IAM policy deletes
-your bucket, or you just want to sleep better knowing there's a copy on
-hardware you own.
-
-CloudDump runs as a single Docker container. Point it at your cloud
-resources, tell it when to sync, and forget about it. If something breaks,
-you get an email.
 
 ## Disaster recovery
 
