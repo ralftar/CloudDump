@@ -28,7 +28,6 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest tests/test_unit.py tests/test_runners.py -v --tb=short --junitxml=unit-results.xml 2>&1 | tee unit-output.txt
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Unit test summary
         if: always()
@@ -113,9 +112,9 @@ jobs:
       - name: Run integration tests
         id: integration
         run: |
+          set -o pipefail
           START=$SECONDS
           bash tests/integration/run.sh 2>&1 | tee integration-output.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
           echo "run_time=$((SECONDS - START))s" >> "$GITHUB_OUTPUT"
 
       - name: Integration test summary
