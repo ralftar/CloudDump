@@ -122,7 +122,13 @@ jobs:
       - name: Record run time
         id: timing
         if: always()
-        run: echo "run_time=$(( $(date +%s) - ${{ steps.timer.outputs.start }} ))s" >> "$GITHUB_OUTPUT"
+        run: |
+          elapsed=$(( $(date +%s) - ${{ steps.timer.outputs.start }} ))
+          if [ "$elapsed" -ge 60 ]; then
+            echo "run_time=$((elapsed / 60))m $((elapsed % 60))s" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_time=${elapsed}s" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Integration test summary
         if: always()
