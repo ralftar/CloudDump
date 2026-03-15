@@ -9,6 +9,9 @@ from datetime import datetime
 
 from clouddump import cfg, log, run_cmd, _safe_remove
 
+# Databases that should never be dumped.
+_SYSTEM_DATABASES = {"template0", "template1", "postgres"}
+
 
 def _list_databases(host, port, user, password):
     """Query the server for a list of databases using psql -l."""
@@ -86,8 +89,8 @@ def run_pg_dump(server, logfile_path):
         log.debug("Using explicitly configured databases: %s", " ".join(configured_dbs))
         databases_to_backup = configured_dbs
     else:
-        log.debug("Using all databases except excluded ones")
-        excluded_set = set(databases_excluded)
+        log.debug("Using all databases except excluded and system ones")
+        excluded_set = set(databases_excluded) | _SYSTEM_DATABASES
         databases_to_backup = [db for db in all_dbs if db not in excluded_set]
 
     if not databases_to_backup:

@@ -3,10 +3,20 @@
 import json
 import os
 import shutil
+import socket
 import sys
 
-from clouddump import cfg, log
+from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
+
+
+def _check_connectivity(host, port, timeout=5):
+    """Test TCP connectivity. Returns True if reachable."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
 
 CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github"}
@@ -98,6 +108,32 @@ def validate_jobs(jobs):
         except (ValueError, TypeError) as exc:
             log.error("Invalid retries '%s' for job ID %s: %s.", retries, job_id, exc)
             errors += 1
+
+        # Validate backup paths
+        path_keys = {
+            "s3bucket": ("buckets", "destination"),
+            "azstorage": ("blobstorages", "destination"),
+            "pgsql": ("servers", "backuppath"),
+            "mysql": ("servers", "backuppath"),
+            "github": ("organizations", "destination"),
+        }
+        if job_type in path_keys:
+            collection_key, field = path_keys[job_type]
+            for target in cfg(job, collection_key, []):
+                path_val = cfg(target, field)
+                if path_val:
+                    err = validate_backup_path(path_val)
+                    if err:
+                        log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
+                        errors += 1
+
+        # Connectivity check for database jobs (warn only — server may start later)
+        if job_type in ("pgsql", "mysql"):
+            for target in cfg(job, "servers", []):
+                host = cfg(target, "host")
+                port = cfg(target, "port", "5432" if job_type == "pgsql" else "3306")
+                if host and not _check_connectivity(host, port):
+                    log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
 
         summaries.append(f"ID: {job_id}\nType: {job_type}\nSchedule: {crontab}")
 

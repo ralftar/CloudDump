@@ -175,7 +175,8 @@ def main():
             break
 
         # Touch heartbeat file so Docker HEALTHCHECK knows we're alive
-        open("/tmp/clouddump-heartbeat", "w").close()
+        from pathlib import Path
+        Path("/tmp/clouddump-heartbeat").touch()
 
         # Sleep until next minute boundary
         sleep_seconds = 60 - datetime.now().second

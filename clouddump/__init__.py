@@ -102,6 +102,20 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None):
     return proc.returncode
 
 
+_ALLOWED_BACKUP_PREFIXES = ("/backup", "/mnt", "/tmp")
+
+
+def validate_backup_path(path):
+    """Check that a backup destination is under an allowed prefix.
+
+    Returns None if valid, or an error message if the path is unsafe.
+    """
+    resolved = os.path.realpath(path)
+    if any(resolved == p or resolved.startswith(p + "/") for p in _ALLOWED_BACKUP_PREFIXES):
+        return None
+    return f"path '{path}' (resolved: '{resolved}') is outside allowed prefixes {_ALLOWED_BACKUP_PREFIXES}"
+
+
 def _safe_remove(path):
     """Remove a file, ignoring errors if it doesn't exist."""
     try:
