@@ -37,6 +37,9 @@ jobs:
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: Patch version
+        run: sed -i "s/0.0.0/${{ steps.tags.outputs.version }}/" clouddump/__init__.py
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
