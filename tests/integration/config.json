@@ -5,6 +5,7 @@
     "SMTPPORT": "1025",
     "SMTPUSER": "",
     "SMTPPASS": "",
+    "SMTPSSL": false,
     "MAILFROM": "test@clouddump.local",
     "MAILTO": "verify@clouddump.local",
     "DEBUG": true
@@ -44,6 +45,26 @@
           "compress": "true",
           "filenamedate": "false",
           "databases_excluded": ["template0", "template1", "postgres"]
+        }
+      ]
+    }
+    ,
+    {
+      "type": "mysql",
+      "id": "test-mysql",
+      "crontab": "* * * * *",
+      "retries": 1,
+      "timeout": 300,
+      "servers": [
+        {
+          "host": "mysql",
+          "port": "3306",
+          "user": "root",
+          "pass": "rootpass",
+          "backuppath": "/backup/mysql",
+          "compress": "true",
+          "filenamedate": "false",
+          "databases_excluded": []
         }
       ]
     }

@@ -15,7 +15,6 @@ from clouddump.config import load_config, validate_jobs
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
 from clouddump.jobs import execute_job
-from clouddump.mounts import setup_mounts
 
 
 def _signal_handler(sig, _frame):
@@ -67,18 +66,10 @@ def main():
         sys.exit(1)
     log.info("All %d job(s) passed configuration validation.", len(jobs))
 
-    # Build and send startup email before mount setup so operators are
-    # notified even if mounts fail fatally.
     smtp_server = cfg(settings, "SMTPSERVER")
     smtp_port = cfg(settings, "SMTPPORT")
     mail_from = cfg(settings, "MAILFROM")
     mail_to = cfg(settings, "MAILTO")
-
-    mounts = cfg(settings, "mount", [])
-    mounts_lines = []
-    for m in mounts:
-        mounts_lines.append(f"  {cfg(m, 'path')} -> {cfg(m, 'mountpoint')}")
-    mounts_info = "\n".join(mounts_lines) if mounts_lines else "(none)"
 
     startup_config = (
         f"Debug: {debug}\n"
@@ -86,7 +77,6 @@ def main():
         f"SMTP port: {smtp_port}\n"
         f"Mail from: {mail_from}\n"
         f"Mail to: {mail_to}\n\n"
-        f"Mountpoints:\n{mounts_info}\n\n"
         f"Total jobs configured: {len(jobs)}"
     )
     startup_config = redact(startup_config)
@@ -101,13 +91,12 @@ def main():
         f"{jobs_summary}\n\n"
         f"CloudDump v{version}"
     )
-    if send_email(settings, f"[Started] CloudDump {host}", startup_body):
+    result = send_email(settings, f"[Started] CloudDump {host}", startup_body)
+    if result is True:
         log.info("Startup email sent.")
-    else:
-        log.info("Startup email skipped (SMTP not configured).")
-
-    # Set up mounts (after email, so operators are notified even on mount failure)
-    setup_mounts(settings)
+    elif result is None:
+        log.info("Email not configured, skipping.")
+    # result is False: send_email already logged the error
 
     # Main loop
     log.info("Starting main loop...")

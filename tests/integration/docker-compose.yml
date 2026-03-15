@@ -22,42 +22,22 @@ services:
       timeout: 5s
       retries: 5
 
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -u root -prootpass -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   mailpit:
     image: axllent/mailpit
     ports:
       - "8025:8025"
-
-  sshserver:
-    image: atmoz/sftp
-    command: testuser::1000
-    volumes:
-      - ./test-keys/id_test.pub:/home/testuser/.ssh/keys/id_test.pub:ro
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/22' 2>/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  azurite:
-    image: mcr.microsoft.com/azure-storage/azurite
-    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 10000 2>/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  samba:
-    image: dperson/samba
-    command: >-
-      -u "testuser;testpass"
-      -s "testshare;/share;yes;no;no;testuser"
-      -g "min protocol = SMB2"
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 445 2>/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
 networks:
   default:

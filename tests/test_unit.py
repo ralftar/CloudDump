@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from clouddump import cfg, redact
+from clouddump import redact
 from clouddump.config import validate_jobs
 from clouddump.cron import matches_cron, should_run, validate_cron
 
@@ -143,6 +143,8 @@ def test_validate_jobs_duplicate_id():
     ("postgres://admin:s3cret@db.example.com:5432/mydb", "s3cret"),
     ("postgresql://user:hunter2@localhost/app", "hunter2"),
     ("mongodb://root:mongopass@mongo:27017", "mongopass"),
+    ("Authorization: Bearer ghp_abc123secret", "ghp_abc123secret"),
+    ("authorization: token mytoken123", "mytoken123"),
 ])
 def test_redact_strips_secrets(text, secret):
     result = redact(text)

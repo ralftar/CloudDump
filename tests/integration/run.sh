@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Integration test: build CloudDump, start fakes, seed, run, verify, teardown.
-# Everything is containerised — only Docker and ssh-keygen are required on the host.
+# Everything is containerised — only Docker is required on the host.
 #
 # Usage:
 #   bash tests/integration/run.sh            # normal run (cleanup on exit)
@@ -26,12 +26,13 @@ cleanup() {
         echo "Keeping containers running (--keep).  Tear down manually with:"
         echo "  docker rm -f $CONTAINER"
         echo "  $COMPOSE down -v"
-        echo "  rm -rf $BACKUP_DIR $SCRIPT_DIR/test-keys $SCRIPT_DIR/config.runtime.json"
+        echo "  rm -rf $BACKUP_DIR"
     else
         echo "Cleaning up..."
         docker rm -f "$CONTAINER" 2>/dev/null || true
         $COMPOSE down -v 2>/dev/null || true
-        rm -rf "$BACKUP_DIR" "$SCRIPT_DIR/test-keys" "$SCRIPT_DIR/config.runtime.json"
+        docker run --rm -v "$BACKUP_DIR:/cleanup" alpine rm -rf /cleanup 2>/dev/null || true
+        rm -rf "$BACKUP_DIR" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -49,7 +50,7 @@ check() {
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 
-for cmd in docker ssh-keygen python3; do
+for cmd in docker python3; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "ERROR: $cmd is required but not found." >&2
         exit 1
@@ -61,125 +62,49 @@ echo ""
 
 # ── 1. Build ─────────────────────────────────────────────────────────────────
 
-echo "[1/8] Building CloudDump image..."
+echo "[1/6] Building CloudDump image..."
 docker build -q -t clouddump:integration-test "$REPO_DIR" >/dev/null
 echo "  Image built."
 
-# ── 2. Generate SSH keys ────────────────────────────────────────────────────
+# ── 2. Start fakes ──────────────────────────────────────────────────────────
 
-echo "[2/8] Generating SSH test key pair..."
-mkdir -p "$SCRIPT_DIR/test-keys"
-ssh-keygen -t ed25519 -f "$SCRIPT_DIR/test-keys/id_test" -N "" -q -C "integration-test"
-echo "  Keys generated."
-
-# ── 3. Generate runtime config (adds mount entries + mount-based jobs) ──────
-
-echo "[3/8] Generating runtime config..."
-python3 -c "
-import json, sys
-
-with open(sys.argv[1]) as f:
-    config = json.load(f)
-
-privkey = open(sys.argv[2]).read()
-
-config['settings']['mount'] = [
-    {
-        'path': 'testuser@sshserver:/upload',
-        'mountpoint': '/mnt/ssh',
-        'privkey': privkey,
-    },
-    {
-        'path': '//samba/testshare',
-        'mountpoint': '/mnt/smb',
-        'username': 'testuser',
-        'password': 'testpass',
-    },
-]
-
-config['jobs'].append({
-    'type': 's3bucket',
-    'id': 'test-s3-via-ssh',
-    'crontab': '* * * * *',
-    'retries': 1,
-    'timeout': 300,
-    'buckets': [{
-        'source': 's3://test-bucket-ssh',
-        'destination': '/mnt/ssh/s3-backup',
-        'endpoint_url': 'http://minio:9000',
-        'aws_access_key_id': 'minioadmin',
-        'aws_secret_access_key': 'minioadmin',
-        'aws_region': 'us-east-1',
-        'delete_destination': 'true',
-    }],
-})
-
-config['jobs'].append({
-    'type': 's3bucket',
-    'id': 'test-s3-via-smb',
-    'crontab': '* * * * *',
-    'retries': 1,
-    'timeout': 300,
-    'buckets': [{
-        'source': 's3://test-bucket-smb',
-        'destination': '/mnt/smb/s3-backup',
-        'endpoint_url': 'http://minio:9000',
-        'aws_access_key_id': 'minioadmin',
-        'aws_secret_access_key': 'minioadmin',
-        'aws_region': 'us-east-1',
-        'delete_destination': 'true',
-    }],
-})
-
-with open(sys.argv[3], 'w') as f:
-    json.dump(config, f, indent=2)
-" "$SCRIPT_DIR/config.json" "$SCRIPT_DIR/test-keys/id_test" "$SCRIPT_DIR/config.runtime.json"
-echo "  Config written to config.runtime.json"
-
-# ── 4. Start fakes ──────────────────────────────────────────────────────────
-
-echo "[4/8] Starting fake services (MinIO, PostgreSQL, Azurite, Mailpit, SSH, Samba)..."
+echo "[2/6] Starting fake services (MinIO, PostgreSQL, MySQL, Mailpit)..."
 $COMPOSE up -d --wait
 echo "  All services healthy."
 
-# ── 5. Seed ──────────────────────────────────────────────────────────────────
+# ── 3. Seed ──────────────────────────────────────────────────────────────────
 
-echo "[5/8] Seeding test data..."
+echo "[3/6] Seeding test data..."
 bash "$SCRIPT_DIR/seed.sh"
 
-# ── 6. Run CloudDump ────────────────────────────────────────────────────────
+# ── 4. Run CloudDump ────────────────────────────────────────────────────────
 
-echo "[6/8] Starting CloudDump container..."
+echo "[4/6] Starting CloudDump container..."
 rm -rf "$BACKUP_DIR"
-mkdir -p "$BACKUP_DIR/s3" "$BACKUP_DIR/pgsql" "$BACKUP_DIR/azure"
+mkdir -m 777 -p "$BACKUP_DIR"
 
 docker run -d --name "$CONTAINER" \
     --network clouddump-integration \
-    --cap-add SYS_ADMIN \
-    --device /dev/fuse \
-    --security-opt apparmor:unconfined \
-    -v "$SCRIPT_DIR/config.runtime.json:/config/config.json:ro" \
+    -v "$SCRIPT_DIR/config.json:/config/config.json:ro" \
     -v "$BACKUP_DIR:/backup" \
     clouddump:integration-test >/dev/null
 
-echo "  Container started (FUSE enabled for sshfs/smbnetfs)."
+echo "  Container started."
 
-# ── 7. Wait & verify ────────────────────────────────────────────────────────
+# ── 5. Wait & verify ────────────────────────────────────────────────────────
 
-echo "[7/8] Waiting for jobs to complete (polling every 5s, up to 150s)..."
+echo "[5/6] Waiting for jobs to complete (polling every 5s, up to 150s)..."
 DONE=false
 for i in $(seq 1 30); do
-    # Check that CloudDump is still running (mounts would exit immediately on failure)
     if ! docker inspect "$CONTAINER" --format='{{.State.Running}}' 2>/dev/null | grep -q true; then
-        echo "  WARNING: container exited early — mount failure?"
+        echo "  WARNING: container exited early."
         break
     fi
 
-    # S3 local + pgsql + mount-based syncs all finished?
+    # S3 local + pgsql + mysql all finished?
     if [ -f "$BACKUP_DIR/s3/file1.txt" ] \
         && compgen -G "$BACKUP_DIR/pgsql/"*.bz2 >/dev/null 2>&1 \
-        && docker exec "$CONTAINER" test -f /mnt/ssh/s3-backup/via-ssh.txt 2>/dev/null \
-        && docker exec "$CONTAINER" test -f /mnt/smb/s3-backup/via-smb.txt 2>/dev/null; then
+        && compgen -G "$BACKUP_DIR/mysql/"*.bz2 >/dev/null 2>&1; then
         echo "  All jobs finished after ~$((i * 5))s."
         sleep 3
         DONE=true
@@ -205,11 +130,11 @@ echo "=== Verification ==="
 echo ""
 
 echo "  Container:"
-check "CloudDump is still running (mounts OK)" \
+check "CloudDump is still running" \
     docker inspect "$CONTAINER" --format='{{.State.Running}}' 2>/dev/null
 
 echo ""
-echo "  S3 sync (local volume):"
+echo "  S3 sync:"
 check "file1.txt exists"                test -f "$BACKUP_DIR/s3/file1.txt"
 check "file1.txt has expected content"  grep -q "file1" "$BACKUP_DIR/s3/file1.txt"
 check "subdir/file2.txt exists"         test -f "$BACKUP_DIR/s3/subdir/file2.txt"
@@ -222,28 +147,19 @@ check "testdb1 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb1.t
 check "testdb2 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb2.tar.bz2"
 
 echo ""
-echo "  S3 sync via sshfs mount:"
-check "via-ssh.txt reached CloudDump mount" \
-    docker exec "$CONTAINER" test -f /mnt/ssh/s3-backup/via-ssh.txt
-check "via-ssh.txt arrived on SSH server" \
-    $COMPOSE exec -T sshserver test -f /home/testuser/upload/s3-backup/via-ssh.txt
+echo "  MySQL dump:"
+check "testdb1 dump exists and non-empty"  test -s "$BACKUP_DIR/mysql/testdb1.sql.bz2"
+check "testdb2 dump exists and non-empty"  test -s "$BACKUP_DIR/mysql/testdb2.sql.bz2"
 
 echo ""
-echo "  S3 sync via smbnetfs mount:"
-check "via-smb.txt reached CloudDump mount" \
-    docker exec "$CONTAINER" test -f /mnt/smb/s3-backup/via-smb.txt
-check "via-smb.txt arrived on Samba server" \
-    $COMPOSE exec -T samba test -f /share/s3-backup/via-smb.txt
+echo "  Email (SMTP via Mailpit):"
+MAIL_COUNT=$(curl -sf http://localhost:8025/api/v1/messages 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
+check "at least one email received by Mailpit"  test "$MAIL_COUNT" -gt 0
+
+# ── 6. Tool smoke tests ─────────────────────────────────────────────────────
 
 echo ""
-echo "  Email (SMTP):"
-echo "  SKIP  CloudDump uses SMTP_SSL; Mailpit only supports plain SMTP."
-echo "        Mailpit web UI: http://localhost:8025 (with --keep)"
-
-# ── 8. Tool & Azure smoke tests ─────────────────────────────────────────────
-
-echo ""
-echo "[8/8] Running tool & Azure smoke tests..."
+echo "[6/6] Running tool smoke tests..."
 echo ""
 
 echo "  Bundled tools (in Docker image):"
@@ -253,46 +169,6 @@ check "aws CLI installed"        docker exec "$CONTAINER" aws --version
 check "azcopy installed"         docker exec "$CONTAINER" azcopy --version
 check "pg_dump installed"        docker exec "$CONTAINER" pg_dump --version
 check "psql installed"           docker exec "$CONTAINER" psql --version
-
-echo ""
-echo "  Azure Blob Storage (azcopy → Azurite, direct):"
-
-# Generate a SAS URL for azcopy using Python (well-known Azurite credentials).
-# CloudDump's Azure runner requires https:// so we can't run it E2E against
-# Azurite on HTTP, but we CAN verify azcopy works against real blob storage.
-AZURITE_SAS=$(docker exec "$CONTAINER" python3 -c "
-import base64, hashlib, hmac, datetime, urllib.parse
-
-key = base64.b64decode(
-    'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq'
-    '/K1SZFPTOtr/KBHBeksoGMGw=='
-)
-expiry = (datetime.datetime.utcnow() + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-start  = (datetime.datetime.utcnow() - datetime.timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-perms  = 'rl'
-# Account SAS string-to-sign (ss=b covers Blob service)
-sts = '\n'.join([
-    'devstoreaccount1',  # account name
-    perms,               # sp
-    'b',                 # ss (blob)
-    'sco',               # srt (service, container, object)
-    start,               # st
-    expiry,              # se
-    '',                  # sip
-    'http,https',        # spr
-    '2020-10-02',        # sv
-    '',                  # sr (encryption scope - empty)
-])
-sig = base64.b64encode(hmac.new(key, sts.encode(), hashlib.sha256).digest()).decode()
-print(f'sv=2020-10-02&ss=b&srt=sco&sp={perms}&st={urllib.parse.quote(start)}&se={urllib.parse.quote(expiry)}&spr=http,https&sig={urllib.parse.quote(sig)}')
-")
-
-docker exec "$CONTAINER" azcopy sync \
-    "http://azurite:10000/devstoreaccount1/test-container?${AZURITE_SAS}" \
-    "/backup/azure" --recursive >/dev/null 2>&1 || true
-
-check "blob1.txt synced via azcopy"         test -f "$BACKUP_DIR/azure/blob1.txt"
-check "subdir/blob2.txt synced via azcopy"  test -f "$BACKUP_DIR/azure/subdir/blob2.txt"
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 

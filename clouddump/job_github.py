@@ -1,9 +1,10 @@
 """GitHub organization backup job runner."""
 
 import os
+import tempfile
 import time
 
-from clouddump import cfg, log, redact, run_cmd
+from clouddump import cfg, log, redact, run_cmd, _safe_remove
 
 
 def run_github_backup(org, logfile_path):
@@ -30,9 +31,16 @@ def run_github_backup(org, logfile_path):
     def _enabled(key, default="true"):
         return str(cfg(org, key, default)).lower() == "true"
 
+    # Write token to a temp file to keep it out of process arguments
+    # (visible via ps aux). github-backup doesn't support env vars.
+    fd, token_path = tempfile.mkstemp(prefix="gh-token-")
+    os.chmod(token_path, 0o600)
+    os.write(fd, token.encode())
+    os.close(fd)
+
     cmd = [
         "github-backup", name,
-        "--token", token,
+        "--token", f"file://{token_path}",
         "--organization",
         "--output-directory", destination,
         "--incremental",
@@ -74,8 +82,11 @@ def run_github_backup(org, logfile_path):
         cmd.append("--lfs")
 
     t0 = time.time()
-    with open(logfile_path, "a") as logf:
-        rc = run_cmd(cmd, stdout=logf, stderr=logf)
+    try:
+        with open(logfile_path, "a") as logf:
+            rc = run_cmd(cmd, stdout=logf, stderr=logf)
+    finally:
+        _safe_remove(token_path)
     elapsed = int(time.time() - t0)
 
     if rc != 0:

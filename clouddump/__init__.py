@@ -57,6 +57,10 @@ def redact(text):
         r"(password|pass|passwd|pwd|key|token|secret|credential|cred)\s*[:=]\s*\S+",
         r"\1: [REDACTED]", text, flags=re.IGNORECASE,
     )
+    text = re.sub(
+        r"(Authorization)\s*:\s*\S+(\s+\S+)?",
+        r"\1: [REDACTED]", text, flags=re.IGNORECASE,
+    )
     text = re.sub(r"AKIA[A-Z0-9]{16}", "[REDACTED_AWS_KEY]", text)
     text = re.sub(
         r"(AccountKey|SharedAccessKey)=[^;]*",
