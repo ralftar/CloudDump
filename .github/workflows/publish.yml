@@ -29,8 +29,9 @@ jobs:
       - name: Extract tags
         id: tags
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          TAGS="${IMAGE}:${VERSION}"
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          TAGS="${IMAGE}:${TAG}"
           if [ "${{ github.event.release.prerelease }}" = "false" ]; then
             TAGS="${TAGS},${IMAGE}:latest"
           fi
