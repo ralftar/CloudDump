@@ -63,13 +63,12 @@ def run_pg_dump(server, logfile_path):
 
     os.makedirs(backuppath, exist_ok=True)
 
-    log.debug("Host: %s", host)
-    log.debug("Port: %s", port)
+    log.info("Host: %s:%s", host, port)
     log.debug("Username: %s", user)
-    log.debug("Backup path: %s", backuppath)
+    log.info("Backup path: %s", backuppath)
     log.debug("Filename date: %s", filenamedate)
     log.debug("Compress: %s", compress)
-    log.debug("Querying server for list of databases...")
+    log.info("Querying server for list of databases...")
 
     all_dbs = _list_databases(host, port, user, password)
     if all_dbs is None:
@@ -86,7 +85,7 @@ def run_pg_dump(server, logfile_path):
                 db_table_configs[dbname] = tbl_cfg or {}
 
     if configured_dbs:
-        log.debug("Using explicitly configured databases: %s", " ".join(configured_dbs))
+        log.info("Using explicitly configured databases: %s", " ".join(configured_dbs))
         databases_to_backup = configured_dbs
     else:
         log.debug("Using all databases except excluded and system ones")
@@ -97,7 +96,7 @@ def run_pg_dump(server, logfile_path):
         log.error("No databases to backup.")
         return 1
 
-    log.debug("Databases to backup: %s", " ".join(databases_to_backup))
+    log.info("Databases to backup: %s", " ".join(databases_to_backup))
 
     env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "30"}
     overall_result = 0
@@ -140,7 +139,7 @@ def run_pg_dump(server, logfile_path):
                 break
 
             if db_attempt < 3:
-                log.debug("Retrying in 30s...")
+                log.warning("Retrying %s in 30s...", database)
                 time.sleep(30)
 
         if not dump_ok:
@@ -149,7 +148,7 @@ def run_pg_dump(server, logfile_path):
             continue
 
         size = os.path.getsize(temp_file)
-        log.debug("pg_dump of %s completed. Backupfile size: %d bytes.", database, size)
+        log.info("pg_dump of %s completed. Size: %d bytes.", database, size)
 
         if filenamedate:
             final_file = temp_file
@@ -182,7 +181,7 @@ def run_pg_dump(server, logfile_path):
         log.debug("Backup completed successfully: %s", final_file)
 
     if overall_result == 0:
-        log.debug("All database backups completed successfully.")
+        log.info("All %d database(s) backed up successfully.", len(databases_to_backup))
     else:
-        log.debug("Some database backups failed.")
+        log.warning("Some database backups failed.")
     return overall_result

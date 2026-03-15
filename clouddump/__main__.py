@@ -8,6 +8,7 @@ import tempfile
 import time
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 import clouddump
 from clouddump import cfg, redact, log, _safe_remove
@@ -153,7 +154,7 @@ def main():
                 if result == 0:
                     log.info("Job %s completed successfully", job_id)
                 else:
-                    log.info("Job %s completed with errors (exit code: %d)", job_id, result)
+                    log.warning("Job %s completed with errors (exit code: %d)", job_id, result)
 
                 send_job_report(settings, version, host, job, result, t_start, t_end, logfile_path,
                                 attempt=attempt, max_attempts=max_attempts)
@@ -163,7 +164,7 @@ def main():
                 if result == 0:
                     break
                 elif attempt < max_attempts:
-                    log.info("Job %s failed (attempt %d/%d), retrying in 60s...",
+                    log.warning("Job %s failed (attempt %d/%d), retrying in 60s...",
                              job_id, attempt, max_attempts)
                     time.sleep(60)
                 else:
@@ -175,7 +176,6 @@ def main():
             break
 
         # Touch heartbeat file so Docker HEALTHCHECK knows we're alive
-        from pathlib import Path
         Path("/tmp/clouddump-heartbeat").touch()
 
         # Sleep until next minute boundary

@@ -26,13 +26,13 @@ def run_s3_sync(bucket, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.debug("Source: %s", source)
-    log.debug("Destination: %s", destination)
-    log.debug("Mirror (delete): %s", "true" if delete else "false")
+    log.info("Source: %s", source)
+    log.info("Destination: %s", destination)
+    log.info("Mirror (delete): %s", "true" if delete else "false")
     log.debug("AWS Region: %s", region)
     if endpoint:
         log.debug("Endpoint URL: %s", endpoint)
-    log.debug("Syncing source %s to destination %s...", source, destination)
+    log.info("Syncing source %s to destination %s...", source, destination)
 
     env = {**os.environ}
     if key_id:
@@ -55,7 +55,7 @@ def run_s3_sync(bucket, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("Sync failed after %d seconds.", elapsed)
+        log.error("Sync of %s failed after %ds.", source, elapsed)
     else:
-        log.debug("Sync completed successfully in %d seconds.", elapsed)
+        log.info("Sync of %s completed in %ds.", source, elapsed)
     return rc

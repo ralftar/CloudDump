@@ -23,10 +23,10 @@ def run_az_sync(blobstorage, logfile_path):
     source_stripped = source.split("?")[0]
     os.makedirs(destination, exist_ok=True)
 
-    log.debug("Source: %s", source_stripped)
-    log.debug("Destination: %s", destination)
-    log.debug("Mirror (delete): %s", "true" if delete else "false")
-    log.debug("Syncing source %s to destination %s...", source_stripped, destination)
+    log.info("Source: %s", source_stripped)
+    log.info("Destination: %s", destination)
+    log.info("Mirror (delete): %s", "true" if delete else "false")
+    log.info("Syncing source %s to destination %s...", source_stripped, destination)
 
     cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={'true' if delete else 'false'}", source, destination]
 
@@ -36,7 +36,7 @@ def run_az_sync(blobstorage, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("Sync failed after %d seconds.", elapsed)
+        log.error("Sync of %s failed after %ds.", source_stripped, elapsed)
     else:
-        log.debug("Sync completed successfully in %d seconds.", elapsed)
+        log.info("Sync of %s completed in %ds.", source_stripped, elapsed)
     return rc

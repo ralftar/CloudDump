@@ -23,10 +23,10 @@ def run_github_backup(org, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.debug("Organization: %s", name)
-    log.debug("Destination: %s", destination)
+    log.info("Organization: %s", name)
+    log.info("Destination: %s", destination)
     log.debug("Token: %s", redact(f"token={token}"))
-    log.debug("Backing up organization %s to %s...", name, destination)
+    log.info("Backing up organization %s...", name)
 
     def _enabled(key, default="true"):
         return str(cfg(org, key, default)).lower() == "true"
@@ -90,7 +90,7 @@ def run_github_backup(org, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("GitHub backup failed after %d seconds.", elapsed)
+        log.error("GitHub backup of %s failed after %ds.", name, elapsed)
     else:
-        log.debug("GitHub backup completed successfully in %d seconds.", elapsed)
+        log.info("GitHub backup of %s completed in %ds.", name, elapsed)
     return rc
