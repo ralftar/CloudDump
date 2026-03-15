@@ -5,8 +5,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     openssh-client \
-    sshfs \
-    smbnetfs \
     tar \
     gzip \
     bzip2 \
@@ -28,10 +26,17 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
+RUN groupadd --system clouddump \
+    && useradd --system --gid clouddump --create-home clouddump \
+    && mkdir -p /backup /config \
+    && chown clouddump:clouddump /backup
+
 COPY clouddump/ /app/clouddump/
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
+
+USER clouddump
 
 HEALTHCHECK --interval=120s --timeout=5s --retries=2 \
   CMD find /tmp/clouddump-heartbeat -mmin -3 | grep -q .

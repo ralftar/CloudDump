@@ -14,21 +14,23 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: pip install pytest
+        run: pip install pytest ruff
+
+      - name: Lint with ruff
+        run: ruff check clouddump tests
 
       - name: Run unit tests
         id: unit
         run: |
           set -o pipefail
           python -m pytest tests/test_unit.py tests/test_runners.py -v --tb=short --junitxml=unit-results.xml 2>&1 | tee unit-output.txt
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Unit test summary
         if: always()
@@ -40,7 +42,7 @@ jobs:
 
       - name: Upload unit test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-results
           path: |
@@ -50,12 +52,19 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
+    outputs:
+      build_time: ${{ steps.build.outputs.build_time }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
         id: build
-        run: docker build -t clouddump:ci-test .
+        run: |
+          START=$SECONDS
+          docker buildx build --load --cache-from type=gha --cache-to type=gha,mode=max -t clouddump:ci-test .
+          echo "build_time=$((SECONDS - START))s" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test bundled tools
         id: smoke
@@ -78,7 +87,8 @@ jobs:
               fi
             done
             echo ""
-            echo "**$PASS passed, $FAIL failed**"
+            echo ""
+            echo "$PASS passed, $FAIL failed"
           } | tee smoke-output.txt
 
       - name: Smoke test summary
@@ -90,7 +100,7 @@ jobs:
 
       - name: Upload smoke test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-test-results
           path: smoke-output.txt
@@ -99,14 +109,40 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
+    outputs:
+      run_time: ${{ steps.timing.outputs.run_time }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Pull compose images (cached by runner)
+        run: |
+          docker pull minio/minio &
+          docker pull postgres:15 &
+          docker pull mysql:8.0 &
+          docker pull axllent/mailpit &
+          docker pull minio/mc &
+          wait
+
+      - name: Record start time
+        id: timer
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Run integration tests
         id: integration
         run: |
+          set -o pipefail
           bash tests/integration/run.sh 2>&1 | tee integration-output.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Record run time
+        id: timing
+        if: always()
+        run: |
+          elapsed=$(( $(date +%s) - ${{ steps.timer.outputs.start }} ))
+          if [ "$elapsed" -ge 60 ]; then
+            echo "run_time=$((elapsed / 60))m $((elapsed % 60))s" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_time=${elapsed}s" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Integration test summary
         if: always()
@@ -118,7 +154,7 @@ jobs:
 
       - name: Upload integration test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-results
           path: integration-output.txt
@@ -129,10 +165,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
@@ -141,7 +177,9 @@ jobs:
         env:
           UNIT_RESULT: ${{ needs.unit-tests.result }}
           DOCKER_RESULT: ${{ needs.docker-build.result }}
+          DOCKER_TIME: ${{ needs.docker-build.outputs.build_time }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+          INTEGRATION_TIME: ${{ needs.integration-tests.outputs.run_time }}
         run: |
           SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
           NOW=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
@@ -152,21 +190,30 @@ jobs:
           DOCKER_ICON=$(icon "$DOCKER_RESULT")
           INTEGRATION_ICON=$(icon "$INTEGRATION_RESULT")
 
-          # Extract test counts from pytest output
+          # Extract "90 passed in 0.23s" without the surrounding === lines
           UNIT_SUMMARY=""
           if [ -f unit-output.txt ]; then
-            UNIT_SUMMARY=$(grep -E "^(FAILED|PASSED|ERROR|=)" unit-output.txt | tail -1)
+            UNIT_SUMMARY=$(grep -oE '[0-9]+ passed[^=]*' unit-output.txt | tail -1 | sed 's/ *$//')
           fi
 
-          # Extract integration pass/fail counts
+          # Extract "12 passed, 0 failed" from integration output
           INTEGRATION_SUMMARY=""
           if [ -f integration-output.txt ]; then
-            INTEGRATION_SUMMARY=$(grep -E "^=== Results:" integration-output.txt | tail -1)
+            INTEGRATION_SUMMARY=$(grep -oE '[0-9]+ passed, [0-9]+ failed' integration-output.txt | tail -1)
+          fi
+          if [ -n "$INTEGRATION_TIME" ] && [ -n "$INTEGRATION_SUMMARY" ]; then
+            INTEGRATION_SUMMARY="${INTEGRATION_SUMMARY} in ${INTEGRATION_TIME}"
           fi
 
+          # Extract "8 passed, 0 failed" from smoke output
+          SMOKE_SUMMARY=""
           SMOKE_BODY=""
           if [ -f smoke-output.txt ]; then
+            SMOKE_SUMMARY=$(grep -oE '[0-9]+ passed, [0-9]+ failed' smoke-output.txt | tail -1)
             SMOKE_BODY=$(cat smoke-output.txt)
+          fi
+          if [ -n "$DOCKER_TIME" ] && [ -n "$SMOKE_SUMMARY" ]; then
+            SMOKE_SUMMARY="${SMOKE_SUMMARY} (build ${DOCKER_TIME})"
           fi
 
           # Build comment
@@ -176,7 +223,7 @@ jobs:
             echo "| Test | Status | Details |"
             echo "|------|--------|---------|"
             echo "| Unit tests | ${UNIT_ICON} ${UNIT_RESULT} | ${UNIT_SUMMARY} |"
-            echo "| Docker build + smoke | ${DOCKER_ICON} ${DOCKER_RESULT} | Image build and tool verification |"
+            echo "| Docker build + smoke | ${DOCKER_ICON} ${DOCKER_RESULT} | ${SMOKE_SUMMARY} |"
             echo "| Integration tests | ${INTEGRATION_ICON} ${INTEGRATION_RESULT} | ${INTEGRATION_SUMMARY} |"
             echo ""
             if [ -n "$SMOKE_BODY" ]; then
@@ -217,7 +264,7 @@ jobs:
           } > comment-body.txt
 
       - name: Post or update sticky comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');

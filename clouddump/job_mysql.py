@@ -10,7 +10,7 @@ from datetime import datetime
 from clouddump import cfg, log, run_cmd, _safe_remove
 
 # Databases that should never be dumped.
-_SYSTEM_DATABASES = {"information_schema", "performance_schema", "sys"}
+_SYSTEM_DATABASES = {"information_schema", "mysql", "performance_schema", "sys"}
 
 
 def _list_databases(host, port, user, password):

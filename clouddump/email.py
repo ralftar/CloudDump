@@ -11,7 +11,10 @@ from clouddump import cfg, log, redact
 
 
 def send_email(settings, subject, body, attachments=None):
-    """Send an email via SMTP_SSL with optional file attachments.
+    """Send an email via SMTP with optional file attachments.
+
+    Uses SMTP_SSL by default.  Set ``SMTPSSL`` to ``false`` in config to use
+    plain SMTP (useful for relay servers that don't support SSL).
 
     Silently skips if SMTPSERVER, SMTPPORT, or MAILTO are not configured.
     Logs but does not raise on send failure.
@@ -20,18 +23,18 @@ def send_email(settings, subject, body, attachments=None):
     smtp_port = cfg(settings, "SMTPPORT")
     smtp_user = cfg(settings, "SMTPUSER")
     smtp_pass = cfg(settings, "SMTPPASS")
+    smtp_ssl = str(cfg(settings, "SMTPSSL", "true")).lower() != "false"
     mail_from = cfg(settings, "MAILFROM")
     mail_to = cfg(settings, "MAILTO")
 
     if not smtp_server or not smtp_port or not mail_to:
-        log.warning("Email not configured, skipping.")
-        return False
+        return None  # Not configured
 
     try:
         smtp_port = int(smtp_port)
     except (ValueError, TypeError):
         log.error("Invalid SMTP port '%s', skipping email.", smtp_port)
-        return False
+        return None
 
     # Support multiple recipients: comma-separated string or list.
     if isinstance(mail_to, list):
@@ -59,7 +62,11 @@ def send_email(settings, subject, body, attachments=None):
 
     log.info("Sending email to %s from %s.", ", ".join(recipients), mail_from)
     try:
-        with smtplib.SMTP_SSL(smtp_server, smtp_port) as srv:
+        if smtp_ssl:
+            srv = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        else:
+            srv = smtplib.SMTP(smtp_server, smtp_port)
+        with srv:
             if smtp_user and smtp_pass:
                 srv.login(smtp_user, smtp_pass)
             srv.sendmail(mail_from, recipients, msg.as_string())
