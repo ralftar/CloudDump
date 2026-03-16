@@ -29,17 +29,11 @@ Email is optional. If SMTP is not configured, CloudDump runs silently.
 | `SIGUSR1` | Run all jobs immediately (skip cron schedule) |
 
 ```sh
-# Docker — run all jobs now
+# Docker
 docker kill -s USR1 clouddump
 
-# Kubernetes — run all jobs now
+# Kubernetes
 kubectl exec deploy/clouddump -- kill -USR1 1
-```
-
-Tip: create a shell alias for convenience:
-
-```sh
-alias clouddump-run='kubectl exec deploy/clouddump -- kill -USR1 1'
 ```
 
 ## Job fields
