@@ -170,6 +170,12 @@ docker run -d --restart always \
 That's it. CloudDump will sync your S3 bucket to `/backup/s3` every day at
 03:00 and email you the result.
 
+**3. Trigger jobs manually** (optional — skip the cron wait)
+
+```sh
+docker kill -s USR1 clouddump
+```
+
 ## Troubleshooting
 
 **Container won't start** — Verify `config.json` is valid JSON and mounted at
@@ -183,6 +189,17 @@ for scheduling messages.
 **Email not working** — CloudDump uses SMTPS (SSL, port 465) by default. Set
 `SMTPSSL` to `false` for plain SMTP relays. Verify the container can reach your
 SMTP server. Check logs for `Failed to send email` messages.
+
+**Run jobs now** — Send `SIGUSR1` to run all jobs immediately without waiting
+for the cron schedule:
+
+```sh
+# Docker
+docker kill -s USR1 clouddump
+
+# Kubernetes
+kubectl exec <pod> -- kill -USR1 1
+```
 
 **Debug mode** — Set `"DEBUG": true` in settings for verbose logging.
 

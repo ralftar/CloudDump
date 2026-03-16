@@ -21,6 +21,27 @@ Email is optional. If SMTP is not configured, CloudDump runs silently.
 (`"ops@example.com, oncall@example.com"`) or a JSON array
 (`["ops@example.com", "oncall@example.com"]`).
 
+## Signals
+
+| Signal | Effect |
+|--------|--------|
+| `SIGTERM` / `SIGINT` | Graceful shutdown — forwards to running child process |
+| `SIGUSR1` | Run all jobs immediately (skip cron schedule) |
+
+```sh
+# Docker — run all jobs now
+docker kill -s USR1 clouddump
+
+# Kubernetes — run all jobs now
+kubectl exec deploy/clouddump -- kill -USR1 1
+```
+
+Tip: create a shell alias for convenience:
+
+```sh
+alias clouddump-run='kubectl exec deploy/clouddump -- kill -USR1 1'
+```
+
 ## Job fields
 
 | Key | Required | Default | Description |
