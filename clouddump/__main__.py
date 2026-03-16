@@ -197,12 +197,16 @@ def main():
         # Touch heartbeat file so Docker HEALTHCHECK knows we're alive
         Path("/tmp/clouddump-heartbeat").touch()
 
-        # Sleep until next minute boundary
+        # Sleep until next minute boundary, waking every second to
+        # check for SIGUSR1 (run now) or shutdown signals.
         sleep_seconds = 60 - datetime.now().second
         if sleep_seconds <= 0:
             sleep_seconds = 1
         try:
-            time.sleep(sleep_seconds)
+            for _ in range(sleep_seconds):
+                if clouddump.shutdown_requested or clouddump.run_now_requested:
+                    break
+                time.sleep(1)
         except (KeyboardInterrupt, SystemExit):
             break
 
