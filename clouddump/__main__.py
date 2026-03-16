@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import clouddump
-from clouddump import cfg, redact, log, _safe_remove
+from clouddump import cfg, redact, log, log_file_to_console, _safe_remove
 from clouddump.config import load_config, validate_jobs
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
@@ -166,6 +166,8 @@ def main():
                     log.info("Job %s completed successfully", job_id)
                 else:
                     log.warning("Job %s completed with errors (exit code: %d)", job_id, result)
+
+                log_file_to_console(logfile_path)
 
                 send_job_report(settings, version, host, job, result, t_start, t_end, logfile_path,
                                 attempt=attempt, max_attempts=max_attempts)

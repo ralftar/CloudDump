@@ -126,6 +126,23 @@ def validate_backup_path(path):
     return f"path '{path}' (resolved: '{resolved}') is outside allowed prefixes {_ALLOWED_BACKUP_PREFIXES}"
 
 
+def log_file_to_console(logfile_path):
+    """Dump the contents of a job log file to the console logger.
+
+    Tool output (aws, pg_dump, etc.) is written directly to the log file,
+    not through the Python logger. This function replays it to console so
+    operators see everything in kubectl logs / docker logs.
+    """
+    try:
+        with open(logfile_path) as f:
+            content = redact(f.read().strip())
+        if content:
+            for line in content.splitlines():
+                log.info("  %s", line)
+    except OSError:
+        pass
+
+
 def _safe_remove(path):
     """Remove a file, ignoring errors if it doesn't exist."""
     try:
