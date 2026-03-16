@@ -26,6 +26,12 @@ def _signal_handler(sig, _frame):
         clouddump.child_proc.terminate()
 
 
+def _run_now_handler(sig, _frame):
+    """Handle SIGUSR1: run all jobs immediately on next loop iteration."""
+    log.info("Received SIGUSR1, running all jobs now...")
+    clouddump.run_now_requested = True
+
+
 def _add_file_handler(path):
     """Add a DEBUG-level FileHandler to the logger. Returns the handler."""
     handler = logging.FileHandler(path, mode="a")
@@ -42,6 +48,7 @@ def main():
 
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGUSR1, _run_now_handler)
 
     config = load_config()
     settings = config.get("settings", {})
@@ -104,6 +111,10 @@ def main():
     last_run = {}
 
     while not clouddump.shutdown_requested:
+        force_run = clouddump.run_now_requested
+        if force_run:
+            clouddump.run_now_requested = False
+
         for job in jobs:
             if clouddump.shutdown_requested:
                 break
@@ -116,7 +127,7 @@ def main():
             if job_id not in last_run:
                 last_run[job_id] = 0
 
-            if not should_run(crontab, last_run[job_id]):
+            if not force_run and not should_run(crontab, last_run[job_id]):
                 continue
 
             job_type = cfg(job, "type")
