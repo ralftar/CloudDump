@@ -90,6 +90,12 @@ def main():
     startup_config = redact(startup_config)
     jobs_summary = redact(jobs_summary)
 
+    for line in startup_config.splitlines():
+        log.info("  %s", line)
+    log.info("Jobs:")
+    for line in jobs_summary.splitlines():
+        log.info("  %s", line)
+
     startup_body = (
         f"CloudDump {host}\n\n"
         f"STARTED\n\n"

@@ -116,6 +116,11 @@ def send_job_report(settings, version, host, job, exit_code, t_start, t_end, log
     if attempt is not None and max_attempts is not None:
         attempt_info = f"Attempt: {attempt}/{max_attempts}\n"
 
+    summary = f"{status} | {job_id} ({job_type}) | {minutes}m {seconds}s"
+    if attempt is not None and max_attempts is not None:
+        summary += f" | attempt {attempt}/{max_attempts}"
+    log.info("Job report: %s", summary)
+
     body = (
         f"CloudDump {host}\n\n"
         f"JOB REPORT ({status})\n\n"
