@@ -1,4 +1,4 @@
-"""GitHub organization backup job runner."""
+"""GitHub backup job runner (organizations and user accounts)."""
 
 import os
 import tempfile
@@ -8,25 +8,26 @@ from clouddump import cfg, log, redact, run_cmd, _safe_remove
 
 
 def run_github_backup(org, logfile_path):
-    """Back up a single GitHub organization using ``github-backup``."""
+    """Back up a GitHub organization or user account using ``github-backup``."""
     name = cfg(org, "name")
     destination = cfg(org, "destination")
     token = cfg(org, "token")
+    account_type = cfg(org, "account_type", "org")
 
     if not name or not destination:
-        log.error("Missing name or destination for GitHub organization.")
+        log.error("Missing name or destination for GitHub account.")
         return 1
 
     if not token:
-        log.error("Missing token for GitHub organization %s.", name)
+        log.error("Missing token for GitHub account %s.", name)
         return 1
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Organization: %s", name)
+    log.info("Account: %s (type: %s)", name, account_type)
     log.info("Destination: %s", destination)
     log.debug("Token: %s", redact(f"token={token}"))
-    log.info("Backing up organization %s...", name)
+    log.info("Backing up %s %s...", account_type, name)
 
     def _enabled(key, default="true"):
         return str(cfg(org, key, default)).lower() == "true"
@@ -41,7 +42,6 @@ def run_github_backup(org, logfile_path):
     cmd = [
         "github-backup", name,
         "--token", f"file://{token_path}",
-        "--organization",
         "--output-directory", destination,
         "--incremental",
         "--private",
@@ -49,6 +49,9 @@ def run_github_backup(org, logfile_path):
         "--throttle-limit", "5000",
         "--throttle-pause", "0.72",
     ]
+
+    if account_type == "org":
+        cmd.append("--organization")
 
     if _enabled("include_repos"):
         cmd.append("--repositories")
@@ -90,7 +93,7 @@ def run_github_backup(org, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("GitHub backup of %s failed after %ds.", name, elapsed)
+        log.error("GitHub backup of %s '%s' failed after %ds.", account_type, name, elapsed)
     else:
-        log.info("GitHub backup of %s completed in %ds.", name, elapsed)
+        log.info("GitHub backup of %s '%s' completed in %ds.", account_type, name, elapsed)
     return rc

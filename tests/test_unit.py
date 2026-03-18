@@ -1,11 +1,13 @@
 """Unit tests for cron, config validation, and redaction."""
 
 from datetime import datetime
+from unittest.mock import patch
+import urllib.error
 
 import pytest
 
 from clouddump import redact
-from clouddump.config import validate_jobs
+from clouddump.config import _check_github, validate_jobs
 from clouddump.cron import matches_cron, should_run, validate_cron
 
 
@@ -155,3 +157,87 @@ def test_redact_strips_secrets(text, secret):
 def test_redact_ignores_clean_text():
     text = "Nothing sensitive here, just a normal log line."
     assert redact(text) == text
+
+
+# ── _check_github ───────────────────────────────────────────────────────────
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_check_github_org_success(mock_urlopen):
+    mock_urlopen.return_value.__enter__ = lambda s: s
+    mock_urlopen.return_value.__exit__ = lambda s, *a: None
+    assert _check_github("my-org", "ghp_validtoken", "org") is None
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_check_github_user_success(mock_urlopen):
+    mock_urlopen.return_value.__enter__ = lambda s: s
+    mock_urlopen.return_value.__exit__ = lambda s, *a: None
+    assert _check_github("my-user", "ghp_validtoken", "user") is None
+    # Verify it used /users/ not /orgs/
+    url = mock_urlopen.call_args[0][0].full_url
+    assert "/users/my-user" in url
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_check_github_bad_token(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://api.github.com/orgs/x", 401, "Unauthorized", {}, None)
+    result = _check_github("my-org", "ghp_badtoken")
+    assert "authentication failed" in result
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_check_github_forbidden(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://api.github.com/orgs/x", 403, "Forbidden", {}, None)
+    result = _check_github("my-org", "ghp_limited")
+    assert "forbidden" in result
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_check_github_not_found(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://api.github.com/orgs/x", 404, "Not Found", {}, None)
+    result = _check_github("no-such-org", "ghp_token")
+    assert "not found" in result
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_check_github_network_error(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.URLError("Name or service not known")
+    result = _check_github("my-org", "ghp_token")
+    assert "cannot reach" in result
+
+
+@patch("clouddump.config._check_github", return_value=None)
+def test_validate_jobs_github_verifies_org(mock_gh):
+    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
+    errors, _ = validate_jobs([job])
+    assert errors == 0
+    mock_gh.assert_called_once_with("my-org", "ghp_xxx", "org")
+
+
+@patch("clouddump.config._check_github", return_value=None)
+def test_validate_jobs_github_verifies_user(mock_gh):
+    job = _job(type="github", organizations=[
+        {"name": "my-user", "token": "ghp_xxx", "account_type": "user"}])
+    errors, _ = validate_jobs([job])
+    assert errors == 0
+    mock_gh.assert_called_once_with("my-user", "ghp_xxx", "user")
+
+
+@patch("clouddump.config._check_github", return_value="auth failed")
+def test_validate_jobs_github_warns_on_failure(mock_gh):
+    """GitHub check failure is a warning, not an error — should not increment error count."""
+    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
+    errors, _ = validate_jobs([job])
+    assert errors == 0
+    mock_gh.assert_called_once()
+
+
+def test_validate_jobs_github_invalid_account_type():
+    job = _job(type="github", organizations=[
+        {"name": "x", "token": "ghp_x", "account_type": "team"}])
+    errors, _ = validate_jobs([job])
+    assert errors >= 1

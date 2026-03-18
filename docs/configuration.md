@@ -157,7 +157,7 @@ The source URL includes the SAS token for authentication.
 Dumps use `--single-transaction --routines --triggers --events` for
 consistent, complete backups without locking tables.
 
-## GitHub organization
+## GitHub organization or user
 
 ```json
 {
@@ -167,6 +167,7 @@ consistent, complete backups without locking tables.
   "organizations": [
     {
       "name": "my-org",
+      "account_type": "org",
       "destination": "/mnt/clouddump/github",
       "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "include_repos": true,
@@ -184,6 +185,7 @@ consistent, complete backups without locking tables.
 }
 ```
 
+- `account_type`: `"org"` (default) for organizations, or `"user"` for personal accounts. At startup CloudDump verifies the token and account via the GitHub API.
 - `token`: GitHub personal access token with `repo` and `read:org` scopes.
 - `include_repos`: mirror-clone repositories with all branches, tags, and PR refs (default: `true`).
 - `include_issues`: back up issues, comments, and events (default: `true`).

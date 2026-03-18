@@ -5,6 +5,8 @@ import os
 import shutil
 import socket
 import sys
+import urllib.request
+import urllib.error
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
@@ -17,6 +19,39 @@ def _check_connectivity(host, port, timeout=5):
             return True
     except (OSError, ValueError):
         return False
+
+
+VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
+
+
+def _check_github(name, token, account_type="org", timeout=10):
+    """Verify a GitHub token and account are accessible.
+
+    *account_type* is ``"org"`` (default) or ``"user"``.
+    Returns None on success, or an error message string on failure.
+    """
+    if account_type == "user":
+        url = f"https://api.github.com/users/{urllib.request.quote(name, safe='')}"
+    else:
+        url = f"https://api.github.com/orgs/{urllib.request.quote(name, safe='')}"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "CloudDump",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout):
+            return None
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return "authentication failed (invalid or expired token)"
+        if exc.code == 403:
+            return "forbidden (token lacks required scopes — needs repo and read:org)"
+        if exc.code == 404:
+            return f"account '{name}' not found (or token lacks access)"
+        return f"HTTP {exc.code}: {exc.reason}"
+    except urllib.error.URLError as exc:
+        return f"cannot reach GitHub API: {exc.reason}"
 
 CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github"}
@@ -134,6 +169,26 @@ def validate_jobs(jobs):
                 port = cfg(target, "port", "5432" if job_type == "pgsql" else "3306")
                 if host and not _check_connectivity(host, port):
                     log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
+
+        # GitHub account type and connectivity check (warn only — API may be temporarily unavailable)
+        if job_type == "github":
+            for account in cfg(job, "organizations", []):
+                acct_name = cfg(account, "name")
+                token = cfg(account, "token")
+                acct_type = cfg(account, "account_type", "org")
+                if acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
+                    log.error("Invalid account_type '%s' for '%s' in job ID %s. Must be one of: %s.",
+                              acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
+                    errors += 1
+                    continue
+                if acct_name and token:
+                    gh_err = _check_github(acct_name, token, acct_type)
+                    if gh_err:
+                        log.warning("GitHub check failed for %s '%s' in job ID %s: %s",
+                                    acct_type, acct_name, job_id, gh_err)
+                    else:
+                        log.info("GitHub token verified for %s '%s' in job ID %s.",
+                                 acct_type, acct_name, job_id)
 
         summaries.append(f"ID: {job_id}\nType: {job_type}\nSchedule: {crontab}")
 
