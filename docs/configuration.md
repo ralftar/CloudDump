@@ -17,7 +17,7 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `smtp_ssl` | No | Use SMTP_SSL (`true`/`false`, default `true`) |
 | `mail_from` | No | Sender address |
 | `mail_to` | No | Recipient address(es) — comma-separated or JSON array |
-| `email_logs` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
+| `email_log_attached` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
 `mail_to` accepts multiple recipients as a comma-separated string

@@ -80,7 +80,7 @@ def main():
 
     startup_config = (
         f"Debug: {debug}\n"
-        f"Email logs: {cfg(config, 'email_logs', False)}\n"
+        f"Email logs: {cfg(config, 'email_log_attached', False)}\n"
         f"SMTP server: {smtp_server}\n"
         f"SMTP port: {smtp_port}\n"
         f"Mail from: {mail_from}\n"

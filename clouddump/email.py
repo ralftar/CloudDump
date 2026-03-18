@@ -102,9 +102,9 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     When *attempt* and *max_attempts* are given, the subject and body include
     attempt information (e.g. ``[Failure - Attempt 1/3]``).
 
-    Attaches the log file when ``email_logs`` is true in config.
+    Attaches the log file when ``email_log_attached`` is true in config.
     """
-    email_logs = cfg(config, "email_logs", False) is True
+    email_log_attached = cfg(config, "email_log_attached", False) is True
     job_id = cfg(job, "id")
     job_type = cfg(job, "type")
     status = "Success" if exit_code == 0 else "Failure"
@@ -135,12 +135,12 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"Time elapsed: {minutes} minutes {seconds} seconds\n\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
-        f"{'See attached log for details.' if email_logs else 'Log available when email_logs is set to true.'}\n\n"
+        f"{'See attached log for details.' if email_log_attached else 'Log available when email_log_attached is set to true.'}\n\n"
         f"CloudDump v{version}\n"
     )
 
     attachments = []
-    if email_logs and os.path.isfile(logfile_path):
+    if email_log_attached and os.path.isfile(logfile_path):
         timestamp = datetime.fromtimestamp(t_start).strftime("%Y%m%d-%H%M%S")
         log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
         attachments.append((logfile_path, log_attachment_name))
