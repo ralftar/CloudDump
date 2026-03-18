@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 # ---------------------------------------------------------------------------
@@ -18,6 +19,7 @@ shutdown_requested = False  # Set by signal handler to break the main loop
 run_now_requested = False   # Set by SIGUSR1 handler to skip cron check
 job_deadline = None        # Unix timestamp; set by main loop before execute_job()
 debug = False              # Set by main() from config; enables verbose console output
+console_verbosity = "simple"  # Set by main() from config; "simple" or "verbose"
 
 
 class JobTimeout(Exception):
@@ -85,14 +87,65 @@ def redact(text):
     return text
 
 
-def run_cmd(cmd, env=None, stdout=None, stderr=None):
+def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
     """Run a command synchronously, tracking it in child_proc for signal forwarding.
 
     While the process is running, child_proc is set so that _signal_handler
     can terminate it on SIGTERM/SIGINT. Respects job_deadline for timeout.
+
+    When *logfile_path* is given, output is streamed to both the log file
+    and the console in real-time (instead of being buffered until the job
+    finishes).  If *stdout* is also provided (e.g. a dump file), only
+    stderr is captured and streamed; otherwise both stdout and stderr are
+    combined.
+
     Returns the process exit code.
     """
     global child_proc
+
+    if logfile_path is not None and stderr is None:
+        if stdout is None:
+            proc = subprocess.Popen(
+                cmd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            pipe = proc.stdout
+        else:
+            proc = subprocess.Popen(
+                cmd, env=env,
+                stdout=stdout, stderr=subprocess.PIPE,
+            )
+            pipe = proc.stderr
+
+        child_proc = proc
+
+        def _stream():
+            with open(logfile_path, "a") as logf:
+                for raw_line in pipe:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
+                    logf.write(line + "\n")
+                    logf.flush()
+                    if console_verbosity == "verbose":
+                        log.info("  %s", redact(line))
+
+        reader = threading.Thread(target=_stream, daemon=True)
+        reader.start()
+
+        try:
+            remaining = None
+            if job_deadline is not None:
+                remaining = max(1, job_deadline - time.time())
+            proc.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            child_proc = None
+            reader.join(timeout=5)
+            raise JobTimeout("Job timed out (deadline exceeded)")
+
+        reader.join(timeout=5)
+        child_proc = None
+        return proc.returncode
 
     proc = subprocess.Popen(cmd, env=env, stdout=stdout, stderr=stderr)
     child_proc = proc

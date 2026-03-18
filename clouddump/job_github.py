@@ -53,26 +53,30 @@ def run_github_backup(org, logfile_path):
     if account_type == "org":
         cmd.append("--organization")
 
+    repos = cfg(org, "repositories", [])
+    for repo in repos:
+        cmd += ["--repository", repo]
+
     if _enabled("include_repos"):
         cmd.append("--repositories")
         cmd.append("--bare")
 
-    if _enabled("include_issues"):
+    if _enabled("include_issues", "false"):
         cmd += ["--issues", "--issue-comments", "--issue-events"]
 
-    if _enabled("include_pulls"):
+    if _enabled("include_pulls", "false"):
         cmd += ["--pulls", "--pull-comments", "--pull-commits", "--pull-details"]
 
-    if _enabled("include_labels"):
+    if _enabled("include_labels", "false"):
         cmd.append("--labels")
 
-    if _enabled("include_milestones"):
+    if _enabled("include_milestones", "false"):
         cmd.append("--milestones")
 
-    if _enabled("include_releases"):
+    if _enabled("include_releases", "false"):
         cmd += ["--releases", "--assets"]
 
-    if _enabled("include_wikis"):
+    if _enabled("include_wikis", "false"):
         cmd.append("--wikis")
 
     if _enabled("include_forks", "false"):
@@ -86,8 +90,7 @@ def run_github_backup(org, logfile_path):
 
     t0 = time.time()
     try:
-        with open(logfile_path, "a") as logf:
-            rc = run_cmd(cmd, stdout=logf, stderr=logf)
+        rc = run_cmd(cmd, logfile_path=logfile_path)
     finally:
         _safe_remove(token_path)
     elapsed = int(time.time() - t0)

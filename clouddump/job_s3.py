@@ -50,8 +50,7 @@ def run_s3_sync(bucket, logfile_path):
     cmd += [source, destination]
 
     t0 = time.time()
-    with open(logfile_path, "a") as logf:
-        rc = run_cmd(cmd, env=env, stdout=logf, stderr=logf)
+    rc = run_cmd(cmd, env=env, logfile_path=logfile_path)
     elapsed = int(time.time() - t0)
 
     if rc != 0:

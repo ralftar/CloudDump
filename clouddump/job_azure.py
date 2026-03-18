@@ -31,8 +31,7 @@ def run_az_sync(blobstorage, logfile_path):
     cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={'true' if delete else 'false'}", source, destination]
 
     t0 = time.time()
-    with open(logfile_path, "a") as logf:
-        rc = run_cmd(cmd, stdout=logf, stderr=logf)
+    rc = run_cmd(cmd, logfile_path=logfile_path)
     elapsed = int(time.time() - t0)
 
     if rc != 0:

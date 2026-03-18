@@ -102,8 +102,8 @@ def run_mysql_dump(server, logfile_path):
 
             log.debug("Running mysqldump of %s (attempt %d/3)...", database, db_attempt)
 
-            with open(temp_file, "w") as dump_out, open(logfile_path, "a") as logf:
-                rc = run_cmd(cmd, env=env, stdout=dump_out, stderr=logf)
+            with open(temp_file, "w") as dump_out:
+                rc = run_cmd(cmd, env=env, stdout=dump_out, logfile_path=logfile_path)
 
             if rc != 0:
                 log.error("mysqldump for %s on %s failed.", database, host)

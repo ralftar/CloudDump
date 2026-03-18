@@ -15,6 +15,8 @@ CloudDump is configured via a single JSON file mounted at `/config/config.json`.
 | `MAILFROM` | No | Sender address |
 | `MAILTO` | No | Recipient address(es) — comma-separated or JSON array |
 | `DEBUG` | No | Enable debug logging (`true`/`false`) |
+| `CONSOLE_VERBOSITY` | No | `simple` (default): only CloudDump's own log messages. `verbose`: stream all tool output in real-time |
+| `EMAIL_VERBOSITY` | No | `simple` (default): summary body only. `verbose`: summary body + full log file attached |
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
 `MAILTO` accepts multiple recipients as a comma-separated string
@@ -187,18 +189,19 @@ consistent, complete backups without locking tables.
 
 - `account_type`: `"org"` (default) for organizations, or `"user"` for personal accounts. At startup CloudDump verifies the token and account via the GitHub API.
 - `token`: GitHub personal access token with `repo` and `read:org` scopes.
+- `repositories`: list of specific repository names to back up (default: all repositories).
 - `include_repos`: mirror-clone repositories with all branches, tags, and PR refs (default: `true`).
-- `include_issues`: back up issues, comments, and events (default: `true`).
-- `include_pulls`: back up pull requests, comments, commits, and details (default: `true`).
-- `include_labels`: back up labels (default: `true`).
-- `include_milestones`: back up milestones (default: `true`).
-- `include_releases`: back up releases and assets (default: `true`).
-- `include_wikis`: back up repository wikis (default: `true`).
+- `include_issues`: back up issues, comments, and events (default: `false`).
+- `include_pulls`: back up pull requests, comments, commits, and details (default: `false`).
+- `include_labels`: back up labels (default: `false`).
+- `include_milestones`: back up milestones (default: `false`).
+- `include_releases`: back up releases and assets (default: `false`).
+- `include_wikis`: back up repository wikis (default: `false`).
 - `include_forks`: include forked repositories (default: `false`).
 - `include_archived`: include archived repositories (default: `true`).
 - `include_lfs`: download Git LFS objects (default: `false`).
 
-All `include_*` options default to `true` except `include_forks` and `include_lfs`.
+By default only repository code is backed up. Metadata options (issues, pulls, labels, milestones, releases, wikis) can be enabled individually but require many GitHub API calls per repository.
 
 ## Storage
 

@@ -22,6 +22,7 @@ def _check_connectivity(host, port, timeout=5):
 
 
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
+VALID_VERBOSITY_LEVELS = {"simple", "verbose"}
 
 
 def _check_github(name, token, account_type="org", timeout=10):
@@ -75,6 +76,21 @@ def load_config():
     except json.JSONDecodeError as exc:
         log.error("Invalid JSON in %s: %s", CONFIG_FILE, exc)
         sys.exit(1)
+
+
+def validate_settings(settings):
+    """Validate global settings. Returns error count.
+
+    Checks CONSOLE_VERBOSITY and EMAIL_VERBOSITY against allowed values.
+    """
+    errors = 0
+    for key in ("CONSOLE_VERBOSITY", "EMAIL_VERBOSITY"):
+        value = cfg(settings, key)
+        if value and str(value).lower() not in VALID_VERBOSITY_LEVELS:
+            log.error("Invalid %s '%s'. Must be one of: %s.",
+                      key, value, ", ".join(sorted(VALID_VERBOSITY_LEVELS)))
+            errors += 1
+    return errors
 
 
 def validate_jobs(jobs):
@@ -162,7 +178,33 @@ def validate_jobs(jobs):
                         log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
                         errors += 1
 
-        # Connectivity check for database jobs (warn only — server may start later)
+        # Validate account_type for GitHub jobs (config error, not connectivity)
+        if job_type == "github":
+            for account in cfg(job, "organizations", []):
+                acct_type = cfg(account, "account_type", "org")
+                if acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
+                    acct_name = cfg(account, "name")
+                    log.error("Invalid account_type '%s' for '%s' in job ID %s. Must be one of: %s.",
+                              acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
+                    errors += 1
+
+        summaries.append(f"ID: {job_id}\nType: {job_type}\nSchedule: {crontab}")
+
+    return errors, "\n\n".join(summaries)
+
+
+def verify_connectivity(jobs):
+    """Run connectivity checks for all jobs (warn only).
+
+    Called after config and job listing have been logged, so the output
+    appears in a natural order: config → jobs → verification.
+    """
+    for job in jobs:
+        job_id = cfg(job, "id")
+        job_type = cfg(job, "type")
+        if not job_id or not job_type:
+            continue
+
         if job_type in ("pgsql", "mysql"):
             for target in cfg(job, "servers", []):
                 host = cfg(target, "host")
@@ -170,18 +212,12 @@ def validate_jobs(jobs):
                 if host and not _check_connectivity(host, port):
                     log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
 
-        # GitHub account type and connectivity check (warn only — API may be temporarily unavailable)
         if job_type == "github":
             for account in cfg(job, "organizations", []):
                 acct_name = cfg(account, "name")
                 token = cfg(account, "token")
                 acct_type = cfg(account, "account_type", "org")
-                if acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
-                    log.error("Invalid account_type '%s' for '%s' in job ID %s. Must be one of: %s.",
-                              acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
-                    errors += 1
-                    continue
-                if acct_name and token:
+                if acct_name and token and acct_type in VALID_GITHUB_ACCOUNT_TYPES:
                     gh_err = _check_github(acct_name, token, acct_type)
                     if gh_err:
                         log.warning("GitHub check failed for %s '%s' in job ID %s: %s",
@@ -189,7 +225,3 @@ def validate_jobs(jobs):
                     else:
                         log.info("GitHub token verified for %s '%s' in job ID %s.",
                                  acct_type, acct_name, job_id)
-
-        summaries.append(f"ID: {job_id}\nType: {job_type}\nSchedule: {crontab}")
-
-    return errors, "\n\n".join(summaries)

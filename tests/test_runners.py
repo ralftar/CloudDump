@@ -381,7 +381,7 @@ class TestGitHubRunner:
         return base
 
     def test_default_flags(self, monkeypatch, tmp_path, _tmp_logfile):
-        """All include_* flags default to true (except forks and lfs)."""
+        """Only repos enabled by default; metadata flags off."""
         from clouddump.job_github import run_github_backup
 
         dest = str(tmp_path / "ghout")
@@ -399,19 +399,45 @@ class TestGitHubRunner:
         # Defaults on
         assert "--repositories" in cmd
         assert "--bare" in cmd
-        assert "--issues" in cmd
-        assert "--issue-comments" in cmd
-        assert "--pulls" in cmd
-        assert "--pull-comments" in cmd
-        assert "--labels" in cmd
-        assert "--milestones" in cmd
-        assert "--releases" in cmd
-        assert "--assets" in cmd
-        assert "--wikis" in cmd
-        # Defaults off
+        # Defaults off (metadata)
+        assert "--issues" not in cmd
+        assert "--issue-comments" not in cmd
+        assert "--pulls" not in cmd
+        assert "--pull-comments" not in cmd
+        assert "--labels" not in cmd
+        assert "--milestones" not in cmd
+        assert "--releases" not in cmd
+        assert "--assets" not in cmd
+        assert "--wikis" not in cmd
         assert "--fork" not in cmd
         assert "--lfs" not in cmd
         assert "--skip-archived" not in cmd
+
+    def test_repositories_filter(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_github import run_github_backup
+
+        dest = str(tmp_path / "ghout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
+
+        run_github_backup(self._cfg(destination=dest, repositories=["repo-a", "repo-b"]), _tmp_logfile)
+
+        cmd = calls[0][0]
+        assert "--repository" in cmd
+        idx = cmd.index("--repository")
+        assert cmd[idx + 1] == "repo-a"
+        idx2 = cmd.index("--repository", idx + 1)
+        assert cmd[idx2 + 1] == "repo-b"
+
+    def test_repositories_default_all(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_github import run_github_backup
+
+        dest = str(tmp_path / "ghout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
+
+        run_github_backup(self._cfg(destination=dest), _tmp_logfile)
+
+        cmd = calls[0][0]
+        assert "--repository" not in cmd
 
     def test_repos_disabled(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_github import run_github_backup

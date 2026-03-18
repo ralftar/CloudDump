@@ -4,20 +4,20 @@
 [![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Keep a copy of your cloud data somewhere you control.**
+**Keep a copy of your cloud data somewhere else.**
 
 The cloud is just someone else's computer. CloudDump pulls your persistent
 data — S3 buckets, Azure Blob Storage, PostgreSQL databases, MySQL
-databases, GitHub organizations — down to on-premises storage, another
-cloud, or wherever you want. On a schedule, unattended, with email
-notifications when things succeed or fail.
+databases, GitHub repos — to an offsite location the cloud provider knows
+nothing about. On a schedule, unattended, with email notifications when
+things succeed or fail.
 
 ## Why
 
 You store data in S3 or Azure. Your databases run in the cloud. That's
 fine — until a provider has an outage, a misconfigured IAM policy deletes
-your bucket, or you just want to sleep better knowing there's a copy on
-hardware you own.
+your bucket, or you just want to sleep better knowing there's a copy
+somewhere else — another cloud, a VPS, a NAS, wherever.
 
 CloudDump runs as a single Docker container. Point it at your cloud
 resources, tell it when to sync, and forget about it. If something breaks,
@@ -32,7 +32,7 @@ you get an email.
 | Azure Blob Storage | `azstorage` | AzCopy | SAS token in source URL |
 | PostgreSQL | `pgsql` | pg_dump / psql | Host, port, user, password |
 | MySQL / MariaDB | `mysql` | mysqldump / mysql | Host, port, user, password |
-| GitHub organization | `github` | github-backup | Personal access token |
+| GitHub (org or user) | `github` | github-backup | Personal access token |
 
 ## Not a backup system
 
@@ -66,8 +66,8 @@ but the cloud has zero control over what you already have.
 
 A typical DR setup:
 
-1. **CloudDump** syncs cloud data to local storage on a schedule.
-2. **A backup tool** (Restic, Borg, Veeam, etc.) snapshots the local copy
+1. **CloudDump** syncs cloud data to offsite storage on a schedule.
+2. **A backup tool** (Restic, Borg, Veeam, etc.) snapshots that copy
    with versioning and retention.
 3. **A dead-man switch** (e.g. [Healthchecks.io](https://healthchecks.io))
    alerts you when expected emails *stop arriving* — a silent failure is

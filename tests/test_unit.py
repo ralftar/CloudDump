@@ -7,7 +7,7 @@ import urllib.error
 import pytest
 
 from clouddump import redact
-from clouddump.config import _check_github, validate_jobs
+from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 
 
@@ -132,6 +132,25 @@ def test_validate_jobs_duplicate_id():
     assert errors >= 1
 
 
+# ── validate_settings ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("key", ["CONSOLE_VERBOSITY", "EMAIL_VERBOSITY"])
+@pytest.mark.parametrize("value", ["simple", "verbose"])
+def test_validate_settings_valid_verbosity(key, value):
+    assert validate_settings({key: value}) == 0
+
+
+@pytest.mark.parametrize("key", ["CONSOLE_VERBOSITY", "EMAIL_VERBOSITY"])
+@pytest.mark.parametrize("value", ["quiet", "debug", "full", "INVALID"])
+def test_validate_settings_invalid_verbosity(key, value):
+    assert validate_settings({key: value}) >= 1
+
+
+def test_validate_settings_defaults_no_errors():
+    assert validate_settings({}) == 0
+
+
 # ── redact ───────────────────────────────────────────────────────────────────
 
 
@@ -210,34 +229,43 @@ def test_check_github_network_error(mock_urlopen):
     assert "cannot reach" in result
 
 
-@patch("clouddump.config._check_github", return_value=None)
-def test_validate_jobs_github_verifies_org(mock_gh):
-    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
-    errors, _ = validate_jobs([job])
-    assert errors == 0
-    mock_gh.assert_called_once_with("my-org", "ghp_xxx", "org")
-
-
-@patch("clouddump.config._check_github", return_value=None)
-def test_validate_jobs_github_verifies_user(mock_gh):
-    job = _job(type="github", organizations=[
-        {"name": "my-user", "token": "ghp_xxx", "account_type": "user"}])
-    errors, _ = validate_jobs([job])
-    assert errors == 0
-    mock_gh.assert_called_once_with("my-user", "ghp_xxx", "user")
-
-
-@patch("clouddump.config._check_github", return_value="auth failed")
-def test_validate_jobs_github_warns_on_failure(mock_gh):
-    """GitHub check failure is a warning, not an error — should not increment error count."""
-    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
-    errors, _ = validate_jobs([job])
-    assert errors == 0
-    mock_gh.assert_called_once()
-
-
 def test_validate_jobs_github_invalid_account_type():
     job = _job(type="github", organizations=[
         {"name": "x", "token": "ghp_x", "account_type": "team"}])
     errors, _ = validate_jobs([job])
     assert errors >= 1
+
+
+# ── verify_connectivity ─────────────────────────────────────────────────────
+
+
+@patch("clouddump.config._check_github", return_value=None)
+def test_verify_connectivity_github_org(mock_gh):
+    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
+    verify_connectivity([job])
+    mock_gh.assert_called_once_with("my-org", "ghp_xxx", "org")
+
+
+@patch("clouddump.config._check_github", return_value=None)
+def test_verify_connectivity_github_user(mock_gh):
+    job = _job(type="github", organizations=[
+        {"name": "my-user", "token": "ghp_xxx", "account_type": "user"}])
+    verify_connectivity([job])
+    mock_gh.assert_called_once_with("my-user", "ghp_xxx", "user")
+
+
+@patch("clouddump.config._check_github", return_value="auth failed")
+def test_verify_connectivity_github_warns_on_failure(mock_gh):
+    """GitHub check failure is a warning, not a crash."""
+    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
+    verify_connectivity([job])  # should not raise
+    mock_gh.assert_called_once()
+
+
+@patch("clouddump.config._check_github")
+def test_verify_connectivity_skips_invalid_account_type(mock_gh):
+    """Invalid account_type is caught by validate_jobs, not verify_connectivity."""
+    job = _job(type="github", organizations=[
+        {"name": "x", "token": "ghp_x", "account_type": "team"}])
+    verify_connectivity([job])
+    mock_gh.assert_not_called()
