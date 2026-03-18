@@ -12,7 +12,7 @@ from pathlib import Path
 
 import clouddump
 from clouddump import cfg, redact, log, _safe_remove
-from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
+from clouddump.config import load_config, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
 from clouddump.jobs import execute_job
@@ -54,17 +54,9 @@ def main():
     settings = config.get("settings", {})
     host = cfg(settings, "HOST")
     debug = str(cfg(settings, "DEBUG", "false")).lower() == "true"
-
-    settings_errors = validate_settings(settings)
-    if settings_errors:
-        log.error("Settings validation failed with %d error(s). Exiting.", settings_errors)
-        sys.exit(1)
-
-    console_verbosity = str(cfg(settings, "CONSOLE_VERBOSITY", "simple")).lower()
-    email_verbosity = str(cfg(settings, "EMAIL_VERBOSITY", "simple")).lower()
+    logs_attached = str(cfg(settings, "LOGS_ATTACHED", "false")).lower() == "true"
 
     clouddump.debug = debug
-    clouddump.console_verbosity = console_verbosity
     if debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
@@ -90,8 +82,7 @@ def main():
 
     startup_config = (
         f"Debug: {debug}\n"
-        f"Console verbosity: {console_verbosity}\n"
-        f"Email verbosity: {email_verbosity}\n"
+        f"Logs attached: {logs_attached}\n"
         f"SMTP server: {smtp_server}\n"
         f"SMTP port: {smtp_port}\n"
         f"Mail from: {mail_from}\n"
@@ -188,7 +179,7 @@ def main():
 
                 send_job_report(settings, version, host, job, result, t_start, t_end, logfile_path,
                                 attempt=attempt, max_attempts=max_attempts,
-                                verbosity=email_verbosity)
+                                logs_attached=logs_attached)
 
                 _safe_remove(logfile_path)
 

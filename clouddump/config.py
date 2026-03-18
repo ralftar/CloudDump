@@ -22,7 +22,6 @@ def _check_connectivity(host, port, timeout=5):
 
 
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
-VALID_VERBOSITY_LEVELS = {"simple", "verbose"}
 
 
 def _check_github(name, token, account_type="org", timeout=10):
@@ -76,21 +75,6 @@ def load_config():
     except json.JSONDecodeError as exc:
         log.error("Invalid JSON in %s: %s", CONFIG_FILE, exc)
         sys.exit(1)
-
-
-def validate_settings(settings):
-    """Validate global settings. Returns error count.
-
-    Checks CONSOLE_VERBOSITY and EMAIL_VERBOSITY against allowed values.
-    """
-    errors = 0
-    for key in ("CONSOLE_VERBOSITY", "EMAIL_VERBOSITY"):
-        value = cfg(settings, key)
-        if value and str(value).lower() not in VALID_VERBOSITY_LEVELS:
-            log.error("Invalid %s '%s'. Must be one of: %s.",
-                      key, value, ", ".join(sorted(VALID_VERBOSITY_LEVELS)))
-            errors += 1
-    return errors
 
 
 def validate_jobs(jobs):

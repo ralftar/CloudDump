@@ -14,9 +14,8 @@ CloudDump is configured via a single JSON file mounted at `/config/config.json`.
 | `SMTPSSL` | No | Use SMTP_SSL (`true`/`false`, default `true`) |
 | `MAILFROM` | No | Sender address |
 | `MAILTO` | No | Recipient address(es) — comma-separated or JSON array |
-| `DEBUG` | No | Enable debug logging (`true`/`false`) |
-| `CONSOLE_VERBOSITY` | No | `simple` (default): only CloudDump's own log messages. `verbose`: stream all tool output in real-time |
-| `EMAIL_VERBOSITY` | No | `simple` (default): summary body only. `verbose`: summary body + full log file attached |
+| `DEBUG` | No | Stream tool output and debug messages to console (`true`/`false`, default `false`) |
+| `LOGS_ATTACHED` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
 `MAILTO` accepts multiple recipients as a comma-separated string

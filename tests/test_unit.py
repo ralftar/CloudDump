@@ -7,7 +7,7 @@ import urllib.error
 import pytest
 
 from clouddump import redact
-from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
+from clouddump.config import _check_github, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 
 
@@ -130,25 +130,6 @@ def test_validate_jobs_mysql_valid():
 def test_validate_jobs_duplicate_id():
     errors, _ = validate_jobs([_job(), _job()])
     assert errors >= 1
-
-
-# ── validate_settings ────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize("key", ["CONSOLE_VERBOSITY", "EMAIL_VERBOSITY"])
-@pytest.mark.parametrize("value", ["simple", "verbose"])
-def test_validate_settings_valid_verbosity(key, value):
-    assert validate_settings({key: value}) == 0
-
-
-@pytest.mark.parametrize("key", ["CONSOLE_VERBOSITY", "EMAIL_VERBOSITY"])
-@pytest.mark.parametrize("value", ["quiet", "debug", "full", "INVALID"])
-def test_validate_settings_invalid_verbosity(key, value):
-    assert validate_settings({key: value}) >= 1
-
-
-def test_validate_settings_defaults_no_errors():
-    assert validate_settings({}) == 0
 
 
 # ── redact ───────────────────────────────────────────────────────────────────

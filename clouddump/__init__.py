@@ -18,8 +18,7 @@ child_proc = None          # Currently running subprocess, for signal forwarding
 shutdown_requested = False  # Set by signal handler to break the main loop
 run_now_requested = False   # Set by SIGUSR1 handler to skip cron check
 job_deadline = None        # Unix timestamp; set by main loop before execute_job()
-debug = False              # Set by main() from config; enables verbose console output
-console_verbosity = "simple"  # Set by main() from config; "simple" or "verbose"
+debug = False  # Set by main() from config; enables tool output + debug on console
 
 
 class JobTimeout(Exception):
@@ -125,7 +124,7 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
                     line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
                     logf.write(line + "\n")
                     logf.flush()
-                    if console_verbosity == "verbose":
+                    if debug:
                         log.info("  %s", redact(line))
 
         reader = threading.Thread(target=_stream, daemon=True)

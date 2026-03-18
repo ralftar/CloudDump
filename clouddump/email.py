@@ -96,14 +96,13 @@ def format_job_config(job):
 
 
 def send_job_report(settings, version, host, job, exit_code, t_start, t_end, logfile_path,
-                    attempt=None, max_attempts=None, verbosity="simple"):
+                    attempt=None, max_attempts=None, logs_attached=False):
     """Send job completion email, optionally with log attachment.
 
     When *attempt* and *max_attempts* are given, the subject and body include
     attempt information (e.g. ``[Failure - Attempt 1/3]``).
 
-    *verbosity* controls attachment behavior: ``"simple"`` sends the summary
-    body only; ``"verbose"`` attaches the full log file.
+    When *logs_attached* is True, the full log file is attached to the email.
     """
     job_id = cfg(job, "id")
     job_type = cfg(job, "type")
@@ -135,12 +134,12 @@ def send_job_report(settings, version, host, job, exit_code, t_start, t_end, log
         f"Time elapsed: {minutes} minutes {seconds} seconds\n\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
-        f"{'See attached log for details.' if verbosity == 'verbose' else 'Log available when EMAIL_VERBOSITY is set to verbose.'}\n\n"
+        f"{'See attached log for details.' if logs_attached else 'Log available when LOGS_ATTACHED is set to true.'}\n\n"
         f"CloudDump v{version}\n"
     )
 
     attachments = []
-    if verbosity == "verbose" and os.path.isfile(logfile_path):
+    if logs_attached and os.path.isfile(logfile_path):
         timestamp = datetime.fromtimestamp(t_start).strftime("%Y%m%d-%H%M%S")
         log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
         attachments.append((logfile_path, log_attachment_name))
