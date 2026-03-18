@@ -2,23 +2,25 @@
 
 CloudDump is configured via a single JSON file mounted at `/config/config.json`.
 
-## Settings
+## Top-level settings
+
+All settings are top-level keys in `config.json`, alongside `jobs`.
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `HOST` | No | Hostname shown in email subjects |
-| `SMTPSERVER` | No | SMTP server |
-| `SMTPPORT` | No | SMTP port (465 for SSL, 25/587 for plain) |
-| `SMTPUSER` | No | SMTP username |
-| `SMTPPASS` | No | SMTP password |
-| `SMTPSSL` | No | Use SMTP_SSL (`true`/`false`, default `true`) |
-| `MAILFROM` | No | Sender address |
-| `MAILTO` | No | Recipient address(es) — comma-separated or JSON array |
-| `DEBUG` | No | Stream tool output and debug messages to console (`true`/`false`, default `false`) |
-| `LOGS_ATTACHED` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
+| `host` | No | Hostname shown in email subjects |
+| `debug` | No | Stream tool output and debug messages to console (`true`/`false`, default `false`) |
+| `smtp_server` | No | SMTP server |
+| `smtp_port` | No | SMTP port (465 for SSL, 25/587 for plain) |
+| `smtp_user` | No | SMTP username |
+| `smtp_pass` | No | SMTP password |
+| `smtp_ssl` | No | Use SMTP_SSL (`true`/`false`, default `true`) |
+| `mail_from` | No | Sender address |
+| `mail_to` | No | Recipient address(es) — comma-separated or JSON array |
+| `email_logs` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
-`MAILTO` accepts multiple recipients as a comma-separated string
+`mail_to` accepts multiple recipients as a comma-separated string
 (`"ops@example.com, oncall@example.com"`) or a JSON array
 (`["ops@example.com", "oncall@example.com"]`).
 

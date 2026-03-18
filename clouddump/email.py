@@ -10,22 +10,22 @@ from email.mime.text import MIMEText
 from clouddump import cfg, log, redact
 
 
-def send_email(settings, subject, body, attachments=None):
+def send_email(config, subject, body, attachments=None):
     """Send an email via SMTP with optional file attachments.
 
-    Uses SMTP_SSL by default.  Set ``SMTPSSL`` to ``false`` in config to use
+    Uses SMTP_SSL by default.  Set ``smtp_ssl`` to ``false`` in config to use
     plain SMTP (useful for relay servers that don't support SSL).
 
-    Silently skips if SMTPSERVER, SMTPPORT, or MAILTO are not configured.
+    Silently skips if smtp_server, smtp_port, or mail_to are not configured.
     Logs but does not raise on send failure.
     """
-    smtp_server = cfg(settings, "SMTPSERVER")
-    smtp_port = cfg(settings, "SMTPPORT")
-    smtp_user = cfg(settings, "SMTPUSER")
-    smtp_pass = cfg(settings, "SMTPPASS")
-    smtp_ssl = str(cfg(settings, "SMTPSSL", "true")).lower() != "false"
-    mail_from = cfg(settings, "MAILFROM")
-    mail_to = cfg(settings, "MAILTO")
+    smtp_server = cfg(config, "smtp_server")
+    smtp_port = cfg(config, "smtp_port")
+    smtp_user = cfg(config, "smtp_user")
+    smtp_pass = cfg(config, "smtp_pass")
+    smtp_ssl = cfg(config, "smtp_ssl", True) is not False
+    mail_from = cfg(config, "mail_from")
+    mail_to = cfg(config, "mail_to")
 
     if not smtp_server or not smtp_port or not mail_to:
         return None  # Not configured
@@ -95,15 +95,16 @@ def format_job_config(job):
     return redact("\n".join(lines))
 
 
-def send_job_report(settings, version, host, job, exit_code, t_start, t_end, logfile_path,
-                    attempt=None, max_attempts=None, logs_attached=False):
+def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfile_path,
+                    attempt=None, max_attempts=None):
     """Send job completion email, optionally with log attachment.
 
     When *attempt* and *max_attempts* are given, the subject and body include
     attempt information (e.g. ``[Failure - Attempt 1/3]``).
 
-    When *logs_attached* is True, the full log file is attached to the email.
+    Attaches the log file when ``email_logs`` is true in config.
     """
+    email_logs = cfg(config, "email_logs", False) is True
     job_id = cfg(job, "id")
     job_type = cfg(job, "type")
     status = "Success" if exit_code == 0 else "Failure"
@@ -134,12 +135,12 @@ def send_job_report(settings, version, host, job, exit_code, t_start, t_end, log
         f"Time elapsed: {minutes} minutes {seconds} seconds\n\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
-        f"{'See attached log for details.' if logs_attached else 'Log available when LOGS_ATTACHED is set to true.'}\n\n"
+        f"{'See attached log for details.' if email_logs else 'Log available when email_logs is set to true.'}\n\n"
         f"CloudDump v{version}\n"
     )
 
     attachments = []
-    if logs_attached and os.path.isfile(logfile_path):
+    if email_logs and os.path.isfile(logfile_path):
         timestamp = datetime.fromtimestamp(t_start).strftime("%Y%m%d-%H%M%S")
         log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
         attachments.append((logfile_path, log_attachment_name))
@@ -148,4 +149,4 @@ def send_job_report(settings, version, host, job, exit_code, t_start, t_end, log
         subject = f"[{status} - Attempt {attempt}/{max_attempts}] CloudDump {host}: {job_id}"
     else:
         subject = f"[{status}] CloudDump {host}: {job_id}"
-    send_email(settings, subject, body, attachments)
+    send_email(config, subject, body, attachments)

@@ -51,10 +51,8 @@ def main():
     signal.signal(signal.SIGUSR1, _run_now_handler)
 
     config = load_config()
-    settings = config.get("settings", {})
-    host = cfg(settings, "HOST")
-    debug = str(cfg(settings, "DEBUG", "false")).lower() == "true"
-    logs_attached = str(cfg(settings, "LOGS_ATTACHED", "false")).lower() == "true"
+    host = cfg(config, "host")
+    debug = cfg(config, "debug", False) is True
 
     clouddump.debug = debug
     if debug:
@@ -75,14 +73,14 @@ def main():
         sys.exit(1)
     log.info("All %d job(s) passed configuration validation.", len(jobs))
 
-    smtp_server = cfg(settings, "SMTPSERVER")
-    smtp_port = cfg(settings, "SMTPPORT")
-    mail_from = cfg(settings, "MAILFROM")
-    mail_to = cfg(settings, "MAILTO")
+    smtp_server = cfg(config, "smtp_server")
+    smtp_port = cfg(config, "smtp_port")
+    mail_from = cfg(config, "mail_from")
+    mail_to = cfg(config, "mail_to")
 
     startup_config = (
         f"Debug: {debug}\n"
-        f"Logs attached: {logs_attached}\n"
+        f"Email logs: {cfg(config, 'email_logs', False)}\n"
         f"SMTP server: {smtp_server}\n"
         f"SMTP port: {smtp_port}\n"
         f"Mail from: {mail_from}\n"
@@ -109,7 +107,7 @@ def main():
         f"{jobs_summary}\n\n"
         f"CloudDump v{version}"
     )
-    result = send_email(settings, f"[Started] CloudDump {host}", startup_body)
+    result = send_email(config, f"[Started] CloudDump {host}", startup_body)
     if result is True:
         log.info("Startup email sent.")
     elif result is None:
@@ -177,9 +175,8 @@ def main():
                 else:
                     log.warning("Job %s completed with errors (exit code: %d)", job_id, result)
 
-                send_job_report(settings, version, host, job, result, t_start, t_end, logfile_path,
-                                attempt=attempt, max_attempts=max_attempts,
-                                logs_attached=logs_attached)
+                send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
+                                attempt=attempt, max_attempts=max_attempts)
 
                 _safe_remove(logfile_path)
 
