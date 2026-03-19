@@ -1,20 +1,18 @@
 {
-  "settings": {
-    "HOST": "integration-test",
-    "SMTPSERVER": "mailpit",
-    "SMTPPORT": "1025",
-    "SMTPUSER": "",
-    "SMTPPASS": "",
-    "SMTPSSL": false,
-    "MAILFROM": "test@clouddump.local",
-    "MAILTO": "verify@clouddump.local",
-    "DEBUG": true
-  },
+  "host": "integration-test",
+  "smtp_server": "mailpit",
+  "smtp_port": "1025",
+  "smtp_user": "",
+  "smtp_pass": "",
+  "smtp_ssl": false,
+  "mail_from": "test@clouddump.local",
+  "mail_to": "verify@clouddump.local",
+  "debug": true,
+  "crontab": "* * * * *",
   "jobs": [
     {
       "type": "s3bucket",
       "id": "test-s3",
-      "crontab": "* * * * *",
       "retries": 1,
       "timeout": 300,
       "buckets": [
@@ -25,45 +23,42 @@
           "aws_access_key_id": "minioadmin",
           "aws_secret_access_key": "minioadmin",
           "aws_region": "us-east-1",
-          "delete_destination": "true"
+          "delete_destination": true
         }
       ]
     },
     {
       "type": "pgsql",
       "id": "test-pgsql",
-      "crontab": "* * * * *",
       "retries": 1,
       "timeout": 300,
       "servers": [
         {
           "host": "postgres",
-          "port": "5432",
+          "port": 5432,
           "user": "testuser",
           "pass": "testpass",
           "backuppath": "/backup/pgsql",
-          "compress": "true",
-          "filenamedate": "false",
+          "compress": true,
+          "filenamedate": false,
           "databases_excluded": ["template0", "template1", "postgres"]
         }
       ]
-    }
-    ,
+    },
     {
       "type": "mysql",
       "id": "test-mysql",
-      "crontab": "* * * * *",
       "retries": 1,
       "timeout": 300,
       "servers": [
         {
           "host": "mysql",
-          "port": "3306",
+          "port": 3306,
           "user": "root",
           "pass": "rootpass",
           "backuppath": "/backup/mysql",
-          "compress": "true",
-          "filenamedate": "false",
+          "compress": true,
+          "filenamedate": false,
           "databases_excluded": []
         }
       ]

@@ -7,7 +7,7 @@ import urllib.error
 import pytest
 
 from clouddump import redact
-from clouddump.config import _check_github, validate_jobs, verify_connectivity
+from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 
 
@@ -97,11 +97,30 @@ def test_should_run_missed_slot_waits(monkeypatch):
     assert should_run("0 3 * * *", datetime(2025, 6, 15, 2, 55).timestamp()) is False
 
 
+# ── validate_settings ───────────────────────────────────────────────────────
+
+
+def test_validate_settings_valid_crontab():
+    assert validate_settings({"crontab": "0 3 * * *"}) == 0
+
+
+def test_validate_settings_missing_crontab():
+    assert validate_settings({}) >= 1
+
+
+def test_validate_settings_invalid_crontab():
+    assert validate_settings({"crontab": "nope"}) >= 1
+
+
+def test_validate_settings_bad_bool():
+    assert validate_settings({"crontab": "0 3 * * *", "debug": "true"}) >= 1
+
+
 # ── validate_jobs ────────────────────────────────────────────────────────────
 
 
 def _job(**overrides):
-    base = {"id": "backup1", "type": "s3bucket", "crontab": "0 3 * * *"}
+    base = {"id": "backup1", "type": "s3bucket"}
     base.update(overrides)
     return base
 
@@ -121,8 +140,6 @@ def test_validate_jobs_valid():
     {"id": ""},
     {"type": ""},
     {"type": "ftp"},
-    {"crontab": ""},
-    {"crontab": "nope"},
     {"timeout": 0},
     {"timeout": -1},
     {"retries": 0},

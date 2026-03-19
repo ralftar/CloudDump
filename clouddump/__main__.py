@@ -59,8 +59,14 @@ def main():
     if debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    crontab = cfg(config, "crontab")
+    if not crontab:
+        log.error("Missing top-level 'crontab' in configuration.")
+        sys.exit(1)
+
     log.info("CONFIGURATION:")
     log.info("Host: %s", host)
+    log.info("Schedule: %s", crontab)
 
     # Validate jobs
     jobs = config.get("jobs", [])
@@ -118,80 +124,77 @@ def main():
 
     # Main loop
     log.info("Starting main loop...")
-    last_run = {}
+    last_run_ts = 0
 
     while not clouddump.shutdown_requested:
         force_run = clouddump.run_now_requested
         if force_run:
             clouddump.run_now_requested = False
 
-        for job in jobs:
-            if clouddump.shutdown_requested:
-                break
+        if not force_run and not should_run(crontab, last_run_ts):
+            pass  # Not time yet — skip to sleep
+        else:
+            log.info("Schedule triggered, running all jobs...")
+            last_run_ts = time.time()
 
-            job_id = cfg(job, "id")
-            crontab = cfg(job, "crontab")
-            if not job_id or not crontab:
-                continue
-
-            if job_id not in last_run:
-                last_run[job_id] = 0
-
-            if not force_run and not should_run(crontab, last_run[job_id]):
-                continue
-
-            job_type = cfg(job, "type")
-            log.info("Running job %s (type: %s)", job_id, job_type)
-
-            timeout = int(cfg(job, "timeout", 604800))
-            max_attempts = int(cfg(job, "retries", 3))
-
-            for attempt in range(1, max_attempts + 1):
-                fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
-                os.close(fd)
-
-                t_start = time.time()
-                clouddump.job_deadline = t_start + timeout
-
-                file_handler = _add_file_handler(logfile_path)
-
-                try:
-                    log.debug("Job %s starting at %s",
-                              job_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                    result = execute_job(job, logfile_path)
-                    t_end = time.time()
-                    log.debug("Job %s finished at %s",
-                              job_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                except Exception:
-                    t_end = time.time()
-                    tb = traceback.format_exc()
-                    log.error("Job %s crashed:\n%s", job_id, tb)
-                    result = 1
-                finally:
-                    clouddump.job_deadline = None
-                    log.removeHandler(file_handler)
-                    file_handler.close()
-
-                if result == 0:
-                    log.info("Job %s completed successfully", job_id)
-                else:
-                    log.warning("Job %s completed with errors (exit code: %d)", job_id, result)
-
-                send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
-                                attempt=attempt, max_attempts=max_attempts)
-
-                _safe_remove(logfile_path)
-
-                if result == 0:
+            for job in jobs:
+                if clouddump.shutdown_requested:
                     break
-                elif attempt < max_attempts:
-                    log.warning("Job %s failed (attempt %d/%d), retrying in 60s...",
-                             job_id, attempt, max_attempts)
-                    time.sleep(60)
-                else:
-                    log.error("Job %s failed after %d attempts", job_id, max_attempts)
 
-            last_run[job_id] = time.time()
+                job_id = cfg(job, "id")
+                if not job_id:
+                    continue
+
+                job_type = cfg(job, "type")
+                log.info("Running job %s (type: %s)", job_id, job_type)
+
+                timeout = int(cfg(job, "timeout", 604800))
+                max_attempts = int(cfg(job, "retries", 3))
+
+                for attempt in range(1, max_attempts + 1):
+                    fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
+                    os.close(fd)
+
+                    t_start = time.time()
+                    clouddump.job_deadline = t_start + timeout
+
+                    file_handler = _add_file_handler(logfile_path)
+
+                    try:
+                        log.debug("Job %s starting at %s",
+                                  job_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        result = execute_job(job, logfile_path)
+                        t_end = time.time()
+                        log.debug("Job %s finished at %s",
+                                  job_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    except Exception:
+                        t_end = time.time()
+                        tb = traceback.format_exc()
+                        log.error("Job %s crashed:\n%s", job_id, tb)
+                        result = 1
+                    finally:
+                        clouddump.job_deadline = None
+                        log.removeHandler(file_handler)
+                        file_handler.close()
+
+                    if result == 0:
+                        log.info("Job %s completed successfully", job_id)
+                    else:
+                        log.warning("Job %s completed with errors (exit code: %d)", job_id, result)
+
+                    send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
+                                    attempt=attempt, max_attempts=max_attempts)
+
+                    _safe_remove(logfile_path)
+
+                    if result == 0:
+                        break
+                    elif attempt < max_attempts:
+                        log.warning("Job %s failed (attempt %d/%d), retrying in 60s...",
+                                 job_id, attempt, max_attempts)
+                        time.sleep(60)
+                    else:
+                        log.error("Job %s failed after %d attempts", job_id, max_attempts)
 
         if clouddump.shutdown_requested:
             break

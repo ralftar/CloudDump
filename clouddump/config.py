@@ -79,13 +79,24 @@ def load_config():
 
 
 def validate_settings(config):
-    """Validate top-level config types. Returns error count."""
+    """Validate top-level config settings. Returns error count."""
     errors = 0
     for field in ("debug", "smtp_ssl", "email_log_attached"):
         val = config.get(field)
         if val is not None and not isinstance(val, bool):
             log.error("Setting '%s' must be true/false (boolean), got %s.", field, type(val).__name__)
             errors += 1
+
+    crontab = config.get("crontab")
+    if not crontab:
+        log.error("Missing required top-level 'crontab'.")
+        errors += 1
+    else:
+        cron_error = validate_cron(crontab)
+        if cron_error:
+            log.error("Invalid crontab '%s': %s.", crontab, cron_error)
+            errors += 1
+
     return errors
 
 
@@ -122,16 +133,6 @@ def validate_jobs(jobs):
                        job_type, job_id, ", ".join(sorted(VALID_JOB_TYPES)))
             errors += 1
             continue
-
-        crontab = cfg(job, "crontab")
-        if not crontab:
-            log.error("Missing crontab for job ID %s.", job_id)
-            errors += 1
-            continue
-        cron_error = validate_cron(crontab)
-        if cron_error:
-            log.error("Invalid crontab '%s' for job ID %s: %s.", crontab, job_id, cron_error)
-            errors += 1
 
         for tool in TOOL_REQUIREMENTS.get(job_type, []):
             if not shutil.which(tool):
@@ -222,7 +223,7 @@ def validate_jobs(jobs):
                               acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
                     errors += 1
 
-        summaries.append(f"ID: {job_id}\nType: {job_type}\nSchedule: {crontab}")
+        summaries.append(f"ID: {job_id}\nType: {job_type}")
 
     return errors, "\n\n".join(summaries)
 

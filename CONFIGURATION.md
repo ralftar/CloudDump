@@ -4,10 +4,9 @@ CloudDump is configured via a single JSON file mounted at `/config/config.json`.
 
 ## Execution model
 
-Jobs run sequentially — one at a time, in the order listed in the config
-file. Each job runs only when the current minute matches its cron pattern.
-If a job misses its scheduled time because another job was running, it
-waits for the next cron match.
+All jobs share a single top-level `crontab`. When the schedule triggers,
+every job runs in sequence — in the order listed in the config file.
+No jobs are skipped.
 
 This is intentional. Sequential execution prevents resource contention
 (disk I/O, network bandwidth) and keeps behavior predictable. If you need
@@ -30,6 +29,7 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `mail_from` | No | Sender address |
 | `mail_to` | No | Recipient address(es) — comma-separated or JSON array |
 | `email_log_attached` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
+| `crontab` | **Yes** | Standard 5-field cron expression — schedule for running all jobs |
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
 `mail_to` accepts multiple recipients as a comma-separated string
@@ -57,7 +57,6 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 |-----|----------|---------|-------------|
 | `id` | Yes | — | Unique job identifier |
 | `type` | Yes | — | `s3bucket`, `azstorage`, `pgsql`, `mysql`, `github`, or `rsync` |
-| `crontab` | Yes | — | Standard 5-field cron expression (supports `*`, `*/N`, ranges, lists) |
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
 
@@ -70,7 +69,7 @@ Plus type-specific fields (`buckets`, `blobstorages`, `servers`, `organizations`
 {
   "type": "s3bucket",
   "id": "my-s3-job",
-  "crontab": "0 2 * * *",
+
   "buckets": [
     {
       "source": "s3://bucket-name/optional-prefix",
@@ -97,7 +96,7 @@ Set `endpoint_url` for S3-compatible storage like MinIO:
 {
   "type": "azstorage",
   "id": "my-azure-job",
-  "crontab": "*/5 * * * *",
+
   "blobstorages": [
     {
       "source": "https://account.blob.core.windows.net/container?sv=...&sig=...",
@@ -116,7 +115,7 @@ The source URL includes the SAS token for authentication.
 {
   "type": "pgsql",
   "id": "my-pg-job",
-  "crontab": "0 4 * * *",
+
   "servers": [
     {
       "host": "db.example.com",
@@ -147,7 +146,7 @@ The source URL includes the SAS token for authentication.
 {
   "type": "mysql",
   "id": "my-mysql-job",
-  "crontab": "0 4 * * *",
+
   "servers": [
     {
       "host": "mysql.example.com",
@@ -180,7 +179,7 @@ consistent, complete backups without locking tables.
 {
   "type": "github",
   "id": "my-github-job",
-  "crontab": "0 5 * * *",
+
   "organizations": [
     {
       "name": "my-org",
@@ -224,7 +223,7 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
 {
   "type": "rsync",
   "id": "my-rsync-job",
-  "crontab": "0 3 * * *",
+
   "targets": [
     {
       "source": "user@server.example.com:/data/important/",

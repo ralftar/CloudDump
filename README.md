@@ -93,12 +93,10 @@ config.json ──> [Orchestrator] ──> aws s3 sync
                      └── email reports (SMTPS)
 ```
 
-Jobs run sequentially — one at a time, in config order. Each job runs only
-when the current minute matches its cron pattern. If a job misses its
-scheduled time because another job was running, it waits for the next match.
-This is by design: sequential execution prevents resource contention and
-keeps behavior predictable. If you need parallel execution or isolated
-scheduling, run multiple CloudDump instances with separate configurations.
+All jobs share a single top-level `crontab`. When the schedule triggers,
+every job runs in sequence — in config order. No jobs are skipped.
+If you need different schedules or parallel execution, run multiple
+CloudDump instances with separate configurations.
 
 ### Bundled tools
 
@@ -140,11 +138,11 @@ servers move to a new major version, update the Dockerfile manually.
   "smtp_pass": "smtp-password",
   "mail_from": "alerts@example.com",
   "mail_to": "ops@example.com, oncall@example.com",
+  "crontab": "0 3 * * *",
   "jobs": [
     {
       "type": "s3bucket",
       "id": "prod-assets",
-      "crontab": "0 3 * * *",
       "buckets": [
         {
           "source": "s3://my-bucket",
