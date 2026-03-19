@@ -29,10 +29,11 @@ API tokens). The following are in scope:
 These are by design and not considered vulnerabilities:
 
 - **Credentials in config file** — All credentials (database passwords,
-  API tokens, AWS keys) are stored in the JSON config file. There is no
-  built-in integration with external secret managers (Vault, Kubernetes
-  Secrets, etc.). Protect the config file with appropriate filesystem
-  permissions and mount it read-only into the container.
+  API tokens, AWS keys) live in the JSON config file. CloudDump just reads
+  a file — it does not care how that file is populated. You can use
+  Kubernetes Secrets, Docker secrets, Vault agent injection, or any
+  mechanism that produces a file at `/config/config.json`. Mount it
+  read-only.
 - **AWS CLI v1** is used (Debian 12 apt). v2 is not available via apt
   for this release.
 - **Database credentials** are passed via environment variables to

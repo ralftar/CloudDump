@@ -65,30 +65,35 @@ def test_matches_cron(pattern, dt, expected):
 # ── should_run ───────────────────────────────────────────────────────────────
 
 
-def test_should_run_first_run_matches(monkeypatch):
+def test_should_run_matches(monkeypatch):
     monkeypatch.setattr("time.time", lambda: datetime(2025, 6, 15, 3, 0).timestamp())
     assert should_run("0 3 * * *", 0) is True
 
 
-def test_should_run_first_run_no_match(monkeypatch):
+def test_should_run_no_match(monkeypatch):
     monkeypatch.setattr("time.time", lambda: datetime(2025, 6, 15, 4, 0).timestamp())
     assert should_run("0 3 * * *", 0) is False
 
 
-def test_should_run_catchup(monkeypatch):
-    # Scheduled 03:00, checked at 03:05, last ran at 02:55
+def test_should_run_no_double_fire(monkeypatch):
+    # Same minute as last run — should not fire again
+    now = datetime(2025, 6, 15, 3, 0, 30).timestamp()
+    last = datetime(2025, 6, 15, 3, 0, 0).timestamp()
+    monkeypatch.setattr("time.time", lambda: now)
+    assert should_run("0 3 * * *", last) is False
+
+
+def test_should_run_next_match(monkeypatch):
+    # Cron matches now, last run was a previous match — should fire
+    now = datetime(2025, 6, 15, 3, 0).timestamp()
+    last = datetime(2025, 6, 14, 3, 0).timestamp()  # yesterday
+    monkeypatch.setattr("time.time", lambda: now)
+    assert should_run("0 3 * * *", last) is True
+
+
+def test_should_run_missed_slot_waits(monkeypatch):
+    # Scheduled 03:00, checked at 03:05 — not a match, must wait
     monkeypatch.setattr("time.time", lambda: datetime(2025, 6, 15, 3, 5).timestamp())
-    assert should_run("0 3 * * *", datetime(2025, 6, 15, 2, 55).timestamp()) is True
-
-
-def test_should_run_too_soon(monkeypatch):
-    monkeypatch.setattr("time.time", lambda: datetime(2025, 6, 15, 3, 0, 30).timestamp())
-    assert should_run("0 3 * * *", datetime(2025, 6, 15, 3, 0, 0).timestamp()) is False
-
-
-def test_should_run_stale_after_long_outage(monkeypatch):
-    # 2-hour gap — outside 60-minute catch-up window
-    monkeypatch.setattr("time.time", lambda: datetime(2025, 6, 15, 5, 0).timestamp())
     assert should_run("0 3 * * *", datetime(2025, 6, 15, 2, 55).timestamp()) is False
 
 

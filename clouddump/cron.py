@@ -28,35 +28,20 @@ def matches_cron(cron_pattern, dt):
 
 
 def should_run(cron_pattern, last_run_ts):
-    """Determine if a job should run, implementing catch-up execution.
+    """Determine if a job should run now.
 
-    On first run (last_run_ts == 0), only checks the current minute.
-    Otherwise, finds the next scheduled time after last_run and checks
-    whether it falls within the catch-up window (60 minutes from now).
-    This ensures a job scheduled for e.g. 3:00 AM that couldn't run because
-    another job was executing will still trigger when checked at 3:05 AM.
+    Returns True if the current minute matches the cron pattern and at least
+    one minute has elapsed since the last run (prevents double-firing within
+    the same minute).
     """
     now = time.time()
-
-    if last_run_ts == 0:
-        return matches_cron(cron_pattern, datetime.fromtimestamp(now))
-
-    # Work in datetime space to avoid timezone issues with float timestamps
     now_dt = datetime.fromtimestamp(now)
-    last_run_dt = datetime.fromtimestamp(last_run_ts)
 
-    # Find the next scheduled time after last run
-    cron = croniter(cron_pattern, last_run_dt)
-    next_dt = cron.get_next(datetime)
-
-    # Must be in the past or current minute to fire
-    if next_dt > now_dt:
+    if not matches_cron(cron_pattern, now_dt):
         return False
 
-    # Cap lookback to 60 minutes — avoids firing stale schedules after
-    # a long container outage.
-    MAX_CATCHUP = 60 * 60
-    if (now_dt - next_dt).total_seconds() > MAX_CATCHUP:
+    # Prevent double-firing: at least 60 seconds must have elapsed
+    if last_run_ts > 0 and (now - last_run_ts) < 60:
         return False
 
     return True

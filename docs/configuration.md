@@ -5,10 +5,9 @@ CloudDump is configured via a single JSON file mounted at `/config/config.json`.
 ## Execution model
 
 Jobs run sequentially — one at a time, in the order listed in the config
-file. If a job's scheduled time passes while another job is still running,
-it fires as soon as the running job finishes (within a 60-minute catch-up
-window). After 60 minutes the missed schedule is discarded to avoid firing
-stale jobs after a long container outage.
+file. Each job runs only when the current minute matches its cron pattern.
+If a job misses its scheduled time because another job was running, it
+waits for the next cron match.
 
 This is intentional. Sequential execution prevents resource contention
 (disk I/O, network bandwidth) and keeps behavior predictable. If you need

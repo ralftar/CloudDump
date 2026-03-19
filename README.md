@@ -46,8 +46,6 @@ Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
 
 - **Cron scheduling** — standard 5-field cron expressions (`0 3 * * *`, `*/15 * * * *`,
   `0 9-17 * * 1-5`, `0,30 * * * *`)
-- **Catch-up execution** — if a scheduled run is missed because another job is
-  still running, it fires as soon as the slot opens (within a 60-minute window)
 - **Retry & timeout** — configurable per job (default: 3 attempts, 1-week timeout)
 - **Email reports** — success/failure notifications with log file attached
 - **No special privileges** — runs as non-root, no FUSE, no kernel mounts.
@@ -95,12 +93,12 @@ config.json ──> [Orchestrator] ──> aws s3 sync
                      └── email reports (SMTPS)
 ```
 
-Jobs run sequentially — one at a time, in config order. If a job's scheduled
-time passes while another job is still running, it fires as soon as the
-running job finishes (within a 60-minute catch-up window). This is by design:
-sequential execution prevents resource contention and keeps behavior
-predictable. If you need parallel execution or isolated scheduling, run
-multiple CloudDump instances with separate configurations.
+Jobs run sequentially — one at a time, in config order. Each job runs only
+when the current minute matches its cron pattern. If a job misses its
+scheduled time because another job was running, it waits for the next match.
+This is by design: sequential execution prevents resource contention and
+keeps behavior predictable. If you need parallel execution or isolated
+scheduling, run multiple CloudDump instances with separate configurations.
 
 ### Bundled tools
 
