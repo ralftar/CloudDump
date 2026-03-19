@@ -189,7 +189,7 @@ to stdout.
 scheduling messages.
 
 **Email not working** — CloudDump uses SMTPS (SSL, port 465) by default. Set
-`SMTPSSL` to `false` for plain SMTP relays. Verify the container can reach your
+`smtp_ssl` to `false` for plain SMTP relays. Verify the container can reach your
 SMTP server. Check logs for `Failed to send email` messages.
 
 **Run jobs now** — Send `SIGUSR1` to run all jobs immediately without waiting

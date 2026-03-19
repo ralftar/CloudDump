@@ -52,7 +52,7 @@ def main():
 
     config = load_config()
     host = cfg(config, "host")
-    debug = cfg(config, "debug", False) is True
+    debug = str(cfg(config, "debug", "false")).lower() == "true"
 
     clouddump.debug = debug
     if debug:

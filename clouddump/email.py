@@ -24,7 +24,7 @@ def send_email(config, subject, body, attachments=None):
     smtp_port = cfg(config, "smtp_port")
     smtp_user = cfg(config, "smtp_user")
     smtp_pass = cfg(config, "smtp_pass")
-    smtp_ssl = cfg(config, "smtp_ssl", True) is not False
+    smtp_ssl = str(cfg(config, "smtp_ssl", "true")).lower() != "false"
     mail_from = cfg(config, "mail_from")
     mail_to = cfg(config, "mail_to")
 
@@ -91,7 +91,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
 
     Attaches the log file when ``email_log_attached`` is true in config.
     """
-    email_log_attached = cfg(config, "email_log_attached", False) is True
+    email_log_attached = str(cfg(config, "email_log_attached", "false")).lower() == "true"
     job_id = cfg(job, "id")
     job_type = cfg(job, "type")
     status = "Success" if exit_code == 0 else "Failure"
