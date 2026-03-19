@@ -101,33 +101,28 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
     Returns the process exit code.
     """
     global child_proc
+    reader = None
 
-    # PATH A: Streaming mode — used when we have a logfile to write to and
-    # stderr isn't already spoken for.  A background thread reads the
-    # process output line-by-line, writing each line to the log file (and
-    # optionally to the console in debug mode).  This is the common path
-    # for job runners like aws/azcopy/github-backup where we want to
-    # capture tool output in real-time.
-    #
-    # Two sub-cases:
-    #   - stdout is None: capture both stdout+stderr combined (e.g. sync tools)
-    #   - stdout is a file: stdout goes to that file (e.g. pg_dump writing a
-    #     dump file), and we stream only stderr to the log
-    if logfile_path is not None and stderr is None:
+    # Setup: if we have a logfile and stderr isn't spoken for, stream
+    # tool output to the logfile (and console in debug mode) via a
+    # background thread.  Otherwise just run the process directly.
+    streaming = logfile_path is not None and stderr is None
+    if streaming:
         if stdout is None:
+            # Capture both stdout+stderr combined (e.g. sync tools)
             proc = subprocess.Popen(
                 cmd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             )
             pipe = proc.stdout
         else:
+            # stdout goes to caller's file (e.g. pg_dump dump file),
+            # stream only stderr to the log
             proc = subprocess.Popen(
                 cmd, env=env,
                 stdout=stdout, stderr=subprocess.PIPE,
             )
             pipe = proc.stderr
-
-        child_proc = proc
 
         def _stream():
             with open(logfile_path, "a") as logf:
@@ -140,30 +135,11 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
 
         reader = threading.Thread(target=_stream, daemon=True)
         reader.start()
+    else:
+        proc = subprocess.Popen(cmd, env=env, stdout=stdout, stderr=stderr)
 
-        try:
-            remaining = None
-            if job_deadline is not None:
-                remaining = max(1, job_deadline - time.time())
-            proc.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            child_proc = None
-            reader.join(timeout=5)
-            raise JobTimeout("Job timed out (deadline exceeded)")
-
-        reader.join(timeout=5)
-        child_proc = None
-        return proc.returncode
-
-    # PATH B: Simple mode — no streaming.  Used for short helper commands
-    # (e.g. psql -l to list databases, bzip2 to compress a file) where the
-    # caller handles stdout/stderr directly.  Just wait for the process
-    # with timeout enforcement.
-    proc = subprocess.Popen(cmd, env=env, stdout=stdout, stderr=stderr)
+    # Wait with timeout enforcement (shared for both modes)
     child_proc = proc
-
     try:
         remaining = None
         if job_deadline is not None:
@@ -173,8 +149,12 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
         proc.kill()
         proc.wait()
         child_proc = None
+        if reader:
+            reader.join(timeout=5)
         raise JobTimeout("Job timed out (deadline exceeded)")
 
+    if reader:
+        reader.join(timeout=5)
     child_proc = None
     return proc.returncode
 
