@@ -33,6 +33,7 @@ you get an email.
 | PostgreSQL | `pgsql` | pg_dump / psql | Host, port, user, password |
 | MySQL / MariaDB | `mysql` | mysqldump / mysql | Host, port, user, password |
 | GitHub (org or user) | `github` | github-backup | Personal access token |
+| Remote server (SSH) | `rsync` | rsync | SSH private key |
 
 ## Not a backup system
 
@@ -43,7 +44,8 @@ Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
 
 ## Features
 
-- **Cron scheduling** — standard 5-field cron patterns (`0 3 * * *`, `*/15 * * * *`)
+- **Cron scheduling** — standard 5-field cron expressions (`0 3 * * *`, `*/15 * * * *`,
+  `0 9-17 * * 1-5`, `0,30 * * * *`)
 - **Catch-up execution** — if a scheduled run is missed because another job is
   still running, it fires as soon as the slot opens (within a 60-minute window)
 - **Retry & timeout** — configurable per job (default: 3 attempts, 1-week timeout)
@@ -85,6 +87,7 @@ config.json ──> [Orchestrator] ──> aws s3 sync
                      │          ──> pg_dump / psql
                      │          ──> mysqldump
                      │          ──> github-backup
+                     │          ──> rsync
                      │
                      ├── cron scheduler (check every 60s)
                      ├── sequential job execution
@@ -92,9 +95,12 @@ config.json ──> [Orchestrator] ──> aws s3 sync
                      └── email reports (SMTPS)
 ```
 
-Jobs run one at a time. If job B is scheduled while job A is still running,
-job B fires as soon as A finishes (within a 60-minute catch-up window). This
-keeps resource usage predictable and avoids conflicts on shared destinations.
+Jobs run sequentially — one at a time, in config order. If a job's scheduled
+time passes while another job is still running, it fires as soon as the
+running job finishes (within a 60-minute catch-up window). This is by design:
+sequential execution prevents resource contention and keeps behavior
+predictable. If you need parallel execution or isolated scheduling, run
+multiple CloudDump instances with separate configurations.
 
 ### Bundled tools
 
@@ -129,15 +135,13 @@ servers move to a new major version, update the Dockerfile manually.
 
 ```json
 {
-  "settings": {
-    "HOST": "myserver",
-    "SMTPSERVER": "smtp.example.com",
-    "SMTPPORT": "465",
-    "SMTPUSER": "alerts@example.com",
-    "SMTPPASS": "smtp-password",
-    "MAILFROM": "alerts@example.com",
-    "MAILTO": "ops@example.com, oncall@example.com"
-  },
+  "host": "myserver",
+  "smtp_server": "smtp.example.com",
+  "smtp_port": "465",
+  "smtp_user": "alerts@example.com",
+  "smtp_pass": "smtp-password",
+  "mail_from": "alerts@example.com",
+  "mail_to": "ops@example.com, oncall@example.com",
   "jobs": [
     {
       "type": "s3bucket",
@@ -182,9 +186,9 @@ docker kill -s USR1 clouddump
 `/config/config.json`. CloudDump validates all jobs at startup and logs errors
 to stdout.
 
-**Jobs not running** — Check your cron syntax. Supported: `*`, `*/N`, exact
-values. Not supported: ranges (`1-5`), lists (`1,3,5`). Check container logs
-for scheduling messages.
+**Jobs not running** — Check your cron syntax (standard 5-field cron: `*`,
+`*/N`, exact values, ranges `1-5`, lists `1,3,5`). Check container logs for
+scheduling messages.
 
 **Email not working** — CloudDump uses SMTPS (SSL, port 465) by default. Set
 `SMTPSSL` to `false` for plain SMTP relays. Verify the container can reach your
@@ -201,7 +205,7 @@ docker kill -s USR1 clouddump
 kubectl exec <pod> -- kill -USR1 1
 ```
 
-**Debug mode** — Set `"DEBUG": true` in settings for verbose logging.
+**Debug mode** — Set `"debug": true` in your config for verbose logging.
 
 ## Contributing
 

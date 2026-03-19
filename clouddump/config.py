@@ -54,13 +54,14 @@ def _check_github(name, token, account_type="org", timeout=10):
         return f"cannot reach GitHub API: {exc.reason}"
 
 CONFIG_FILE = "/config/config.json"
-VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github"}
+VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"}
 TOOL_REQUIREMENTS = {
     "s3bucket": ["aws"],
     "azstorage": ["azcopy"],
     "pgsql": ["pg_dump", "psql"],
     "mysql": ["mysqldump", "mysql"],
     "github": ["github-backup", "git"],
+    "rsync": ["rsync", "ssh"],
 }
 
 
@@ -151,6 +152,7 @@ def validate_jobs(jobs):
             "pgsql": ("servers", "backuppath"),
             "mysql": ("servers", "backuppath"),
             "github": ("organizations", "destination"),
+            "rsync": ("targets", "destination"),
         }
         if job_type in path_keys:
             collection_key, field = path_keys[job_type]
@@ -195,6 +197,15 @@ def verify_connectivity(jobs):
                 port = cfg(target, "port", "5432" if job_type == "pgsql" else "3306")
                 if host and not _check_connectivity(host, port):
                     log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
+
+        if job_type == "rsync":
+            for target in cfg(job, "targets", []):
+                source = cfg(target, "source")
+                port = cfg(target, "ssh_port", "22")
+                if source and ":" in source:
+                    host = source.split(":")[0].split("@")[-1]
+                    if host and not _check_connectivity(host, port):
+                        log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
 
         if job_type == "github":
             for account in cfg(job, "organizations", []):

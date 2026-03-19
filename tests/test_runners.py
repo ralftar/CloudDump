@@ -201,6 +201,69 @@ class TestAzureRunner:
         assert os.path.isdir(dest)
 
 
+# ── PostgreSQL runner ──────────────────────────────────────────────────────
+
+
+class TestPgSQLRunner:
+    """Tests for clouddump.job_pgsql.run_pg_dump — db_retries configuration."""
+
+    @staticmethod
+    def _cfg(**overrides):
+        base = {
+            "host": "pg.example.com",
+            "port": "5432",
+            "user": "backupuser",
+            "pass": "secret",
+            "backuppath": "/backup/pgsql",
+        }
+        base.update(overrides)
+        return base
+
+    def test_custom_db_retries(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_pgsql import run_pg_dump
+
+        dest = str(tmp_path / "pgout")
+        attempts = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            if cmd[0] == "psql":
+                stdout = kwargs.get("stdout")
+                if stdout:
+                    stdout.write(" Name    | Owner\n---------+--------\n testdb  | postgres\n")
+                return 0
+            attempts.append(1)
+            return 1  # pg_dump always fails
+
+        monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
+        monkeypatch.setattr("clouddump.job_pgsql.time.sleep", lambda _: None)
+
+        rc = run_pg_dump(self._cfg(backuppath=dest, db_retries=2, compress="false"), _tmp_logfile)
+        assert rc == 1
+        assert len(attempts) == 2  # exactly 2, not default 3
+
+    def test_default_db_retries(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_pgsql import run_pg_dump
+
+        dest = str(tmp_path / "pgout")
+        attempts = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            if cmd[0] == "psql":
+                stdout = kwargs.get("stdout")
+                if stdout:
+                    stdout.write(" Name    | Owner\n---------+--------\n testdb  | postgres\n")
+                return 0
+            attempts.append(1)
+            return 1
+
+        monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
+        monkeypatch.setattr("clouddump.job_pgsql.time.sleep", lambda _: None)
+
+        rc = run_pg_dump(self._cfg(backuppath=dest, compress="false"), _tmp_logfile)
+        assert rc == 1
+        assert len(attempts) == 3  # default
+
+
 # ── MySQL runner ────────────────────────────────────────────────────────────
 
 
@@ -352,6 +415,28 @@ class TestMySQLRunner:
 
         rc = run_mysql_dump(self._cfg(backuppath=dest), _tmp_logfile)
         assert rc == 1
+
+    def test_custom_db_retries(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_mysql import run_mysql_dump
+
+        dest = str(tmp_path / "mysqlout")
+        attempts = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            if cmd[0] == "mysql":
+                stdout = kwargs.get("stdout")
+                if stdout:
+                    stdout.write("testdb\n")
+                return 0
+            attempts.append(1)
+            return 1  # mysqldump always fails
+
+        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
+        monkeypatch.setattr("clouddump.job_mysql.time.sleep", lambda _: None)
+
+        rc = run_mysql_dump(self._cfg(backuppath=dest, db_retries=2), _tmp_logfile)
+        assert rc == 1
+        assert len(attempts) == 2  # exactly 2, not default 3
 
     def test_creates_destination_dir(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_mysql import run_mysql_dump
@@ -628,6 +713,129 @@ class TestGitHubRunner:
         log_text = "\n".join(log_records)
         assert "ghp_testtoken123" not in log_text
         assert "REDACTED" in log_text
+
+
+# ── Rsync runner ───────────────────────────────────────────────────────────
+
+
+class TestRsyncRunner:
+    """Tests for clouddump.job_rsync.run_rsync_sync."""
+
+    @staticmethod
+    def _cfg(**overrides):
+        base = {
+            "source": "user@server.example.com:/data/important",
+            "destination": "/backup/rsync",
+            "ssh_key": "/config/id_ed25519",
+        }
+        base.update(overrides)
+        return base
+
+    def test_basic_sync(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        rc = run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert rc == 0
+        assert len(calls) == 1
+        cmd = calls[0][0]
+        assert cmd[0] == "rsync"
+        assert "-az" in cmd
+        assert "--delete" in cmd
+        assert "user@server.example.com:/data/important" in cmd
+        assert dest in cmd
+
+    def test_ssh_options(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, ssh_port="2222"), _tmp_logfile)
+
+        cmd = calls[0][0]
+        idx = cmd.index("-e")
+        ssh_cmd = cmd[idx + 1]
+        assert "-i /config/id_ed25519" in ssh_cmd
+        assert "-p 2222" in ssh_cmd
+        assert "StrictHostKeyChecking=accept-new" in ssh_cmd
+        assert "BatchMode=yes" in ssh_cmd
+
+    def test_default_ssh_port(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        cmd = calls[0][0]
+        idx = cmd.index("-e")
+        ssh_cmd = cmd[idx + 1]
+        assert "-p 22" in ssh_cmd
+
+    def test_delete_disabled(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, delete_destination="false"), _tmp_logfile)
+
+        assert "--delete" not in calls[0][0]
+
+    def test_exclude_patterns(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, exclude=["*.tmp", "cache/"]), _tmp_logfile)
+
+        cmd = calls[0][0]
+        idx1 = cmd.index("--exclude")
+        assert cmd[idx1 + 1] == "*.tmp"
+        idx2 = cmd.index("--exclude", idx1 + 1)
+        assert cmd[idx2 + 1] == "cache/"
+
+    def test_missing_source(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        rc = run_rsync_sync(self._cfg(source=""), _tmp_logfile)
+        assert rc == 1
+
+    def test_invalid_source_no_colon(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        rc = run_rsync_sync(self._cfg(source="/local/path/only"), _tmp_logfile)
+        assert rc == 1
+
+    def test_missing_ssh_key(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        rc = run_rsync_sync(self._cfg(ssh_key=""), _tmp_logfile)
+        assert rc == 1
+
+    def test_nonzero_exit(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd", rc=1)
+
+        rc = run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
+        assert rc == 1
+
+    def test_creates_destination_dir(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "deep" / "nested" / "dir")
+        _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
+        assert os.path.isdir(dest)
 
 
 # ── Job dispatch ────────────────────────────────────────────────────────────

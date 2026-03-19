@@ -38,7 +38,8 @@ def _list_databases(host, port, user, password):
 def run_mysql_dump(server, logfile_path):
     """Dump one or more MySQL databases from a server using ``mysqldump``.
 
-    Individual databases are retried up to 3 times on failure.
+    Individual databases are retried on failure (configurable via
+    ``db_retries``, default 3).
     """
     host = cfg(server, "host")
     port = str(cfg(server, "port", "3306"))
@@ -49,6 +50,7 @@ def run_mysql_dump(server, logfile_path):
     compress = str(cfg(server, "compress", "true")).lower() == "true"
     databases_cfg = cfg(server, "databases", [])
     databases_excluded = cfg(server, "databases_excluded", [])
+    max_db_retries = int(cfg(server, "db_retries", 3))
 
     if not host or not user or not password or not backuppath:
         log.error("Missing required mysql parameters.")
@@ -96,11 +98,11 @@ def run_mysql_dump(server, logfile_path):
         ]
 
         dump_ok = False
-        for db_attempt in range(1, 4):
+        for db_attempt in range(1, max_db_retries + 1):
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             temp_file = os.path.join(backuppath, f"{database}-{timestamp}.sql")
 
-            log.debug("Running mysqldump of %s (attempt %d/3)...", database, db_attempt)
+            log.debug("Running mysqldump of %s (attempt %d/%d)...", database, db_attempt, max_db_retries)
 
             with open(temp_file, "w") as dump_out:
                 rc = run_cmd(cmd, env=env, stdout=dump_out, logfile_path=logfile_path)
@@ -115,12 +117,12 @@ def run_mysql_dump(server, logfile_path):
                 dump_ok = True
                 break
 
-            if db_attempt < 3:
+            if db_attempt < max_db_retries:
                 log.warning("Retrying %s in 30s...", database)
                 time.sleep(30)
 
         if not dump_ok:
-            log.error("mysqldump for %s failed after 3 attempts.", database)
+            log.error("mysqldump for %s failed after %d attempts.", database, max_db_retries)
             overall_result = 1
             continue
 

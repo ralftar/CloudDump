@@ -14,6 +14,7 @@ RUN apt-get update && \
     python3-pip \
     postgresql-client-15 \
     default-mysql-client \
+    rsync \
     awscli \
     procps \
     && curl -sSL -o /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \

@@ -16,6 +16,12 @@ from clouddump.cron import matches_cron, should_run, validate_cron
 
 @pytest.mark.parametrize("pattern", [
     "* * * * *", "*/5 * * * *", "0 3 * * *", "59 23 31 12 6",
+    "0 1-5 * * *",      # range
+    "0,30 * * * *",     # list
+    "0 3 1,15 * *",     # list in day field
+    "0 3 * * 1-5",      # weekday range (Mon-Fri)
+    "*/10 9-17 * * *",  # step with range
+    "* * * * 7",        # dow 7 (Sunday alias, standard cron)
 ])
 def test_validate_cron_valid(pattern):
     assert validate_cron(pattern) is None
@@ -28,7 +34,6 @@ def test_validate_cron_valid(pattern):
     "* 24 * * *",       # hour out of range
     "* * 0 * *",        # day 0 out of range
     "* * * 13 *",       # month out of range
-    "* * * * 7",        # dow out of range
     "*/0 * * * *",      # step zero
     "abc * * * *",      # non-numeric
 ])
@@ -45,6 +50,13 @@ def test_validate_cron_invalid(pattern):
     ("*/15 * * * *", datetime(2025, 6, 15, 12, 15), True),
     ("*/15 * * * *", datetime(2025, 6, 15, 12, 10), False),
     ("* * * * 0", datetime(2025, 6, 15, 0, 0), True),  # Sunday
+    # Range and list syntax
+    ("0 9-17 * * *", datetime(2025, 6, 15, 12, 0), True),
+    ("0 9-17 * * *", datetime(2025, 6, 15, 8, 0), False),
+    ("0,30 * * * *", datetime(2025, 6, 15, 12, 30), True),
+    ("0,30 * * * *", datetime(2025, 6, 15, 12, 15), False),
+    ("0 3 * * 1-5", datetime(2025, 6, 16, 3, 0), True),   # Monday
+    ("0 3 * * 1-5", datetime(2025, 6, 15, 3, 0), False),  # Sunday
 ])
 def test_matches_cron(pattern, dt, expected):
     assert matches_cron(pattern, dt) is expected

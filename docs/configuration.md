@@ -2,6 +2,19 @@
 
 CloudDump is configured via a single JSON file mounted at `/config/config.json`.
 
+## Execution model
+
+Jobs run sequentially — one at a time, in the order listed in the config
+file. If a job's scheduled time passes while another job is still running,
+it fires as soon as the running job finishes (within a 60-minute catch-up
+window). After 60 minutes the missed schedule is discarded to avoid firing
+stale jobs after a long container outage.
+
+This is intentional. Sequential execution prevents resource contention
+(disk I/O, network bandwidth) and keeps behavior predictable. If you need
+parallel execution or isolated scheduling, run multiple CloudDump instances
+with separate configurations and backup destinations.
+
 ## Top-level settings
 
 All settings are top-level keys in `config.json`, alongside `jobs`.
@@ -44,13 +57,13 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 | Key | Required | Default | Description |
 |-----|----------|---------|-------------|
 | `id` | Yes | — | Unique job identifier |
-| `type` | Yes | — | `s3bucket`, `azstorage`, `pgsql`, `mysql`, or `github` |
-| `crontab` | Yes | — | 5-field cron pattern |
+| `type` | Yes | — | `s3bucket`, `azstorage`, `pgsql`, `mysql`, `github`, or `rsync` |
+| `crontab` | Yes | — | Standard 5-field cron expression (supports `*`, `*/N`, ranges, lists) |
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
 
-Plus type-specific fields (`buckets`, `blobstorages`, `servers`, `organizations`)
-— see below.
+Plus type-specific fields (`buckets`, `blobstorages`, `servers`, `organizations`,
+`targets`) — see below.
 
 ## S3 bucket
 
@@ -127,6 +140,7 @@ The source URL includes the SAS token for authentication.
   databases are dumped (except `databases_excluded`).
 - `compress`: bzip2 compression of dump files.
 - `filenamedate`: append timestamp to dump filenames.
+- `db_retries`: number of retry attempts per individual database dump (default: `3`).
 
 ## MySQL / MariaDB
 
@@ -156,6 +170,7 @@ The source URL includes the SAS token for authentication.
   `performance_schema`, `sys`).
 - `compress`: bzip2 compression of dump files.
 - `filenamedate`: append timestamp to dump filenames.
+- `db_retries`: number of retry attempts per individual database dump (default: `3`).
 
 Dumps use `--single-transaction --routines --triggers --events` for
 consistent, complete backups without locking tables.
@@ -203,6 +218,46 @@ consistent, complete backups without locking tables.
 - `include_lfs`: download Git LFS objects (default: `false`).
 
 By default only repository code is backed up. Metadata options (issues, pulls, labels, milestones, releases, wikis) can be enabled individually but require many GitHub API calls per repository.
+
+## Rsync over SSH
+
+```json
+{
+  "type": "rsync",
+  "id": "my-rsync-job",
+  "crontab": "0 3 * * *",
+  "targets": [
+    {
+      "source": "user@server.example.com:/data/important/",
+      "destination": "/mnt/clouddump/rsync",
+      "ssh_key": "/config/id_ed25519",
+      "ssh_port": 22,
+      "delete_destination": true,
+      "exclude": ["*.tmp", "cache/"]
+    }
+  ]
+}
+```
+
+- `source`: remote path in `user@host:/path` format (required).
+- `destination`: local backup directory (required).
+- `ssh_key`: path to the SSH private key file, mounted into the container (required).
+- `ssh_port`: SSH port (default: `22`).
+- `delete_destination`: remove files at destination that no longer exist at source (default: `true`).
+- `exclude`: list of rsync exclude patterns (default: none).
+
+The SSH key file should be mounted read-only into the container:
+
+```sh
+docker run -d \
+  -v /path/to/id_ed25519:/config/id_ed25519:ro \
+  -v /mnt/nas/clouddump:/backup \
+  -v $(pwd)/config.json:/config/config.json:ro \
+  ghcr.io/ralftar/clouddump:latest
+```
+
+SSH uses `StrictHostKeyChecking=accept-new` (auto-accepts new host keys but
+rejects changed ones) and `BatchMode=yes` (never prompts for passwords).
 
 ## Storage
 

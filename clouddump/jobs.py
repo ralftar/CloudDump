@@ -6,6 +6,7 @@ from clouddump.job_azure import run_az_sync
 from clouddump.job_pgsql import run_pg_dump
 from clouddump.job_github import run_github_backup
 from clouddump.job_mysql import run_mysql_dump
+from clouddump.job_rsync import run_rsync_sync
 
 _RUNNERS = {
     "s3bucket": ("buckets", run_s3_sync),
@@ -13,6 +14,7 @@ _RUNNERS = {
     "pgsql": ("servers", run_pg_dump),
     "mysql": ("servers", run_mysql_dump),
     "github": ("organizations", run_github_backup),
+    "rsync": ("targets", run_rsync_sync),
 }
 
 
