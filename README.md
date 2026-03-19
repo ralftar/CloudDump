@@ -129,7 +129,7 @@ servers move to a new major version, update the Dockerfile manually.
 
 ## Quick start
 
-**1. Create a config file** (see [Configuration reference](docs/configuration.md) for all options)
+**1. Create a config file** (see [Configuration reference](CONFIGURATION.md) for all options)
 
 ```json
 {
