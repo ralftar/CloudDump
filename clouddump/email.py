@@ -1,5 +1,6 @@
 """Email reporting and notification."""
 
+import json
 import os
 import smtplib
 from datetime import datetime
@@ -77,22 +78,8 @@ def send_email(config, subject, body, attachments=None):
 
 
 def format_job_config(job):
-    """Return a readable, redacted representation of a job's configuration.
-
-    Formats the job dict as indented key-value text, then passes the result
-    through redact() to strip sensitive values.
-    """
-    lines = []
-    for k, v in job.items():
-        if k in ("blobstorages", "buckets", "servers", "organizations"):
-            lines.append(f"{k}:")
-            for idx, item in enumerate(v):
-                lines.append(f"  [{idx}]")
-                for ik, iv in item.items():
-                    lines.append(f"    {ik}: {iv}")
-        else:
-            lines.append(f"{k}: {v}")
-    return redact("\n".join(lines))
+    """Return a readable, redacted representation of a job's configuration."""
+    return redact(json.dumps(job, indent=2, default=str))
 
 
 def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfile_path,
