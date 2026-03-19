@@ -10,7 +10,7 @@ def run_s3_sync(bucket, logfile_path):
     """Sync a single S3 bucket to a local directory using ``aws s3 sync``."""
     source = cfg(bucket, "source")
     destination = cfg(bucket, "destination")
-    delete = str(cfg(bucket, "delete_destination", "true")).lower() == "true"
+    delete = cfg(bucket, "delete_destination", True)
     key_id = cfg(bucket, "aws_access_key_id")
     secret = cfg(bucket, "aws_secret_access_key")
     region = cfg(bucket, "aws_region", "us-east-1")

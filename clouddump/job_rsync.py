@@ -12,7 +12,7 @@ def run_rsync_sync(target, logfile_path):
     destination = cfg(target, "destination")
     ssh_key = cfg(target, "ssh_key")
     ssh_port = str(cfg(target, "ssh_port", "22"))
-    delete = str(cfg(target, "delete_destination", "true")).lower() == "true"
+    delete = cfg(target, "delete_destination", True)
     exclude = cfg(target, "exclude", [])
 
     if not source or not destination:

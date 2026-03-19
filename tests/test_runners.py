@@ -70,7 +70,7 @@ class TestS3Runner:
         dest = str(tmp_path / "s3out")
         calls = _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd")
 
-        run_s3_sync(self._cfg(destination=dest, delete_destination="false"), _tmp_logfile)
+        run_s3_sync(self._cfg(destination=dest, delete_destination=False), _tmp_logfile)
 
         assert "--delete" not in calls[0][0]
 
@@ -166,7 +166,7 @@ class TestAzureRunner:
         dest = str(tmp_path / "azout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_azure.run_cmd")
 
-        run_az_sync(self._cfg(destination=dest, delete_destination="false"), _tmp_logfile)
+        run_az_sync(self._cfg(destination=dest, delete_destination=False), _tmp_logfile)
 
         assert "--delete-destination=false" in calls[0][0]
 
@@ -237,7 +237,7 @@ class TestPgSQLRunner:
         monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
         monkeypatch.setattr("clouddump.job_pgsql.time.sleep", lambda _: None)
 
-        rc = run_pg_dump(self._cfg(backuppath=dest, db_retries=2, compress="false"), _tmp_logfile)
+        rc = run_pg_dump(self._cfg(backuppath=dest, db_retries=2, compress=False), _tmp_logfile)
         assert rc == 1
         assert len(attempts) == 2  # exactly 2, not default 3
 
@@ -259,7 +259,7 @@ class TestPgSQLRunner:
         monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
         monkeypatch.setattr("clouddump.job_pgsql.time.sleep", lambda _: None)
 
-        rc = run_pg_dump(self._cfg(backuppath=dest, compress="false"), _tmp_logfile)
+        rc = run_pg_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
         assert rc == 1
         assert len(attempts) == 3  # default
 
@@ -310,7 +310,7 @@ class TestMySQLRunner:
         fake, recorded = self._fake_mysql_run_cmd()
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
 
-        rc = run_mysql_dump(self._cfg(backuppath=dest, compress="false"), _tmp_logfile)
+        rc = run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
 
         assert rc == 0
         assert len(recorded) == 2
@@ -331,7 +331,7 @@ class TestMySQLRunner:
         fake, recorded = self._fake_mysql_run_cmd()
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
 
-        run_mysql_dump(self._cfg(backuppath=dest, compress="false"), _tmp_logfile)
+        run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
 
         for _, call_kwargs in recorded:
             env = call_kwargs.get("env", {})
@@ -357,7 +357,7 @@ class TestMySQLRunner:
 
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
 
-        run_mysql_dump(self._cfg(backuppath=dest, compress="false"), _tmp_logfile)
+        run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
 
         assert dumped == ["userdb"]
 
@@ -381,7 +381,7 @@ class TestMySQLRunner:
 
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
 
-        run_mysql_dump(self._cfg(backuppath=dest, compress="false", databases=["db1", "db3"]), _tmp_logfile)
+        run_mysql_dump(self._cfg(backuppath=dest, compress=False, databases=["db1", "db3"]), _tmp_logfile)
 
         assert dumped == ["db1", "db3"]
 
@@ -445,7 +445,7 @@ class TestMySQLRunner:
         fake, _ = self._fake_mysql_run_cmd()
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
 
-        run_mysql_dump(self._cfg(backuppath=dest, compress="false"), _tmp_logfile)
+        run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
         assert os.path.isdir(dest)
 
 
@@ -530,7 +530,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_repos="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_repos=False), _tmp_logfile)
 
         cmd = calls[0][0]
         assert "--repositories" not in cmd
@@ -542,7 +542,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_issues="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_issues=False), _tmp_logfile)
 
         cmd = calls[0][0]
         assert "--issues" not in cmd
@@ -555,7 +555,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_pulls="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_pulls=False), _tmp_logfile)
 
         cmd = calls[0][0]
         assert "--pulls" not in cmd
@@ -569,7 +569,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_labels="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_labels=False), _tmp_logfile)
 
         assert "--labels" not in calls[0][0]
 
@@ -579,7 +579,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_milestones="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_milestones=False), _tmp_logfile)
 
         assert "--milestones" not in calls[0][0]
 
@@ -589,7 +589,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_releases="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_releases=False), _tmp_logfile)
 
         cmd = calls[0][0]
         assert "--releases" not in cmd
@@ -601,7 +601,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_forks="true"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_forks=True), _tmp_logfile)
 
         assert "--fork" in calls[0][0]
 
@@ -611,7 +611,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_archived="false"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_archived=False), _tmp_logfile)
 
         assert "--skip-archived" in calls[0][0]
 
@@ -621,7 +621,7 @@ class TestGitHubRunner:
         dest = str(tmp_path / "ghout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_github.run_cmd")
 
-        run_github_backup(self._cfg(destination=dest, include_lfs="true"), _tmp_logfile)
+        run_github_backup(self._cfg(destination=dest, include_lfs=True), _tmp_logfile)
 
         assert "--lfs" in calls[0][0]
 
@@ -634,13 +634,13 @@ class TestGitHubRunner:
 
         run_github_backup(self._cfg(
             destination=dest,
-            include_repos="false",
-            include_issues="false",
-            include_pulls="false",
-            include_labels="false",
-            include_milestones="false",
-            include_releases="false",
-            include_wikis="false",
+            include_repos=False,
+            include_issues=False,
+            include_pulls=False,
+            include_labels=False,
+            include_milestones=False,
+            include_releases=False,
+            include_wikis=False,
         ), _tmp_logfile)
 
         cmd = calls[0][0]
@@ -783,7 +783,7 @@ class TestRsyncRunner:
         dest = str(tmp_path / "rsyncout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
 
-        run_rsync_sync(self._cfg(destination=dest, delete_destination="false"), _tmp_logfile)
+        run_rsync_sync(self._cfg(destination=dest, delete_destination=False), _tmp_logfile)
 
         assert "--delete" not in calls[0][0]
 

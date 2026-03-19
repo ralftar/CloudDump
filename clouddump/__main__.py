@@ -12,7 +12,7 @@ from pathlib import Path
 
 import clouddump
 from clouddump import cfg, redact, log, _safe_remove
-from clouddump.config import load_config, validate_jobs, verify_connectivity
+from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
 from clouddump.jobs import execute_job
@@ -52,7 +52,8 @@ def main():
 
     config = load_config()
     host = cfg(config, "host")
-    debug = str(cfg(config, "debug", "false")).lower() == "true"
+    settings_errors = validate_settings(config)
+    debug = cfg(config, "debug", False)
 
     clouddump.debug = debug
     if debug:
@@ -68,6 +69,7 @@ def main():
         sys.exit(1)
 
     errors, jobs_summary = validate_jobs(jobs)
+    errors += settings_errors
     if errors:
         log.error("Configuration validation failed with %d error(s). Exiting.", errors)
         sys.exit(1)

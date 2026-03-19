@@ -78,6 +78,17 @@ def load_config():
         sys.exit(1)
 
 
+def validate_settings(config):
+    """Validate top-level config types. Returns error count."""
+    errors = 0
+    for field in ("debug", "smtp_ssl", "email_log_attached"):
+        val = config.get(field)
+        if val is not None and not isinstance(val, bool):
+            log.error("Setting '%s' must be true/false (boolean), got %s.", field, type(val).__name__)
+            errors += 1
+    return errors
+
+
 def validate_jobs(jobs):
     """Validate all job configs at startup. Returns (error_count, summary_text).
 
@@ -144,6 +155,43 @@ def validate_jobs(jobs):
         except (ValueError, TypeError) as exc:
             log.error("Invalid retries '%s' for job ID %s: %s.", retries, job_id, exc)
             errors += 1
+
+        # Validate field types in targets
+        _TARGET_BOOLS = {
+            "s3bucket": ("buckets", ["delete_destination"]),
+            "azstorage": ("blobstorages", ["delete_destination"]),
+            "pgsql": ("servers", ["filenamedate", "compress"]),
+            "mysql": ("servers", ["filenamedate", "compress"]),
+            "github": ("organizations", [
+                "include_repos", "include_issues", "include_pulls",
+                "include_labels", "include_milestones", "include_releases",
+                "include_wikis", "include_forks", "include_archived", "include_lfs",
+            ]),
+            "rsync": ("targets", ["delete_destination"]),
+        }
+        _TARGET_INTS = {
+            "pgsql": ("servers", ["port", "db_retries"]),
+            "mysql": ("servers", ["port", "db_retries"]),
+            "rsync": ("targets", ["ssh_port"]),
+        }
+        if job_type in _TARGET_BOOLS:
+            coll, fields = _TARGET_BOOLS[job_type]
+            for target in cfg(job, coll, []):
+                for field in fields:
+                    val = target.get(field)
+                    if val is not None and not isinstance(val, bool):
+                        log.error("Field '%s' must be true/false (boolean) in job ID %s, got %s.",
+                                  field, job_id, type(val).__name__)
+                        errors += 1
+        if job_type in _TARGET_INTS:
+            coll, fields = _TARGET_INTS[job_type]
+            for target in cfg(job, coll, []):
+                for field in fields:
+                    val = target.get(field)
+                    if val is not None and not isinstance(val, int):
+                        log.error("Field '%s' must be an integer in job ID %s, got %s.",
+                                  field, job_id, type(val).__name__)
+                        errors += 1
 
         # Validate backup paths
         path_keys = {

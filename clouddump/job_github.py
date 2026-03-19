@@ -29,9 +29,6 @@ def run_github_backup(org, logfile_path):
     log.debug("Token: %s", redact(f"token={token}"))
     log.info("Backing up %s %s...", account_type, name)
 
-    def _enabled(key, default="true"):
-        return str(cfg(org, key, default)).lower() == "true"
-
     # Write token to a temp file to keep it out of process arguments
     # (visible via ps aux). github-backup doesn't support env vars.
     fd, token_path = tempfile.mkstemp(prefix="gh-token-")
@@ -57,35 +54,35 @@ def run_github_backup(org, logfile_path):
     for repo in repos:
         cmd += ["--repository", repo]
 
-    if _enabled("include_repos"):
+    if cfg(org, "include_repos", True):
         cmd.append("--repositories")
         cmd.append("--bare")
 
-    if _enabled("include_issues", "false"):
+    if cfg(org, "include_issues", False):
         cmd += ["--issues", "--issue-comments", "--issue-events"]
 
-    if _enabled("include_pulls", "false"):
+    if cfg(org, "include_pulls", False):
         cmd += ["--pulls", "--pull-comments", "--pull-commits", "--pull-details"]
 
-    if _enabled("include_labels", "false"):
+    if cfg(org, "include_labels", False):
         cmd.append("--labels")
 
-    if _enabled("include_milestones", "false"):
+    if cfg(org, "include_milestones", False):
         cmd.append("--milestones")
 
-    if _enabled("include_releases", "false"):
+    if cfg(org, "include_releases", False):
         cmd += ["--releases", "--assets"]
 
-    if _enabled("include_wikis", "false"):
+    if cfg(org, "include_wikis", False):
         cmd.append("--wikis")
 
-    if _enabled("include_forks", "false"):
+    if cfg(org, "include_forks", False):
         cmd.append("--fork")
 
-    if not _enabled("include_archived"):
+    if not cfg(org, "include_archived", True):
         cmd.append("--skip-archived")
 
-    if _enabled("include_lfs", "false"):
+    if cfg(org, "include_lfs", False):
         cmd.append("--lfs")
 
     t0 = time.time()

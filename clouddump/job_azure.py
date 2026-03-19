@@ -10,7 +10,7 @@ def run_az_sync(blobstorage, logfile_path):
     """Sync an Azure Blob Storage container to a local directory using ``azcopy sync``."""
     source = cfg(blobstorage, "source")
     destination = cfg(blobstorage, "destination")
-    delete = str(cfg(blobstorage, "delete_destination", "true")).lower() == "true"
+    delete = cfg(blobstorage, "delete_destination", True)
 
     if not source or not destination:
         log.error("Missing source or destination for Azure blobstorage.")

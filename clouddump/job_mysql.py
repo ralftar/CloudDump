@@ -46,11 +46,11 @@ def run_mysql_dump(server, logfile_path):
     user = cfg(server, "user", "root")
     password = cfg(server, "pass")
     backuppath = cfg(server, "backuppath")
-    filenamedate = str(cfg(server, "filenamedate", "false")).lower() == "true"
-    compress = str(cfg(server, "compress", "true")).lower() == "true"
+    filenamedate = cfg(server, "filenamedate", False)
+    compress = cfg(server, "compress", True)
     databases_cfg = cfg(server, "databases", [])
     databases_excluded = cfg(server, "databases_excluded", [])
-    max_db_retries = int(cfg(server, "db_retries", 3))
+    max_db_retries = cfg(server, "db_retries", 3)
 
     if not host or not user or not password or not backuppath:
         log.error("Missing required mysql parameters.")
