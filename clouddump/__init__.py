@@ -102,6 +102,17 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
     """
     global child_proc
 
+    # PATH A: Streaming mode — used when we have a logfile to write to and
+    # stderr isn't already spoken for.  A background thread reads the
+    # process output line-by-line, writing each line to the log file (and
+    # optionally to the console in debug mode).  This is the common path
+    # for job runners like aws/azcopy/github-backup where we want to
+    # capture tool output in real-time.
+    #
+    # Two sub-cases:
+    #   - stdout is None: capture both stdout+stderr combined (e.g. sync tools)
+    #   - stdout is a file: stdout goes to that file (e.g. pg_dump writing a
+    #     dump file), and we stream only stderr to the log
     if logfile_path is not None and stderr is None:
         if stdout is None:
             proc = subprocess.Popen(
@@ -146,6 +157,10 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
         child_proc = None
         return proc.returncode
 
+    # PATH B: Simple mode — no streaming.  Used for short helper commands
+    # (e.g. psql -l to list databases, bzip2 to compress a file) where the
+    # caller handles stdout/stderr directly.  Just wait for the process
+    # with timeout enforcement.
     proc = subprocess.Popen(cmd, env=env, stdout=stdout, stderr=stderr)
     child_proc = proc
 
