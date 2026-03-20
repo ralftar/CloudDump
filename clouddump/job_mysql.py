@@ -18,19 +18,25 @@ def _list_databases(host, port, user, password):
     env = {**os.environ, "MYSQL_PWD": password}
 
     fd, tmppath = tempfile.mkstemp(prefix="mysql-list-")
+    fd_err, errpath = tempfile.mkstemp(prefix="mysql-err-")
     try:
-        with os.fdopen(fd, "w") as tmp:
+        with os.fdopen(fd, "w") as tmp, os.fdopen(fd_err, "w") as err:
             rc = run_cmd(
                 ["mysql", "-h", host, "-P", str(port), "-u", user,
                  "--batch", "--skip-column-names", "-e", "SHOW DATABASES"],
-                env=env, stdout=tmp, stderr=subprocess.DEVNULL,
+                env=env, stdout=tmp, stderr=err,
             )
         if rc != 0:
+            with open(errpath) as f:
+                err_msg = f.read().strip()
+            if err_msg:
+                log.error("mysql: %s", err_msg)
             return None
         with open(tmppath) as f:
             output = f.read()
     finally:
         _safe_remove(tmppath)
+        _safe_remove(errpath)
 
     return [name.strip() for name in output.splitlines() if name.strip()]
 

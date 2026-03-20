@@ -18,18 +18,24 @@ def _list_databases(host, port, user, password):
     env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "30"}
 
     fd, tmppath = tempfile.mkstemp(prefix="psql-list-")
+    fd_err, errpath = tempfile.mkstemp(prefix="psql-err-")
     try:
-        with os.fdopen(fd, "w") as tmp:
+        with os.fdopen(fd, "w") as tmp, os.fdopen(fd_err, "w") as err:
             rc = run_cmd(
                 ["psql", "-h", host, "-p", str(port), "-U", user, "-l"],
-                env=env, stdout=tmp, stderr=subprocess.DEVNULL,
+                env=env, stdout=tmp, stderr=err,
             )
         if rc != 0:
+            with open(errpath) as f:
+                err_msg = f.read().strip()
+            if err_msg:
+                log.error("psql: %s", err_msg)
             return None
         with open(tmppath) as f:
             output = f.read()
     finally:
         _safe_remove(tmppath)
+        _safe_remove(errpath)
 
     databases = []
     for line in output.splitlines():
