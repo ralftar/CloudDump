@@ -7,6 +7,7 @@ import socket
 import sys
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
@@ -228,6 +229,14 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
+def _check_tcp(host, port, job_id, label):
+    """TCP connectivity check with consistent logging."""
+    if _check_connectivity(host, port):
+        log.info("Connectivity OK: %s %s:%s (job %s).", label, host, port, job_id)
+    else:
+        log.warning("Cannot reach %s %s:%s for job %s.", label, host, port, job_id)
+
+
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
 
@@ -240,21 +249,41 @@ def verify_connectivity(jobs):
         if not job_id or not job_type:
             continue
 
+        if job_type == "s3bucket":
+            for target in cfg(job, "buckets", []):
+                endpoint = cfg(target, "endpoint_url")
+                if endpoint:
+                    # Parse host:port from endpoint URL
+                    parsed = urlparse(endpoint)
+                    host = parsed.hostname
+                    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                    if host:
+                        _check_tcp(host, port, job_id, "S3 endpoint")
+
+        if job_type == "azstorage":
+            for target in cfg(job, "blobstorages", []):
+                source = cfg(target, "source")
+                if source:
+                    parsed = urlparse(source.split("?")[0])
+                    host = parsed.hostname
+                    if host:
+                        _check_tcp(host, 443, job_id, "Azure Blob")
+
         if job_type in ("pgsql", "mysql"):
             for target in cfg(job, "servers", []):
                 host = cfg(target, "host")
-                port = cfg(target, "port", "5432" if job_type == "pgsql" else "3306")
-                if host and not _check_connectivity(host, port):
-                    log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
+                port = cfg(target, "port", 5432 if job_type == "pgsql" else 3306)
+                if host:
+                    _check_tcp(host, port, job_id, job_type)
 
         if job_type == "rsync":
             for target in cfg(job, "targets", []):
                 source = cfg(target, "source")
-                port = cfg(target, "ssh_port", "22")
+                port = cfg(target, "ssh_port", 22)
                 if source and ":" in source:
                     host = source.split(":")[0].split("@")[-1]
-                    if host and not _check_connectivity(host, port):
-                        log.warning("Cannot reach %s:%s for job ID %s (will retry at runtime).", host, port, job_id)
+                    if host:
+                        _check_tcp(host, port, job_id, "SSH")
 
         if job_type == "github":
             for account in cfg(job, "organizations", []):
@@ -264,8 +293,8 @@ def verify_connectivity(jobs):
                 if acct_name and token and acct_type in VALID_GITHUB_ACCOUNT_TYPES:
                     gh_err = _check_github(acct_name, token, acct_type)
                     if gh_err:
-                        log.warning("GitHub check failed for %s '%s' in job ID %s: %s",
+                        log.warning("GitHub check failed for %s '%s' in job %s: %s",
                                     acct_type, acct_name, job_id, gh_err)
                     else:
-                        log.info("GitHub token verified for %s '%s' in job ID %s.",
+                        log.info("GitHub token verified for %s '%s' in job %s.",
                                  acct_type, acct_name, job_id)
