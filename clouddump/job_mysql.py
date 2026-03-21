@@ -7,6 +7,7 @@ import tempfile
 import time
 from datetime import datetime
 
+import clouddump
 from clouddump import cfg, log, run_cmd, _safe_remove
 
 # Databases that should never be dumped.
@@ -102,6 +103,8 @@ def run_mysql_dump(server, logfile_path):
             "--single-transaction", "--routines", "--triggers", "--events",
             database,
         ]
+        if clouddump.debug:
+            cmd.append("--verbose")
 
         dump_ok = False
         for db_attempt in range(1, max_db_retries + 1):

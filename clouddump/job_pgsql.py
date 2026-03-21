@@ -7,6 +7,7 @@ import tempfile
 import time
 from datetime import datetime
 
+import clouddump
 from clouddump import cfg, log, run_cmd, _safe_remove
 
 # Databases that should never be dumped.
@@ -117,6 +118,8 @@ def run_pg_dump(server, logfile_path):
         tables_excluded = tbl_cfg.get("tables_excluded", [])
 
         cmd = ["pg_dump", "-h", host, "-p", port, "-U", user, "-d", database, "-F", "tar"]
+        if clouddump.debug:
+            cmd.append("-v")
         for t in tables_included:
             t = t.strip()
             if t:

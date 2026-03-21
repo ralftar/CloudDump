@@ -3,6 +3,7 @@
 import os
 import time
 
+import clouddump
 from clouddump import cfg, log, run_cmd
 
 
@@ -42,7 +43,10 @@ def run_rsync_sync(target, logfile_path):
         " -o BatchMode=yes"
     )
 
-    cmd = ["rsync", "-az", "-e", ssh_cmd]
+    cmd = ["rsync", "-az"]
+    if clouddump.debug:
+        cmd.append("-v")
+    cmd += ["-e", ssh_cmd]
     if delete:
         cmd.append("--delete")
     for pattern in exclude:
