@@ -8,7 +8,6 @@ import tempfile
 import time
 import traceback
 from datetime import datetime
-from pathlib import Path
 
 import clouddump
 from clouddump import cfg, redact, log, _safe_remove
@@ -152,8 +151,6 @@ def main():
                 max_attempts = int(cfg(job, "retries", 3))
 
                 for attempt in range(1, max_attempts + 1):
-                    Path("/tmp/clouddump-heartbeat").touch()
-
                     fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
                     os.close(fd)
 
@@ -200,9 +197,6 @@ def main():
 
         if clouddump.shutdown_requested:
             break
-
-        # Touch heartbeat file so Docker HEALTHCHECK knows we're alive
-        Path("/tmp/clouddump-heartbeat").touch()
 
         # Sleep until next minute boundary, waking every second to
         # check for SIGUSR1 (run now) or shutdown signals.
