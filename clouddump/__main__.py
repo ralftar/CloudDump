@@ -152,6 +152,8 @@ def main():
                 max_attempts = int(cfg(job, "retries", 3))
 
                 for attempt in range(1, max_attempts + 1):
+                    Path("/tmp/clouddump-heartbeat").touch()
+
                     fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
                     os.close(fd)
 

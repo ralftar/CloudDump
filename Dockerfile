@@ -40,7 +40,7 @@ ENV PYTHONUNBUFFERED=1
 
 USER clouddump
 
-HEALTHCHECK --interval=120s --timeout=5s --retries=2 \
-  CMD find /tmp/clouddump-heartbeat -mmin -3 | grep -q .
+HEALTHCHECK --interval=120s --timeout=5s --retries=3 \
+  CMD find /tmp/clouddump-heartbeat -mmin -10 | grep -q .
 
 CMD ["python3", "-m", "clouddump"]
