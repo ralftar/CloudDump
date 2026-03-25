@@ -837,6 +837,104 @@ class TestRsyncRunner:
         run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
         assert os.path.isdir(dest)
 
+    def test_min_age_days_builds_filelist(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        # Stub _find_old_files to return a known file list
+        monkeypatch.setattr(
+            "clouddump.job_rsync._find_old_files",
+            lambda *a, **kw: ["old/file1.txt", "old/file2.log"],
+        )
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=30), _tmp_logfile)
+
+        assert rc == 0
+        cmd = calls[0][0]
+        assert "--files-from" in cmd
+        # delete_destination defaults to True — mirror mode
+        assert "--delete" in cmd
+
+    def test_min_age_days_no_delete(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        monkeypatch.setattr(
+            "clouddump.job_rsync._find_old_files",
+            lambda *a, **kw: ["old/file.txt"],
+        )
+
+        run_rsync_sync(self._cfg(destination=dest, min_age_days=30, delete_destination=False), _tmp_logfile)
+
+        cmd = calls[0][0]
+        assert "--files-from" in cmd
+        assert "--delete" not in cmd
+
+    def test_min_age_days_no_files_returns_0(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        monkeypatch.setattr(
+            "clouddump.job_rsync._find_old_files",
+            lambda *a, **kw: [],
+        )
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7), _tmp_logfile)
+
+        assert rc == 0
+        assert len(calls) == 0  # rsync should not have been called
+
+    def test_min_age_days_find_failure(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+
+        monkeypatch.setattr(
+            "clouddump.job_rsync._find_old_files",
+            lambda *a, **kw: None,  # signals failure
+        )
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7), _tmp_logfile)
+        assert rc == 1
+
+    def test_min_age_days_cleans_up_tempfile(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        monkeypatch.setattr(
+            "clouddump.job_rsync._find_old_files",
+            lambda *a, **kw: ["somefile.txt"],
+        )
+
+        run_rsync_sync(self._cfg(destination=dest, min_age_days=5), _tmp_logfile)
+
+        # The temp file referenced in --files-from should be cleaned up
+        cmd = calls[0][0]
+        idx = cmd.index("--files-from")
+        filelist_path = cmd[idx + 1]
+        assert not os.path.exists(filelist_path)
+
+    def test_without_min_age_no_files_from(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Without min_age_days, rsync runs normally (no --files-from)."""
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        cmd = calls[0][0]
+        assert "--files-from" not in cmd
+        assert "--delete" in cmd
+
 
 # ── Job dispatch ────────────────────────────────────────────────────────────
 

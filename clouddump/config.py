@@ -174,7 +174,7 @@ def validate_jobs(jobs):
         _TARGET_INTS = {
             "pgsql": ("servers", ["port", "db_retries"]),
             "mysql": ("servers", ["port", "db_retries"]),
-            "rsync": ("targets", ["ssh_port"]),
+            "rsync": ("targets", ["ssh_port", "min_age_days"]),
         }
         if job_type in _TARGET_BOOLS:
             coll, fields = _TARGET_BOOLS[job_type]
