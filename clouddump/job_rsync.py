@@ -1,6 +1,7 @@
 """Rsync-over-SSH job runner."""
 
 import os
+import shlex
 import subprocess
 import tempfile
 import time
@@ -26,8 +27,12 @@ def _find_old_files(host_part, remote_path, min_age_days, ssh_args):
     # Ensure remote_path ends with / so the relative-path stripping works
     if not remote_path.endswith("/"):
         remote_path += "/"
+    safe_path = shlex.quote(remote_path)
+    # Try GNU find -printf first; fall back to POSIX find + sed for BSD/macOS
     find_expr = (
-        f"find '{remote_path}' -type f -mtime +{min_age_days} -printf '%P\\n'"
+        f"find {safe_path} -type f -mtime +{min_age_days} -printf '%P\\n'"
+        f" 2>/dev/null || find {safe_path} -type f -mtime +{min_age_days}"
+        f" | sed 's|^{remote_path}||'"
     )
     cmd = ssh_args + [host_part, find_expr]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -71,17 +76,13 @@ def run_rsync_sync(target, logfile_path):
         log.info("Min age filter: %d days (only files older than %d days)", min_age_days, min_age_days)
     log.info("Syncing %s to %s...", source, destination)
 
-    ssh_cmd = (
-        f"ssh -i {ssh_key} -p {ssh_port}"
-        " -o StrictHostKeyChecking=accept-new"
-        " -o BatchMode=yes"
-    )
+    ssh_args = _build_ssh_args(ssh_key, ssh_port)
+    ssh_cmd = " ".join(ssh_args)
 
     # Build file list from remote if min_age_days is set
     filelist_path = None
     if min_age_days:
         host_part, remote_path = source.split(":", 1)
-        ssh_args = _build_ssh_args(ssh_key, ssh_port)
         files = _find_old_files(host_part, remote_path, min_age_days, ssh_args)
         if files is None:
             return 1
