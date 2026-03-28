@@ -26,13 +26,10 @@ def run_s3_sync(bucket, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Source: %s", source)
-    log.info("Destination: %s", destination)
-    log.info("Mirror (delete): %s", "true" if delete else "false")
+    log.info("Syncing %s → %s (delete=%s)", source, destination, delete)
     log.debug("AWS Region: %s", region)
     if endpoint:
         log.debug("Endpoint URL: %s", endpoint)
-    log.info("Syncing source %s to destination %s...", source, destination)
 
     env = {**os.environ}
     if key_id:

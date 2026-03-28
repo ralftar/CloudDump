@@ -167,12 +167,8 @@ def main():
                     file_handler = _add_file_handler(logfile_path)
 
                     try:
-                        log.debug("Starting at %s",
-                                  datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                         result = execute_job(job, logfile_path)
                         t_end = time.time()
-                        log.debug("Finished at %s",
-                                  datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                     except Exception:
                         t_end = time.time()
                         tb = traceback.format_exc()
@@ -183,10 +179,14 @@ def main():
                         log.removeHandler(file_handler)
                         file_handler.close()
 
+                    elapsed = int(t_end - t_start)
+                    minutes, seconds = divmod(elapsed, 60)
+
                     if result == 0:
-                        log.info("Completed successfully")
+                        log.info("Completed successfully (%dm %ds)", minutes, seconds)
                     else:
-                        log.warning("Completed with errors (exit code: %d)", result)
+                        log.warning("Completed with errors (exit code: %d, %dm %ds)",
+                                    result, minutes, seconds)
 
                     send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
                                     attempt=attempt, max_attempts=max_attempts)
@@ -207,9 +207,18 @@ def main():
                 clouddump.current_job = ""
 
             if not clouddump.shutdown_requested:
+                run_end = datetime.now(timezone.utc)
+                run_elapsed = int((run_end - run_start).total_seconds())
+                run_min, run_sec = divmod(run_elapsed, 60)
+                if failed:
+                    log.warning("Run complete: %d succeeded, %d failed, %d total (%dm %ds)",
+                                succeeded, failed, len(jobs), run_min, run_sec)
+                else:
+                    log.info("Run complete: %d/%d succeeded (%dm %ds)",
+                             succeeded, len(jobs), run_min, run_sec)
                 update_last_run(
                     started=run_start,
-                    finished=datetime.now(timezone.utc),
+                    finished=run_end,
                     succeeded=succeeded,
                     failed=failed,
                     total=len(jobs),

@@ -75,12 +75,8 @@ def run_pg_dump(server, logfile_path):
 
     os.makedirs(backuppath, exist_ok=True)
 
-    log.info("Host: %s:%s", host, port)
-    log.debug("Username: %s", user)
-    log.info("Backup path: %s", backuppath)
-    log.debug("Filename date: %s", filenamedate)
-    log.debug("Compress: %s", compress)
-    log.info("Querying server for list of databases...")
+    log.info("Dumping %s:%s → %s", host, port, backuppath)
+    log.debug("Username: %s, filenamedate: %s, compress: %s", user, filenamedate, compress)
 
     all_dbs = _list_databases(host, port, user, password)
     if all_dbs is None:
