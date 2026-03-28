@@ -14,6 +14,7 @@ from clouddump import cfg, redact, log, _safe_remove
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
+from clouddump.health import start_health_server, update_last_run
 from clouddump.jobs import execute_job
 
 
@@ -121,6 +122,9 @@ def main():
         log.info("Email not configured, skipping.")
     # result is False: send_email already logged the error
 
+    health_port = int(cfg(config, "health_port", 8080))
+    start_health_server(health_port)
+
     # Main loop
     log.info("Starting main loop...")
     last_run_ts = 0
@@ -135,6 +139,9 @@ def main():
         else:
             log.info("Schedule triggered, running all jobs...")
             last_run_ts = time.time()
+            run_start = datetime.now()
+            succeeded = 0
+            failed = 0
 
             for job in jobs:
                 if clouddump.shutdown_requested:
@@ -187,13 +194,23 @@ def main():
                     _safe_remove(logfile_path)
 
                     if result == 0:
+                        succeeded += 1
                         break
                     elif attempt < max_attempts:
                         log.warning("Job %s failed (attempt %d/%d), retrying in 60s...",
                                  job_id, attempt, max_attempts)
                         time.sleep(60)
                     else:
+                        failed += 1
                         log.error("Job %s failed after %d attempts", job_id, max_attempts)
+
+            update_last_run(
+                started=run_start,
+                finished=datetime.now(),
+                succeeded=succeeded,
+                failed=failed,
+                total=len(jobs),
+            )
 
         if clouddump.shutdown_requested:
             break
