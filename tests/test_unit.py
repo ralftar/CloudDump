@@ -1,6 +1,7 @@
-"""Unit tests for cron, config validation, redaction, and health endpoint."""
+"""Unit tests for cron, config validation, redaction, log format, and health endpoint."""
 
 import json
+import logging
 from datetime import datetime, timezone
 from unittest.mock import patch
 import urllib.error
@@ -8,10 +9,53 @@ import urllib.request
 
 import pytest
 
-from clouddump import redact
+from clouddump import redact, _LevelFormatter, _LOG_FORMAT, _LOG_DATEFMT
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 from clouddump.health import _state, update_last_run, _Handler, start_health_server
+
+
+# ── log format ──────────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def _log_capture():
+    """Yield a (logger, handler) that captures formatted output."""
+    formatter = _LevelFormatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logger = logging.getLogger("clouddump.test_format")
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    yield logger, handler
+    logger.removeHandler(handler)
+
+
+def test_log_format_info(_log_capture):
+    logger, handler = _log_capture
+    record = logger.makeRecord(
+        logger.name, logging.INFO, "test", 0, "hello", (), None)
+    output = handler.format(record)
+    assert "level=info" in output
+    assert "hello" in output
+
+
+def test_log_format_warning(_log_capture):
+    logger, handler = _log_capture
+    record = logger.makeRecord(
+        logger.name, logging.WARNING, "test", 0, "caution", (), None)
+    output = handler.format(record)
+    assert "level=warn" in output
+    assert "caution" in output
+
+
+def test_log_format_error(_log_capture):
+    logger, handler = _log_capture
+    record = logger.makeRecord(
+        logger.name, logging.ERROR, "test", 0, "boom", (), None)
+    output = handler.format(record)
+    assert "level=error" in output
+    assert "boom" in output
 
 
 # ── validate_cron ────────────────────────────────────────────────────────────
