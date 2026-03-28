@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import clouddump
 from clouddump import cfg, log, run_cmd, _safe_remove
@@ -107,7 +107,7 @@ def run_mysql_dump(server, logfile_path):
 
         dump_ok = False
         for db_attempt in range(1, max_db_retries + 1):
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             temp_file = os.path.join(backuppath, f"{database}-{timestamp}.sql")
 
             log.debug("Running mysqldump of %s (attempt %d/%d)...", database, db_attempt, max_db_retries)

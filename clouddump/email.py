@@ -3,7 +3,7 @@
 import json
 import os
 import smtplib
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -97,8 +97,8 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     status = "Success" if exit_code == 0 else "Failure"
     elapsed = int(t_end - t_start)
     minutes, seconds = divmod(elapsed, 60)
-    start_str = datetime.fromtimestamp(t_start).strftime("%Y-%m-%d %H:%M:%S")
-    end_str = datetime.fromtimestamp(t_end).strftime("%Y-%m-%d %H:%M:%S")
+    start_str = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    end_str = datetime.fromtimestamp(t_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     job_config_text = format_job_config(job)
 
@@ -128,7 +128,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
 
     attachments = []
     if email_log_attached and os.path.isfile(logfile_path):
-        timestamp = datetime.fromtimestamp(t_start).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
         log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
         attachments.append((logfile_path, log_attachment_name))
 
