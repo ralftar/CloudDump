@@ -229,7 +229,7 @@ class TestPgSQLRunner:
             if cmd[0] == "psql":
                 stdout = kwargs.get("stdout")
                 if stdout:
-                    stdout.write(" Name    | Owner\n---------+--------\n testdb  | postgres\n")
+                    stdout.write("testdb\n")
                 return 0
             attempts.append(1)
             return 1  # pg_dump always fails
@@ -251,7 +251,7 @@ class TestPgSQLRunner:
             if cmd[0] == "psql":
                 stdout = kwargs.get("stdout")
                 if stdout:
-                    stdout.write(" Name    | Owner\n---------+--------\n testdb  | postgres\n")
+                    stdout.write("testdb\n")
                 return 0
             attempts.append(1)
             return 1

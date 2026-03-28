@@ -14,7 +14,12 @@ _SYSTEM_DATABASES = {"template0", "template1", "postgres"}
 
 
 def _list_databases(host, port, user, password):
-    """Query the server for a list of databases using psql -l."""
+    """Query the server for a list of databases via a direct SQL query.
+
+    Uses a ``SELECT`` on ``pg_database`` instead of ``psql -l`` so that the
+    command works across all PostgreSQL versions (the ``-l`` flag relies on
+    internal catalogue columns that were renamed in PostgreSQL 16).
+    """
     env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "30"}
 
     fd, tmppath = tempfile.mkstemp(prefix="psql-list-")
@@ -22,7 +27,9 @@ def _list_databases(host, port, user, password):
     try:
         with os.fdopen(fd, "w") as tmp, os.fdopen(fd_err, "w") as err:
             rc = run_cmd(
-                ["psql", "-h", host, "-p", str(port), "-U", user, "-l"],
+                ["psql", "-h", host, "-p", str(port), "-U", user,
+                 "-d", "postgres", "-t", "-A",
+                 "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"],
                 env=env, stdout=tmp, stderr=err,
             )
         if rc != 0:
@@ -39,12 +46,9 @@ def _list_databases(host, port, user, password):
 
     databases = []
     for line in output.splitlines():
-        if "|" not in line:
-            continue
-        name = line.split("|")[0].strip()
-        if not name or name == "Name" or name.startswith("-"):
-            continue
-        databases.append(name)
+        name = line.strip()
+        if name:
+            databases.append(name)
     return databases
 
 
