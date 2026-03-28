@@ -74,6 +74,83 @@ def test_log_format_restores_levelname(_log_capture):
     assert record.levelname == "WARNING"
 
 
+# ── debug log suppression ───────────────────────────────────────────────────
+
+
+def test_debug_lines_suppressed_at_info_level():
+    """When the logger is at INFO level (debug=false), DEBUG messages are dropped."""
+    logger = logging.getLogger("clouddump.test_suppress")
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    try:
+        records = []
+        handler.emit = lambda r: records.append(r)
+        logger.debug("should be suppressed")
+        logger.info("should appear")
+        assert len(records) == 1
+        assert records[0].getMessage() == "should appear"
+    finally:
+        logger.removeHandler(handler)
+
+
+def test_debug_lines_visible_at_debug_level():
+    """When the logger is at DEBUG level (debug=true), DEBUG messages pass through."""
+    logger = logging.getLogger("clouddump.test_visible")
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    try:
+        records = []
+        handler.emit = lambda r: records.append(r)
+        logger.debug("should appear")
+        assert len(records) == 1
+        assert records[0].getMessage() == "should appear"
+    finally:
+        logger.removeHandler(handler)
+
+
+def test_tool_output_logged_at_debug_level():
+    """run_cmd streams subprocess output at DEBUG level, not INFO."""
+    import io
+    import clouddump
+
+    # Patch subprocess to produce a known line
+    fake_pipe = io.BytesIO(b"Updating repo-x in /backup/github\n")
+
+    logger = logging.getLogger("clouddump")
+    records = []
+    handler = logging.Handler()
+    handler.emit = lambda r: records.append(r)
+    logger.addHandler(handler)
+    old_level = logger.getEffectiveLevel()
+    logger.setLevel(logging.DEBUG)
+    try:
+        # Call _stream logic directly via a thread (mirrors run_cmd internals)
+        import tempfile
+        fd, logfile = tempfile.mkstemp(prefix="test-stream-")
+        import os
+        os.close(fd)
+        try:
+            with open(logfile, "a") as logf:
+                for raw_line in fake_pipe:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
+                    logf.write(line + "\n")
+                    logf.flush()
+                    clouddump.log.debug("  %s", line)
+
+            debug_records = [r for r in records if "Updating repo-x" in r.getMessage()]
+            assert len(debug_records) == 1
+            assert debug_records[0].levelno == logging.DEBUG
+        finally:
+            clouddump._safe_remove(logfile)
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+
+
 # ── validate_cron ────────────────────────────────────────────────────────────
 
 

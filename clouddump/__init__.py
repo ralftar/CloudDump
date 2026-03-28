@@ -145,8 +145,7 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
                     line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
                     logf.write(line + "\n")
                     logf.flush()
-                    if debug:
-                        log.info("  %s", redact(line))
+                    log.debug("  %s", redact(line))
 
         reader = threading.Thread(target=_stream, daemon=True)
         reader.start()
