@@ -23,10 +23,7 @@ def run_az_sync(blobstorage, logfile_path):
     source_stripped = source.split("?")[0]
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Source: %s", source_stripped)
-    log.info("Destination: %s", destination)
-    log.info("Mirror (delete): %s", "true" if delete else "false")
-    log.info("Syncing source %s to destination %s...", source_stripped, destination)
+    log.info("Syncing %s → %s (delete=%s)", source_stripped, destination, delete)
 
     cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={'true' if delete else 'false'}", source, destination]
 

@@ -24,10 +24,8 @@ def run_github_backup(org, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Account: %s (type: %s)", name, account_type)
-    log.info("Destination: %s", destination)
+    log.info("Backing up %s %s → %s", account_type, name, destination)
     log.debug("Token: %s", redact(f"token={token}"))
-    log.info("Backing up %s %s...", account_type, name)
 
     # Write token to a temp file to keep it out of process arguments
     # (visible via ps aux). github-backup doesn't support env vars.

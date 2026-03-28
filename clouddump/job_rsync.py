@@ -67,14 +67,10 @@ def run_rsync_sync(target, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Source: %s", source)
-    log.info("Destination: %s", destination)
-    log.info("SSH key: %s", ssh_key)
-    log.info("SSH port: %s", ssh_port)
-    log.info("Mirror (delete): %s", "true" if delete else "false")
+    log.info("Syncing %s → %s (delete=%s)", source, destination, delete)
+    log.debug("SSH key: %s, port: %s", ssh_key, ssh_port)
     if min_age_days:
-        log.info("Min age filter: %d days (only files older than %d days)", min_age_days, min_age_days)
-    log.info("Syncing %s to %s...", source, destination)
+        log.info("Min age filter: %d days", min_age_days)
 
     ssh_args = _build_ssh_args(ssh_key, ssh_port)
     ssh_cmd = " ".join(ssh_args)
