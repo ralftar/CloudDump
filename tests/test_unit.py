@@ -11,7 +11,7 @@ import pytest
 from clouddump import redact
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
-from clouddump.health import _state, update_last_run, _Handler, start_health_server
+from clouddump.health import _state, update_last_run, _Handler
 
 
 # ── validate_cron ────────────────────────────────────────────────────────────

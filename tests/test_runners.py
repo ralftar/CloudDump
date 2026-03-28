@@ -3,6 +3,7 @@
 Every test mocks run_cmd so no external tools are needed.
 """
 
+import logging
 import os
 
 import pytest
@@ -263,6 +264,25 @@ class TestPgSQLRunner:
         assert rc == 1
         assert len(attempts) == 3  # default
 
+    def test_only_system_databases_returns_success(self, monkeypatch, tmp_path, _tmp_logfile, caplog):
+        from clouddump.job_pgsql import run_pg_dump
+
+        dest = str(tmp_path / "pgout")
+
+        def fake_run_cmd(cmd, **kwargs):
+            if cmd[0] == "psql":
+                stdout = kwargs.get("stdout")
+                if stdout:
+                    stdout.write("postgres\n")
+                return 0
+            return 0
+
+        monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
+
+        rc = run_pg_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
+        assert rc == 0
+        assert any(r.levelno == logging.WARNING and "No databases to backup" in r.message for r in caplog.records)
+
 
 # ── MySQL runner ────────────────────────────────────────────────────────────
 
@@ -447,6 +467,25 @@ class TestMySQLRunner:
 
         run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
         assert os.path.isdir(dest)
+
+    def test_only_system_databases_returns_success(self, monkeypatch, tmp_path, _tmp_logfile, caplog):
+        from clouddump.job_mysql import run_mysql_dump
+
+        dest = str(tmp_path / "mysqlout")
+
+        def fake_run_cmd(cmd, **kwargs):
+            if cmd[0] == "mysql":
+                stdout = kwargs.get("stdout")
+                if stdout:
+                    stdout.write("information_schema\nmysql\nperformance_schema\nsys\n")
+                return 0
+            return 0
+
+        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
+
+        rc = run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
+        assert rc == 0
+        assert any(r.levelno == logging.WARNING and "No databases to backup" in r.message for r in caplog.records)
 
 
 # ── GitHub runner ───────────────────────────────────────────────────────────

@@ -86,8 +86,8 @@ def run_mysql_dump(server, logfile_path):
         databases_to_backup = [db for db in all_dbs if db not in excluded_set]
 
     if not databases_to_backup:
-        log.error("No databases to backup.")
-        return 1
+        log.warning("No databases to backup.")
+        return 0
 
     log.info("Databases to backup: %s", " ".join(databases_to_backup))
 
