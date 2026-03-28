@@ -2,7 +2,7 @@
 
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from clouddump import log
@@ -14,8 +14,8 @@ _state = {"last_run": None}
 def update_last_run(started, finished, succeeded, failed, total):
     """Record the result of the most recent backup run."""
     _state["last_run"] = {
-        "started": started.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "finished": finished.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "started": started.isoformat(),
+        "finished": finished.isoformat(),
         "jobs": total,
         "succeeded": succeeded,
         "failed": failed,
@@ -35,13 +35,16 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def log_message(self, fmt, *args):
-        # Delegate to Python logging instead of stderr.
         log.debug("health: %s", fmt % args)
 
 
 def start_health_server(port=8080):
     """Start the health HTTP server in a daemon thread."""
-    server = HTTPServer(("", port), _Handler)
+    try:
+        server = HTTPServer(("", port), _Handler)
+    except OSError as exc:
+        log.warning("Could not start health endpoint on port %d: %s", port, exc)
+        return
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     log.info("Health endpoint listening on port %d", port)

@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 import clouddump
 from clouddump import cfg, redact, log, _safe_remove
@@ -122,8 +122,7 @@ def main():
         log.info("Email not configured, skipping.")
     # result is False: send_email already logged the error
 
-    health_port = int(cfg(config, "health_port", 8080))
-    start_health_server(health_port)
+    start_health_server(int(cfg(config, "health_port", 8080)))
 
     # Main loop
     log.info("Starting main loop...")
@@ -139,7 +138,7 @@ def main():
         else:
             log.info("Schedule triggered, running all jobs...")
             last_run_ts = time.time()
-            run_start = datetime.now()
+            run_start = datetime.now(timezone.utc)
             succeeded = 0
             failed = 0
 
@@ -204,13 +203,14 @@ def main():
                         failed += 1
                         log.error("Job %s failed after %d attempts", job_id, max_attempts)
 
-            update_last_run(
-                started=run_start,
-                finished=datetime.now(),
-                succeeded=succeeded,
-                failed=failed,
-                total=len(jobs),
-            )
+            if not clouddump.shutdown_requested:
+                update_last_run(
+                    started=run_start,
+                    finished=datetime.now(timezone.utc),
+                    succeeded=succeeded,
+                    failed=failed,
+                    total=len(jobs),
+                )
 
         if clouddump.shutdown_requested:
             break

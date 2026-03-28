@@ -98,6 +98,16 @@ def validate_settings(config):
             log.error("Invalid crontab '%s': %s.", crontab, cron_error)
             errors += 1
 
+    health_port = config.get("health_port")
+    if health_port is not None:
+        try:
+            health_port = int(health_port)
+            if not 1 <= health_port <= 65535:
+                raise ValueError("must be 1-65535")
+        except (ValueError, TypeError) as exc:
+            log.error("Invalid health_port '%s': %s.", health_port, exc)
+            errors += 1
+
     return errors
 
 
