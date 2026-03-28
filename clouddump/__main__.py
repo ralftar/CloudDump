@@ -151,7 +151,8 @@ def main():
                     continue
 
                 job_type = cfg(job, "type")
-                log.info("Running job %s (type: %s)", job_id, job_type)
+                clouddump.current_job = job_id
+                log.info("Starting (type: %s)", job_type)
 
                 timeout = int(cfg(job, "timeout", 604800))
                 max_attempts = int(cfg(job, "retries", 3))
@@ -166,16 +167,16 @@ def main():
                     file_handler = _add_file_handler(logfile_path)
 
                     try:
-                        log.debug("Job %s starting at %s",
-                                  job_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+                        log.debug("Starting at %s",
+                                  datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                         result = execute_job(job, logfile_path)
                         t_end = time.time()
-                        log.debug("Job %s finished at %s",
-                                  job_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+                        log.debug("Finished at %s",
+                                  datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                     except Exception:
                         t_end = time.time()
                         tb = traceback.format_exc()
-                        log.error("Job %s crashed:\n%s", job_id, tb)
+                        log.error("Crashed:\n%s", tb)
                         result = 1
                     finally:
                         clouddump.job_deadline = None
@@ -183,9 +184,9 @@ def main():
                         file_handler.close()
 
                     if result == 0:
-                        log.info("Job %s completed successfully", job_id)
+                        log.info("Completed successfully")
                     else:
-                        log.warning("Job %s completed with errors (exit code: %d)", job_id, result)
+                        log.warning("Completed with errors (exit code: %d)", result)
 
                     send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
                                     attempt=attempt, max_attempts=max_attempts)
@@ -196,12 +197,14 @@ def main():
                         succeeded += 1
                         break
                     elif attempt < max_attempts:
-                        log.warning("Job %s failed (attempt %d/%d), retrying in 60s...",
-                                 job_id, attempt, max_attempts)
+                        log.warning("Failed (attempt %d/%d), retrying in 60s...",
+                                    attempt, max_attempts)
                         time.sleep(60)
                     else:
                         failed += 1
-                        log.error("Job %s failed after %d attempts", job_id, max_attempts)
+                        log.error("Failed after %d attempts", max_attempts)
+
+                clouddump.current_job = ""
 
             if not clouddump.shutdown_requested:
                 update_last_run(

@@ -74,6 +74,52 @@ def test_log_format_restores_levelname(_log_capture):
     assert record.levelname == "WARNING"
 
 
+def test_log_format_includes_job_context(_log_capture):
+    """When current_job is set, log lines get a [job_id] prefix."""
+    import clouddump
+    logger, handler = _log_capture
+    old = clouddump.current_job
+    clouddump.current_job = "sleipner-pg"
+    try:
+        record = logger.makeRecord(
+            logger.name, logging.WARNING, "test", 0, "No databases to backup.", (), None)
+        output = handler.format(record)
+        assert "[sleipner-pg] No databases to backup." in output
+    finally:
+        clouddump.current_job = old
+
+
+def test_log_format_no_prefix_without_job(_log_capture):
+    """When current_job is empty, no prefix is added."""
+    import clouddump
+    logger, handler = _log_capture
+    old = clouddump.current_job
+    clouddump.current_job = ""
+    try:
+        record = logger.makeRecord(
+            logger.name, logging.INFO, "test", 0, "Starting main loop...", (), None)
+        output = handler.format(record)
+        assert "[" not in output.split("]", 1)[1]  # no bracket after timestamp
+        assert "Starting main loop..." in output
+    finally:
+        clouddump.current_job = old
+
+
+def test_log_format_restores_msg_after_job_context(_log_capture):
+    """Formatter must not permanently mutate record.msg."""
+    import clouddump
+    logger, handler = _log_capture
+    old = clouddump.current_job
+    clouddump.current_job = "test-job"
+    try:
+        record = logger.makeRecord(
+            logger.name, logging.INFO, "test", 0, "original msg", (), None)
+        handler.format(record)
+        assert record.msg == "original msg"
+    finally:
+        clouddump.current_job = old
+
+
 # ── debug log suppression ───────────────────────────────────────────────────
 
 

@@ -19,6 +19,7 @@ shutdown_requested = False  # Set by signal handler to break the main loop
 run_now_requested = False   # Set by SIGUSR1 handler to skip cron check
 job_deadline = None        # Unix timestamp; set by main loop before execute_job()
 debug = False  # Set by main() from config; enables tool output + debug on console
+current_job = ""  # Set by main loop; auto-prefixed to log messages
 
 
 class JobTimeout(Exception):
@@ -39,12 +40,16 @@ class _LevelFormatter(logging.Formatter):
     _NAMES = {"WARNING": "warn", "CRITICAL": "crit"}
 
     def format(self, record):
-        original = record.levelname
-        record.levelname = self._NAMES.get(original, original.lower())
+        original_level = record.levelname
+        original_msg = record.msg
+        record.levelname = self._NAMES.get(original_level, original_level.lower())
+        if current_job:
+            record.msg = f"[{current_job}] {record.msg}"
         try:
             return super().format(record)
         finally:
-            record.levelname = original
+            record.levelname = original_level
+            record.msg = original_msg
 
 
 # INFO and below → stdout
