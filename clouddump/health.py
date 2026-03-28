@@ -15,6 +15,7 @@ def update_last_run(started, finished, succeeded, failed, total):
     _state["last_run"] = {
         "started": started.isoformat(),
         "finished": finished.isoformat(),
+        "finished_epoch": int(finished.timestamp()),
         "jobs": total,
         "succeeded": succeeded,
         "failed": failed,

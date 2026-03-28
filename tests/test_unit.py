@@ -448,6 +448,7 @@ def test_update_last_run_populates_state():
     assert lr["failed"] == 1
     assert "2026-03-28" in lr["started"]
     assert "2026-03-28" in lr["finished"]
+    assert lr["finished_epoch"] == int(finished.timestamp())
 
 
 def test_update_last_run_initially_null():
