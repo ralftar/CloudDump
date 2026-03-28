@@ -38,6 +38,8 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 
+EXPOSE 8080
+
 USER clouddump
 
 

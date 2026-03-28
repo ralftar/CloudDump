@@ -1,14 +1,17 @@
-"""Unit tests for cron, config validation, and redaction."""
+"""Unit tests for cron, config validation, redaction, and health endpoint."""
 
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from unittest.mock import patch
 import urllib.error
+import urllib.request
 
 import pytest
 
 from clouddump import redact
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
+from clouddump.health import _state, update_last_run, _Handler, start_health_server
 
 
 # ── validate_cron ────────────────────────────────────────────────────────────
@@ -114,6 +117,15 @@ def test_validate_settings_invalid_crontab():
 
 def test_validate_settings_bad_bool():
     assert validate_settings({"crontab": "0 3 * * *", "debug": "true"}) >= 1
+
+
+def test_validate_settings_valid_health_port():
+    assert validate_settings({"crontab": "0 3 * * *", "health_port": 9090}) == 0
+
+
+@pytest.mark.parametrize("val", ["abc", 0, -1, 70000])
+def test_validate_settings_bad_health_port(val):
+    assert validate_settings({"crontab": "0 3 * * *", "health_port": val}) >= 1
 
 
 # ── validate_jobs ────────────────────────────────────────────────────────────
@@ -284,3 +296,69 @@ def test_verify_connectivity_skips_invalid_account_type(mock_gh):
         {"name": "x", "token": "ghp_x", "account_type": "team"}])
     verify_connectivity([job])
     mock_gh.assert_not_called()
+
+
+# ── health endpoint ─────────────────────────────────────────────────────────
+
+
+def test_update_last_run_populates_state():
+    started = datetime(2026, 3, 28, 3, 0, 0, tzinfo=timezone.utc)
+    finished = datetime(2026, 3, 28, 3, 47, 0, tzinfo=timezone.utc)
+    update_last_run(started, finished, succeeded=4, failed=1, total=5)
+    lr = _state["last_run"]
+    assert lr["jobs"] == 5
+    assert lr["succeeded"] == 4
+    assert lr["failed"] == 1
+    assert "2026-03-28" in lr["started"]
+    assert "2026-03-28" in lr["finished"]
+
+
+def test_update_last_run_initially_null():
+    old = _state["last_run"]
+    _state["last_run"] = None
+    try:
+        assert _state["last_run"] is None
+    finally:
+        _state["last_run"] = old
+
+
+def test_healthz_returns_200():
+    """Start a real health server on a random port and GET /healthz."""
+    import http.server
+    import threading
+
+    _state["last_run"] = None
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    port = server.server_address[1]
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        url = f"http://127.0.0.1:{port}/healthz"
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            assert resp.status == 200
+            body = json.loads(resp.read())
+            assert body["status"] == "ok"
+            assert body["last_run"] is None
+    finally:
+        server.shutdown()
+
+
+def test_healthz_404_on_other_paths():
+    """Non-/healthz paths return 404."""
+    import http.server
+    import threading
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    port = server.server_address[1]
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        url = f"http://127.0.0.1:{port}/other"
+        req = urllib.request.Request(url)
+        try:
+            urllib.request.urlopen(req, timeout=2)
+            assert False, "Expected 404"
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+    finally:
+        server.shutdown()
