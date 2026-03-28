@@ -52,7 +52,6 @@ Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
   Use Docker bind mounts or Kubernetes PVCs for remote storage (SMB, NFS, etc.)
 - **Credential redaction** — passwords, keys, and tokens are scrubbed from logs
   and emails automatically
-- **Health check** — built-in Docker `HEALTHCHECK` via heartbeat file
 - **Graceful shutdown** — SIGTERM forwarded to child processes
 
 ## Disaster recovery
