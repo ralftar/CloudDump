@@ -167,11 +167,11 @@ def main():
 
                     try:
                         log.debug("Job %s starting at %s",
-                                  job_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                                  job_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                         result = execute_job(job, logfile_path)
                         t_end = time.time()
                         log.debug("Job %s finished at %s",
-                                  job_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                                  job_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                     except Exception:
                         t_end = time.time()
                         tb = traceback.format_exc()
