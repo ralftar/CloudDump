@@ -58,6 +58,22 @@ def test_log_format_error(_log_capture):
     assert "boom" in output
 
 
+def test_log_format_critical(_log_capture):
+    logger, handler = _log_capture
+    record = logger.makeRecord(
+        logger.name, logging.CRITICAL, "test", 0, "critical issue", (), None)
+    output = handler.format(record)
+    assert "level=crit" in output
+
+
+def test_log_format_restores_levelname(_log_capture):
+    logger, handler = _log_capture
+    record = logger.makeRecord(
+        logger.name, logging.WARNING, "test", 0, "test msg", (), None)
+    handler.format(record)
+    assert record.levelname == "WARNING"
+
+
 # ── validate_cron ────────────────────────────────────────────────────────────
 
 
