@@ -852,6 +852,18 @@ class TestRsyncRunner:
         rc = run_rsync_sync(self._cfg(source="/local/path/only"), _tmp_logfile)
         assert rc == 1
 
+    @pytest.mark.parametrize("source", [
+        "$(whoami)@host:/path",
+        "user@host$(cmd):/path",
+        "user@host:/path;rm -rf /",
+        "user@host`id`:/path",
+    ])
+    def test_rejects_shell_metacharacters_in_source(self, monkeypatch, _tmp_logfile, source):
+        from clouddump.job_rsync import run_rsync_sync
+
+        rc = run_rsync_sync(self._cfg(source=source), _tmp_logfile)
+        assert rc == 1
+
     def test_missing_ssh_key(self, monkeypatch, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync
 

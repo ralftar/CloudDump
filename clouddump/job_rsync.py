@@ -1,6 +1,7 @@
 """Rsync-over-SSH job runner."""
 
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -8,6 +9,9 @@ import time
 
 import clouddump
 from clouddump import cfg, log, run_cmd
+
+# user@host:/path — no shell metacharacters anywhere
+_SOURCE_RE = re.compile(r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:/[a-zA-Z0-9_./ -]+$")
 
 
 def _build_ssh_args(ssh_key, ssh_port):
@@ -57,8 +61,8 @@ def run_rsync_sync(target, logfile_path):
         log.error("Missing source or destination for rsync target.")
         return 1
 
-    if ":" not in source:
-        log.error("Invalid source %s. Must contain ':' (e.g. user@host:/path).", source)
+    if not _SOURCE_RE.match(source):
+        log.error("Invalid source %s. Must match user@host:/path (no special characters).", source)
         return 1
 
     if not ssh_key:
