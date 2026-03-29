@@ -1,10 +1,12 @@
-# CloudDump 🌩️
+# CloudDump 🍃
 
 [![CI](https://github.com/ralftar/CloudDump/actions/workflows/ci.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions/workflows/ci.yml)
 [![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**A tool for dumping your cloud data — so you always have access.**
+![CloudDump](cloud_dump_illustration.png)
+
+**An independent copy of your cloud data. Under your control.**
 
 The cloud is just someone else's computer. CloudDump pulls your persistent
 data — S3 buckets, Azure Blob Storage, PostgreSQL databases, MySQL
