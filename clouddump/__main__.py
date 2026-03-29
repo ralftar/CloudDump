@@ -52,6 +52,9 @@ def main():
 
     config = load_config()
     host = cfg(config, "host")
+    if not host:
+        log.error("Missing required top-level 'host' in configuration.")
+        sys.exit(1)
     settings_errors = validate_settings(config)
     debug = cfg(config, "debug", False)
 
@@ -65,7 +68,7 @@ def main():
         sys.exit(1)
 
     log.info("CONFIGURATION:")
-    log.info("Host: %s", host)
+    log.info("Instance: %s", host)
     log.info("Schedule: %s", crontab)
 
     # Validate jobs
@@ -82,6 +85,7 @@ def main():
     log.info("All %d job(s) passed configuration validation.", len(jobs))
 
     startup_config = (
+        f"Instance: {host}\n"
         f"Schedule: {crontab}\n"
         f"Debug: {debug}\n"
         f"Email logs: {cfg(config, 'email_log_attached', False)}\n"
@@ -100,7 +104,6 @@ def main():
 
     startup_body = (
         f"CloudDump started!\n\n"
-        f"Host: {host}\n\n"
         f"CONFIGURATION\n\n"
         f"{startup_config}\n\n"
         f"JOBS\n\n"

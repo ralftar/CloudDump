@@ -141,7 +141,8 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     log.info("Job report: %s", summary)
 
     body = (
-        f"CLOUDDUMP JOB REPORT\n\n"
+        f"CloudDump job completed!\n\n"
+        f"JOB REPORT\n\n"
         f"Result: {status}\n"
         f"Job: {job_id} ({job_type})\n"
         f"{attempt_info}"
