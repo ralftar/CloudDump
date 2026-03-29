@@ -81,28 +81,50 @@ def cfg(d, key, default=""):
 def redact(text):
     """Remove sensitive values from text for safe logging.
 
-    Covers: password/key/token/secret/credential field patterns,
-    AWS access key IDs (AKIA...), Azure connection string secrets
-    (AccountKey, SharedAccessKey), and Azure SAS token query parameters.
+    Covers: unquoted and JSON-quoted field patterns, Authorization headers,
+    AWS access key IDs, GitHub tokens (all prefixes), Azure connection
+    string secrets, Azure SAS tokens, database connection URLs, and
+    PEM-encoded private keys.
     """
+    # PEM private keys (must run BEFORE field patterns to avoid partial matches)
     text = re.sub(
-        r"(password|pass|passwd|pwd|key|token|secret|credential|cred)\s*[:=]\s*\S+",
+        r"-----BEGIN[A-Z \n]*(PRIVATE|ENCRYPTED)[A-Z \n]*KEY-----"
+        r"[\s\S]*?"
+        r"-----END[A-Z \n]*KEY-----",
+        "[REDACTED_PRIVATE_KEY]", text,
+    )
+    # JSON-quoted fields: "pass": "secret", "aws_secret_access_key": "value", etc.
+    text = re.sub(
+        r'("[^"]*(?:password|pass|passwd|pwd|key|token|secret|credential|cred)[^"]*"'
+        r'\s*:\s*)"[^"]*"',
+        r'\1"[REDACTED]"', text, flags=re.IGNORECASE,
+    )
+    # Unquoted field patterns: password=secret, token: value
+    text = re.sub(
+        r"\b(password|pass|passwd|pwd|token|secret|credential|cred)\s*[:=]\s*\S+",
         r"\1: [REDACTED]", text, flags=re.IGNORECASE,
     )
+    # Authorization headers
     text = re.sub(
         r"(Authorization)\s*:\s*\S+(\s+\S+)?",
         r"\1: [REDACTED]", text, flags=re.IGNORECASE,
     )
+    # AWS access key IDs
     text = re.sub(r"AKIA[A-Z0-9]{16}", "[REDACTED_AWS_KEY]", text)
+    # GitHub tokens (all prefixes: ghp_, gho_, ghu_, ghs_, ghr_, github_pat_)
+    text = re.sub(r"gh[pousr]_[A-Za-z0-9_]{36,255}", "[REDACTED_GH_TOKEN]", text)
+    text = re.sub(r"github_pat_[A-Za-z0-9_]{22,255}", "[REDACTED_GH_TOKEN]", text)
+    # Azure connection string secrets
     text = re.sub(
         r"(AccountKey|SharedAccessKey)=[^;]*",
         r"\1=[REDACTED]", text, flags=re.IGNORECASE,
     )
+    # Azure SAS query parameters
     text = re.sub(r"\?[^?]*(sig|se|st|sp|sr|sv)=[^&?]*", "?[REDACTED]", text)
-    # Database connection strings: postgres://user:pass@host, mysql://user:pass@host, etc.
+    # Database connection URLs — match password between first : and last @ before host
     text = re.sub(
-        r"(postgres|postgresql|mysql|mongodb|redis|amqp)://([^:]+):([^@]+)@",
-        r"\1://\2:[REDACTED]@", text, flags=re.IGNORECASE,
+        r"(postgres|postgresql|mysql|mongodb|redis|amqp)://([^:]+):(.+)@([^@]+)$",
+        r"\1://\2:[REDACTED]@\4", text, flags=re.IGNORECASE | re.MULTILINE,
     )
     return text
 

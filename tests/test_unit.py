@@ -382,15 +382,32 @@ def test_validate_jobs_duplicate_id():
 
 
 @pytest.mark.parametrize("text, secret", [
+    # Unquoted field patterns
     ("password: secret123", "secret123"),
     ("pass: abc", "abc"),
     ("token=xyz", "xyz"),
+    # JSON-quoted field patterns
+    ('"pass": "SuperSecret123"', "SuperSecret123"),
+    ('"password": "db_pass_456"', "db_pass_456"),
+    ('"token": "ghp_xxx"', "ghp_xxx"),
+    ('"secret": "my-api-secret"', "my-api-secret"),
+    ('"aws_secret_access_key": "wJalrXUtnFEMI"', "wJalrXUtnFEMI"),
+    # AWS keys
     ("key is AKIAIOSFODNN7EXAMPLE here", "AKIAIOSFODNN7EXAMPLE"),
+    # GitHub tokens (all prefixes)
+    ("Error: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"),
+    ("Error: ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn", "ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"),
+    ("Error: ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn", "ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"),
+    # Azure
     ("AccountKey=abc123;EndpointSuffix=core.windows.net", "abc123"),
     ("https://store.blob.core.windows.net/c?sv=2021-08&sig=abc&se=2025-01-01", "sig=abc"),
+    # Database URLs
     ("postgres://admin:s3cret@db.example.com:5432/mydb", "s3cret"),
     ("postgresql://user:hunter2@localhost/app", "hunter2"),
     ("mongodb://root:mongopass@mongo:27017", "mongopass"),
+    # Database URL with @ in password
+    ("mysql://root:p%40ssw0rd@db:3306/mydb", "p%40ssw0rd"),
+    # Authorization headers
     ("Authorization: Bearer ghp_abc123secret", "ghp_abc123secret"),
     ("authorization: token mytoken123", "mytoken123"),
 ])
@@ -398,6 +415,20 @@ def test_redact_strips_secrets(text, secret):
     result = redact(text)
     assert secret not in result
     assert "REDACTED" in result
+
+
+def test_redact_strips_pem_private_key():
+    text = (
+        "Error loading key:\n"
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAA\n"
+        "-----END OPENSSH PRIVATE KEY-----\n"
+        "Permission denied."
+    )
+    result = redact(text)
+    assert "b3BlbnNzaC1rZXktdjE" not in result
+    assert "REDACTED_PRIVATE_KEY" in result
+    assert "Permission denied." in result
 
 
 def test_redact_ignores_clean_text():

@@ -126,8 +126,8 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     status = "Success" if exit_code == 0 else "Failure"
     elapsed = int(t_end - t_start)
     minutes, seconds = divmod(elapsed, 60)
-    start_str = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    end_str = datetime.fromtimestamp(t_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    start_str = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    end_str = datetime.fromtimestamp(t_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
     job_config_text = format_job_config(job)
 
