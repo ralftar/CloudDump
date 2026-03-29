@@ -206,10 +206,10 @@ def main():
                 run_elapsed = int((run_end - run_start).total_seconds())
                 run_min, run_sec = divmod(run_elapsed, 60)
                 if failed:
-                    log.warning("Run complete: %d succeeded, %d failed, %d total (%dm %ds)",
+                    log.warning("Jobs completed: %d succeeded, %d failed, %d total (%dm %ds)",
                                 succeeded, failed, len(jobs), run_min, run_sec)
                 else:
-                    log.info("Run complete: %d/%d succeeded (%dm %ds)",
+                    log.info("Jobs completed: %d/%d succeeded (%dm %ds)",
                              succeeded, len(jobs), run_min, run_sec)
                 update_last_run(
                     started=run_start,
