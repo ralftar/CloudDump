@@ -15,7 +15,7 @@ from clouddump import cfg, fmt_bytes, net_bytes, redact, log, _safe_remove
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
-from clouddump.health import start_health_server, update_last_run
+from clouddump.health import start_health_server, update_last_run, update_job_metric
 from clouddump.jobs import execute_job
 
 
@@ -176,6 +176,11 @@ def main():
                         rx = net_after[0] - net_before[0]
                         tx = net_after[1] - net_before[1]
                         net_info = f", rx {fmt_bytes(rx)}, tx {fmt_bytes(tx)}"
+
+                    rx_bytes = (net_after[0] - net_before[0]) if net_before and net_after else None
+                    tx_bytes = (net_after[1] - net_before[1]) if net_before and net_after else None
+                    status = "success" if result == 0 else "failure"
+                    update_job_metric(job_id, job_type, status, elapsed, rx=rx_bytes, tx=tx_bytes)
 
                     if result == 0:
                         log.info("Completed successfully (%dm %ds%s)", minutes, seconds, net_info)

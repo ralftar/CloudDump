@@ -14,7 +14,7 @@ from clouddump import redact, fmt_bytes, validate_backup_path, _LevelFormatter, 
 from clouddump.email import format_job_config
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
-from clouddump.health import _state, update_last_run, _Handler
+from clouddump.health import _state, update_last_run, update_job_metric, _Handler
 
 
 # ── log format ──────────────────────────────────────────────────────────────
@@ -593,6 +593,31 @@ def test_update_last_run_populates_state():
     assert "2026-03-28" in lr["started"]
     assert "2026-03-28" in lr["finished"]
     assert lr["finished_epoch"] == int(finished.timestamp())
+
+
+def test_update_job_metric():
+    old = _state["jobs"].copy()
+    try:
+        update_job_metric("test-pg", "pgsql", "success", 134, rx=1024000, tx=512)
+        m = _state["jobs"]["test-pg"]
+        assert m["type"] == "pgsql"
+        assert m["status"] == "success"
+        assert m["elapsed_seconds"] == 134
+        assert m["rx_bytes"] == 1024000
+        assert m["tx_bytes"] == 512
+    finally:
+        _state["jobs"] = old
+
+
+def test_update_job_metric_without_net():
+    old = _state["jobs"].copy()
+    try:
+        update_job_metric("test-s3", "s3bucket", "failure", 60)
+        m = _state["jobs"]["test-s3"]
+        assert m["status"] == "failure"
+        assert "rx_bytes" not in m
+    finally:
+        _state["jobs"] = old
 
 
 def test_update_last_run_initially_null():

@@ -21,16 +21,26 @@ jobs:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: pip install pytest ruff croniter
+        run: pip install pytest pytest-cov ruff croniter
 
       - name: Lint with ruff
         run: ruff check clouddump tests
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         id: unit
         run: |
           set -o pipefail
-          python -m pytest tests/test_unit.py tests/test_runners.py -v --tb=short --junitxml=unit-results.xml 2>&1 | tee unit-output.txt
+          python -m pytest tests/test_unit.py tests/test_runners.py -v --tb=short --junitxml=unit-results.xml --cov=clouddump --cov-report=term-missing --cov-report=json:coverage.json 2>&1 | tee unit-output.txt
+
+      - name: Extract coverage percentage
+        id: coverage
+        if: always()
+        run: |
+          if [ -f coverage.json ]; then
+            PCT=$(python3 -c "import json; print(round(json.load(open('coverage.json'))['totals']['percent_covered']))")
+            echo "percent=$PCT" >> "$GITHUB_OUTPUT"
+            echo "Coverage: ${PCT}%"
+          fi
 
       - name: Unit test summary
         if: always()
@@ -48,6 +58,7 @@ jobs:
           path: |
             unit-results.xml
             unit-output.txt
+            coverage.json
 
   docker-build:
     name: Docker build
@@ -194,6 +205,15 @@ jobs:
           UNIT_SUMMARY=""
           if [ -f unit-output.txt ]; then
             UNIT_SUMMARY=$(grep -oE '[0-9]+ passed[^=]*' unit-output.txt | tail -1 | sed 's/ *$//')
+          fi
+
+          # Extract coverage percentage
+          COVERAGE=""
+          if [ -f coverage.json ]; then
+            COVERAGE=$(python3 -c "import json; print(str(round(json.load(open('coverage.json'))['totals']['percent_covered'])) + '%')" 2>/dev/null || true)
+          fi
+          if [ -n "$COVERAGE" ] && [ -n "$UNIT_SUMMARY" ]; then
+            UNIT_SUMMARY="${UNIT_SUMMARY}, coverage ${COVERAGE}"
           fi
 
           # Extract "12 passed, 0 failed" from integration output
