@@ -11,11 +11,34 @@ from email.mime.text import MIMEText
 from clouddump import cfg, log, redact
 
 
+def _resolve_smtp_security(config):
+    """Determine SMTP security mode from config.
+
+    Supports the new ``smtp_security`` field (``"ssl"``, ``"starttls"``,
+    ``"none"``) and falls back to the legacy ``smtp_ssl`` boolean for
+    backwards compatibility.  Default is ``"ssl"``.
+    """
+    explicit = cfg(config, "smtp_security")
+    if explicit:
+        return explicit
+
+    # Legacy: smtp_ssl boolean
+    smtp_ssl = cfg(config, "smtp_ssl")
+    if smtp_ssl is False:
+        return "starttls"
+    return "ssl"
+
+
 def send_email(config, subject, body, attachments=None):
     """Send an email via SMTP with optional file attachments.
 
-    Uses SMTP_SSL by default.  Set ``smtp_ssl`` to ``false`` in config to use
-    plain SMTP (useful for relay servers that don't support SSL).
+    Encryption modes (``smtp_security``):
+
+    - ``"ssl"`` (default) — SMTP_SSL, typically port 465.
+    - ``"starttls"`` — STARTTLS upgrade, typically port 587.
+    - ``"none"`` — plain SMTP, no encryption (local relays only).
+
+    Legacy ``smtp_ssl: true/false`` is supported for backwards compatibility.
 
     Silently skips if smtp_server, smtp_port, or mail_to are not configured.
     Logs but does not raise on send failure.
@@ -24,7 +47,7 @@ def send_email(config, subject, body, attachments=None):
     smtp_port = cfg(config, "smtp_port")
     smtp_user = cfg(config, "smtp_user")
     smtp_pass = cfg(config, "smtp_pass")
-    smtp_ssl = cfg(config, "smtp_ssl", True)
+    security = _resolve_smtp_security(config)
     mail_from = cfg(config, "mail_from")
     mail_to = cfg(config, "mail_to")
 
@@ -63,11 +86,11 @@ def send_email(config, subject, body, attachments=None):
 
     log.info("Sending email to %s from %s.", ", ".join(recipients), mail_from)
     try:
-        if smtp_ssl:
+        if security == "ssl":
             srv = smtplib.SMTP_SSL(smtp_server, smtp_port)
         else:
             srv = smtplib.SMTP(smtp_server, smtp_port)
-            if srv.has_extn("starttls"):
+            if security == "starttls":
                 srv.starttls()
         with srv:
             if smtp_user and smtp_pass:

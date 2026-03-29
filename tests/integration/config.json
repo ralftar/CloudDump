@@ -4,7 +4,7 @@
   "smtp_port": "1025",
   "smtp_user": "",
   "smtp_pass": "",
-  "smtp_ssl": false,
+  "smtp_security": "none",
   "mail_from": "test@clouddump.local",
   "mail_to": "verify@clouddump.local",
   "debug": true,
