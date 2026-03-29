@@ -54,6 +54,10 @@ def send_email(config, subject, body, attachments=None):
     if not smtp_server or not smtp_port or not mail_to:
         return None  # Not configured
 
+    if not mail_from:
+        log.error("smtp_server/mail_to configured but mail_from is missing.")
+        return False
+
     try:
         smtp_port = int(smtp_port)
     except (ValueError, TypeError):
