@@ -10,7 +10,7 @@ import traceback
 from datetime import datetime, timezone
 
 import clouddump
-from clouddump import cfg, redact, log, _safe_remove
+from clouddump import cfg, fmt_bytes, net_bytes, redact, log, _safe_remove
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
@@ -160,6 +160,8 @@ def main():
 
                     file_handler = _add_file_handler(logfile_path)
 
+                    net_before = net_bytes()
+
                     try:
                         result = execute_job(job, logfile_path)
                         t_end = time.time()
@@ -176,11 +178,18 @@ def main():
                     elapsed = int(t_end - t_start)
                     minutes, seconds = divmod(elapsed, 60)
 
+                    net_after = net_bytes()
+                    net_info = ""
+                    if net_before and net_after:
+                        rx = net_after[0] - net_before[0]
+                        tx = net_after[1] - net_before[1]
+                        net_info = f", rx {fmt_bytes(rx)}, tx {fmt_bytes(tx)}"
+
                     if result == 0:
-                        log.info("Completed successfully (%dm %ds)", minutes, seconds)
+                        log.info("Completed successfully (%dm %ds%s)", minutes, seconds, net_info)
                     else:
-                        log.warning("Completed with errors (exit code: %d, %dm %ds)",
-                                    result, minutes, seconds)
+                        log.warning("Completed with errors (exit code: %d, %dm %ds%s)",
+                                    result, minutes, seconds, net_info)
 
                     send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
                                     attempt=attempt, max_attempts=max_attempts)

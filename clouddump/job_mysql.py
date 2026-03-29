@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 
 import clouddump
-from clouddump import cfg, log, run_cmd, _safe_remove
+from clouddump import cfg, fmt_bytes, log, run_cmd, _safe_remove
 
 # Databases that should never be dumped.
 _SYSTEM_DATABASES = {"information_schema", "mysql", "performance_schema", "sys"}
@@ -89,6 +89,7 @@ def run_mysql_dump(server, logfile_path):
 
     env = {**os.environ, "MYSQL_PWD": password}
     overall_result = 0
+    total_bytes = 0
 
     for database in databases_to_backup:
         log.debug("Processing database: %s", database)
@@ -131,6 +132,7 @@ def run_mysql_dump(server, logfile_path):
             continue
 
         size = os.path.getsize(temp_file)
+        total_bytes += size
         log.info("mysqldump of %s completed. Size: %d bytes.", database, size)
 
         if filenamedate:
@@ -163,6 +165,8 @@ def run_mysql_dump(server, logfile_path):
 
         log.debug("Backup completed successfully: %s", final_file)
 
+    if total_bytes > 0:
+        log.info("Total dump size: %s", fmt_bytes(total_bytes))
     if overall_result == 0:
         log.info("All %d database(s) backed up successfully.", len(databases_to_backup))
     else:

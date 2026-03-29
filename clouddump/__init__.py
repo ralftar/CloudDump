@@ -78,6 +78,31 @@ def cfg(d, key, default=""):
     return default if v is None else v
 
 
+def fmt_bytes(n):
+    """Format a byte count as a human-readable string."""
+    if n >= 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024 * 1024):.1f} GB"
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / 1024:.1f} KB"
+
+
+def net_bytes():
+    """Read total rx/tx bytes from /proc/net/dev. Returns (rx, tx) or None."""
+    try:
+        with open("/proc/net/dev") as f:
+            rx, tx = 0, 0
+            for line in f:
+                if ":" not in line or "face" in line:
+                    continue
+                parts = line.split(":")[1].split()
+                rx += int(parts[0])
+                tx += int(parts[8])
+            return rx, tx
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def redact(text):
     """Remove sensitive values from text for safe logging.
 

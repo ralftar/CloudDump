@@ -141,10 +141,9 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     log.info("Job report: %s", summary)
 
     body = (
-        f"CloudDump {host}\n\n"
-        f"JOB REPORT ({status})\n\n"
-        f"Type: {job_type}\n"
-        f"ID: {job_id}\n"
+        f"CLOUDDUMP JOB REPORT\n\n"
+        f"Result: {status}\n"
+        f"Job: {job_id} ({job_type})\n"
         f"{attempt_info}"
         f"Started: {start_str}\n"
         f"Completed: {end_str}\n"
@@ -153,7 +152,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"{job_config_text}\n\n"
         f"{'See attached log for details.' if email_log_attached else 'Log available when email_log_attached is set to true.'}\n\n"
         f"----\n"
-        f"CloudDump v{version}\n"
+        f"CloudDump v{version} | {host}\n"
         f"https://github.com/ralftar/CloudDump\n"
     )
 
