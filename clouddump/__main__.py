@@ -81,18 +81,10 @@ def main():
         sys.exit(1)
     log.info("All %d job(s) passed configuration validation.", len(jobs))
 
-    smtp_server = cfg(config, "smtp_server")
-    smtp_port = cfg(config, "smtp_port")
-    mail_from = cfg(config, "mail_from")
-    mail_to = cfg(config, "mail_to")
-
     startup_config = (
+        f"Schedule: {crontab}\n"
         f"Debug: {debug}\n"
         f"Email logs: {cfg(config, 'email_log_attached', False)}\n"
-        f"SMTP server: {smtp_server}\n"
-        f"SMTP port: {smtp_port}\n"
-        f"Mail from: {mail_from}\n"
-        f"Mail to: {mail_to}\n\n"
         f"Total jobs configured: {len(jobs)}"
     )
     startup_config = redact(startup_config)

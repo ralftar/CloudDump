@@ -25,7 +25,8 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `smtp_port` | No | SMTP port (465 for SSL, 25/587 for plain) |
 | `smtp_user` | No | SMTP username |
 | `smtp_pass` | No | SMTP password |
-| `smtp_ssl` | No | Use SMTP_SSL (`true`/`false`, default `true`) |
+| `smtp_security` | No | Encryption mode: `"ssl"` (default, port 465), `"starttls"` (port 587), `"none"` (plain) |
+| `smtp_ssl` | No | Legacy alias — `true` maps to `"ssl"`, `false` maps to `"starttls"` |
 | `mail_from` | No | Sender address |
 | `mail_to` | No | Recipient address(es) — comma-separated or JSON array |
 | `email_log_attached` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |

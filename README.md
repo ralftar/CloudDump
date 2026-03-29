@@ -4,7 +4,7 @@
 [![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Keep a copy of your cloud data somewhere else.**
+**A tool for dumping your cloud data — so you always have access.**
 
 The cloud is just someone else's computer. CloudDump pulls your persistent
 data — S3 buckets, Azure Blob Storage, PostgreSQL databases, MySQL
@@ -48,11 +48,12 @@ Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
   `0 9-17 * * 1-5`, `0,30 * * * *`)
 - **Retry & timeout** — configurable per job (default: 3 attempts, 1-week timeout)
 - **Email reports** — success/failure notifications with log file attached
-- **No special privileges** — runs as non-root, no FUSE, no kernel mounts.
-  Use Docker bind mounts or Kubernetes PVCs for remote storage (SMB, NFS, etc.)
-- **Credential redaction** — passwords, keys, and tokens are scrubbed from logs
-  and emails automatically
+  (SSL, STARTTLS, or plain SMTP)
+- **No special privileges** — runs as non-root, writes to `/backup` and `/mnt`
+- **Credential redaction** — passwords, keys, tokens, PEM keys, and connection strings
+  are scrubbed from all log output, logfiles, and emails automatically
 - **Health endpoint** — `GET /healthz` returns last-run status as JSON (port configurable)
+- **Run now** — send `SIGUSR1` to trigger all jobs immediately
 - **Graceful shutdown** — SIGTERM forwarded to child processes
 
 ## Disaster recovery
@@ -125,6 +126,23 @@ Dockerfile (`postgresql-client-15`). Unlike the other apt packages, it
 does not auto-update with Debian base image bumps. When your PostgreSQL
 servers move to a new major version, update the Dockerfile manually.
 
+## Installation
+
+CloudDump is distributed as a Docker image from GitHub Container Registry:
+
+```
+ghcr.io/ralftar/clouddump:latest
+```
+
+Pin to a specific version for production use:
+
+```
+ghcr.io/ralftar/clouddump:v0.9.0
+```
+
+No other installation is needed. The image includes all bundled tools
+(AWS CLI, AzCopy, pg_dump, mysqldump, github-backup, rsync).
+
 ## Quick start
 
 **1. Create a config file** (see [Configuration reference](CONFIGURATION.md) for all options)
@@ -162,6 +180,7 @@ servers move to a new major version, update the Dockerfile manually.
 ```sh
 docker run -d --restart always \
   --name clouddump \
+  -p 8080:8080 \
   --mount type=bind,source=$(pwd)/config.json,target=/config/config.json,readonly \
   --volume /backup:/mnt/clouddump \
   ghcr.io/ralftar/clouddump:latest
@@ -186,9 +205,10 @@ to stdout.
 `*/N`, exact values, ranges `1-5`, lists `1,3,5`). Check container logs for
 scheduling messages.
 
-**Email not working** — CloudDump uses SMTPS (SSL, port 465) by default. Set
-`smtp_ssl` to `false` for plain SMTP relays. Verify the container can reach your
-SMTP server. Check logs for `Failed to send email` messages.
+**Email not working** — CloudDump uses SMTP over SSL (port 465) by default.
+Set `"smtp_security": "starttls"` for port 587, or `"smtp_security": "none"` for
+plain SMTP relays. Verify the container can reach your SMTP server. Check logs
+for `Failed to send email` messages.
 
 **Run jobs now** — Send `SIGUSR1` to run all jobs immediately without waiting
 for the cron schedule:

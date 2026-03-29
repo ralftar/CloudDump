@@ -126,8 +126,8 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     status = "Success" if exit_code == 0 else "Failure"
     elapsed = int(t_end - t_start)
     minutes, seconds = divmod(elapsed, 60)
-    start_str = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    end_str = datetime.fromtimestamp(t_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    start_str = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    end_str = datetime.fromtimestamp(t_end, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
     job_config_text = format_job_config(job)
 
@@ -163,8 +163,5 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
         attachments.append((logfile_path, log_attachment_name))
 
-    if attempt is not None and max_attempts is not None:
-        subject = f"[{status} - Attempt {attempt}/{max_attempts}] CloudDump {host}: {job_id}"
-    else:
-        subject = f"[{status}] CloudDump {host}: {job_id}"
+    subject = f"[{status}] CloudDump {host}: {job_id}"
     send_email(config, subject, body, attachments)
