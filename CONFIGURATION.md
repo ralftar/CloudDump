@@ -19,7 +19,7 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `host` | No | Hostname shown in email subjects |
+| `host` | **Yes** | Instance name shown in emails and logs (e.g. `"prod-backup"`, `"dr-site"`) |
 | `debug` | No | Stream tool output and debug messages to console (`true`/`false`, default `false`) |
 | `smtp_server` | No | SMTP server |
 | `smtp_port` | No | SMTP port (465 for SSL, 25/587 for plain) |
