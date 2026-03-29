@@ -7,7 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from clouddump import log
 
 # Module-level state, updated by __main__ after each run completes.
-_state = {"last_run": None}
+_state = {"last_run": None, "jobs": {}}
 
 
 def update_last_run(started, finished, succeeded, failed, total):
@@ -22,10 +22,28 @@ def update_last_run(started, finished, succeeded, failed, total):
     }
 
 
+def update_job_metric(job_id, job_type, status, elapsed, rx=None, tx=None):
+    """Record metrics for a single job execution."""
+    entry = {
+        "type": job_type,
+        "status": status,
+        "elapsed_seconds": elapsed,
+    }
+    if rx is not None:
+        entry["rx_bytes"] = rx
+    if tx is not None:
+        entry["tx_bytes"] = tx
+    _state["jobs"][job_id] = entry
+
+
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/healthz":
-            body = json.dumps({"status": "ok", "last_run": _state["last_run"]})
+            body = json.dumps({
+                "status": "ok",
+                "last_run": _state["last_run"],
+                "jobs": _state["jobs"],
+            })
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
