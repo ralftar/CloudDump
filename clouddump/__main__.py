@@ -107,13 +107,15 @@ def main():
     verify_connectivity(jobs)
 
     startup_body = (
-        f"CloudDump {host}\n\n"
-        f"STARTED\n\n"
+        f"CloudDump started!\n\n"
+        f"Host: {host}\n\n"
         f"CONFIGURATION\n\n"
         f"{startup_config}\n\n"
         f"JOBS\n\n"
         f"{jobs_summary}\n\n"
-        f"CloudDump v{version}"
+        f"----\n"
+        f"CloudDump v{version}\n"
+        f"https://github.com/ralftar/CloudDump"
     )
     result = send_email(config, f"[Started] CloudDump {host}", startup_body)
     if result is True:
