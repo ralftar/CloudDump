@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from unittest.mock import patch
 import urllib.error
@@ -9,7 +10,8 @@ import urllib.request
 
 import pytest
 
-from clouddump import redact, _LevelFormatter, _LOG_FORMAT, _LOG_DATEFMT
+from clouddump import redact, fmt_bytes, validate_backup_path, _LevelFormatter, _LOG_FORMAT, _LOG_DATEFMT
+from clouddump.email import format_job_config
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 from clouddump.health import _state, update_last_run, _Handler
@@ -527,6 +529,54 @@ def test_verify_connectivity_skips_invalid_account_type(mock_gh):
         {"name": "x", "token": "ghp_x", "account_type": "team"}])
     verify_connectivity([job])
     mock_gh.assert_not_called()
+
+
+# ── fmt_bytes ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("n, expected", [
+    (500, "0.5 KB"),
+    (1024, "1.0 KB"),
+    (1024 * 1024, "1.0 MB"),
+    (1024 * 1024 * 512, "512.0 MB"),
+    (1024 * 1024 * 1024, "1.0 GB"),
+    (1024 * 1024 * 1024 * 2.5, "2.5 GB"),
+])
+def test_fmt_bytes(n, expected):
+    assert fmt_bytes(n) == expected
+
+
+# ── validate_backup_path ────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix paths only")
+@pytest.mark.parametrize("path", ["/backup/s3", "/mnt/clouddump", "/tmp/test"])
+def test_validate_backup_path_allowed(path):
+    assert validate_backup_path(path) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix paths only")
+@pytest.mark.parametrize("path", ["/etc/passwd", "/root", "/home/user", "/var/data"])
+def test_validate_backup_path_rejected(path):
+    assert validate_backup_path(path) is not None
+
+
+# ── format_job_config ───────────────────────────────────────────────────────
+
+
+def test_format_job_config_redacts_secrets():
+    job = {"id": "test", "type": "pgsql", "servers": [{"host": "db", "pass": "secret123"}]}
+    result = format_job_config(job)
+    assert "secret123" not in result
+    assert "REDACTED" in result
+    assert "db" in result  # non-secret values preserved
+
+
+def test_format_job_config_valid_json():
+    job = {"id": "test", "type": "s3bucket"}
+    result = format_job_config(job)
+    parsed = json.loads(result)
+    assert parsed["id"] == "test"
 
 
 # ── health endpoint ─────────────────────────────────────────────────────────
