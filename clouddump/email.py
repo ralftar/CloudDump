@@ -67,6 +67,8 @@ def send_email(config, subject, body, attachments=None):
             srv = smtplib.SMTP_SSL(smtp_server, smtp_port)
         else:
             srv = smtplib.SMTP(smtp_server, smtp_port)
+            if srv.has_extn("starttls"):
+                srv.starttls()
         with srv:
             if smtp_user and smtp_pass:
                 srv.login(smtp_user, smtp_pass)
