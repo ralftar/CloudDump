@@ -74,6 +74,23 @@ def test_log_format_restores_levelname(_log_capture):
     assert record.levelname == "WARNING"
 
 
+@pytest.mark.parametrize("secret,label", [
+    ("password=SuperSecret123", "SuperSecret123"),
+    ("token=ghp_abc123secret", "ghp_abc123secret"),
+    ("AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+    ("AccountKey=abc123;EndpointSuffix=core.windows.net", "abc123"),
+    ("postgres://admin:s3cret@db:5432/mydb", "s3cret"),
+])
+def test_log_format_redacts_secrets(_log_capture, secret, label):
+    """Formatter must redact secrets from ALL log output."""
+    logger, handler = _log_capture
+    record = logger.makeRecord(
+        logger.name, logging.ERROR, "test", 0, f"Connection failed: {secret}", (), None)
+    output = handler.format(record)
+    assert label not in output
+    assert "REDACTED" in output
+
+
 def test_log_format_includes_job_context(_log_capture):
     """When current_job is set, log lines get a [job_id] prefix."""
     import clouddump

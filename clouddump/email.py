@@ -163,8 +163,5 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
         attachments.append((logfile_path, log_attachment_name))
 
-    if attempt is not None and max_attempts is not None:
-        subject = f"[{status} - Attempt {attempt}/{max_attempts}] CloudDump {host}: {job_id}"
-    else:
-        subject = f"[{status}] CloudDump {host}: {job_id}"
+    subject = f"[{status}] CloudDump {host}: {job_id}"
     send_email(config, subject, body, attachments)

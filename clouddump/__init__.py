@@ -46,7 +46,8 @@ class _LevelFormatter(logging.Formatter):
         if current_job:
             record.msg = f"[{current_job}] {record.msg}"
         try:
-            return super().format(record)
+            result = super().format(record)
+            return redact(result)
         finally:
             record.levelname = original_level
             record.msg = original_msg
@@ -148,9 +149,9 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
             with open(logfile_path, "a") as logf:
                 for raw_line in pipe:
                     line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
-                    logf.write(line + "\n")
+                    logf.write(redact(line) + "\n")
                     logf.flush()
-                    log.debug("  %s", redact(line))
+                    log.debug("  %s", line)
 
         reader = threading.Thread(target=_stream, daemon=True)
         reader.start()
