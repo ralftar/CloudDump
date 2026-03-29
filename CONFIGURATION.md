@@ -34,9 +34,8 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `health_port` | No | Port for the HTTP health endpoint (`1`–`65535`, default `8080`) |
 
 CloudDump exposes a health endpoint at `GET /healthz` on the configured
-`health_port` (default `8080`). It returns JSON with the outcome of the
-most recent backup run (job counts, start/finish timestamps). Use it as a
-Kubernetes liveness probe or a simple monitoring target.
+`health_port` (default `8080`). See **Monitoring** in [README](README.md) for
+response format and Prometheus integration.
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
 `mail_to` accepts multiple recipients as a comma-separated string

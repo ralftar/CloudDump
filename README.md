@@ -225,6 +225,56 @@ kubectl exec <pod> -- kill -USR1 1
 
 **Debug mode** — Set `"debug": true` in your config for verbose logging.
 
+## Monitoring
+
+CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "last_run": {
+    "started": "2026-03-29T03:00:00+00:00",
+    "finished": "2026-03-29T03:05:31+00:00",
+    "finished_epoch": 1743220731,
+    "jobs": 3,
+    "succeeded": 3,
+    "failed": 0
+  },
+  "jobs": {
+    "prod-pg": {
+      "type": "pgsql",
+      "status": "success",
+      "elapsed_seconds": 134,
+      "rx_bytes": 1024000,
+      "tx_bytes": 512
+    },
+    "prod-s3": {
+      "type": "s3bucket",
+      "status": "success",
+      "elapsed_seconds": 187,
+      "rx_bytes": 52428800,
+      "tx_bytes": 1024
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `last_run` | Most recent backup run summary (`null` before first run) |
+| `last_run.finished_epoch` | Unix timestamp for staleness detection |
+| `jobs` | Per-job metrics from the most recent execution |
+| `jobs.*.elapsed_seconds` | Job duration |
+| `jobs.*.rx_bytes` / `tx_bytes` | Network I/O (Linux only) |
+
+**Prometheus staleness alert:**
+
+```promql
+time() - clouddump_last_run_finished > 48 * 3600
+```
+
 ## Contributing
 
 Contributions are welcome. Please open an issue first to discuss what you'd
