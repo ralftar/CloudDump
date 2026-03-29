@@ -1,5 +1,6 @@
 """Entry point — run with ``python -m clouddump``."""
 
+import json
 import logging
 import os
 import signal
@@ -67,10 +68,6 @@ def main():
         log.error("Missing top-level 'crontab' in configuration.")
         sys.exit(1)
 
-    log.info("CONFIGURATION:")
-    log.info("Instance: %s", host)
-    log.info("Schedule: %s", crontab)
-
     # Validate jobs
     jobs = config.get("jobs", [])
     if not jobs:
@@ -84,21 +81,13 @@ def main():
         sys.exit(1)
     log.info("All %d job(s) passed configuration validation.", len(jobs))
 
-    startup_config = (
-        f"Instance: {host}\n"
-        f"Schedule: {crontab}\n"
-        f"Debug: {debug}\n"
-        f"Email logs: {cfg(config, 'email_log_attached', False)}\n"
-        f"Total jobs configured: {len(jobs)}"
-    )
-    startup_config = redact(startup_config)
+    # Build a settings-only view (exclude jobs — logged separately)
+    settings = {k: v for k, v in config.items() if k != "jobs"}
+    startup_config = redact(json.dumps(settings, indent=2, default=str))
     jobs_summary = redact(jobs_summary)
 
-    for line in startup_config.splitlines():
-        log.info("  %s", line)
-    log.info("Jobs:")
-    for line in jobs_summary.splitlines():
-        log.info("  %s", line)
+    log.info("Configuration:\n%s", startup_config)
+    log.info("Jobs:\n%s", jobs_summary)
 
     verify_connectivity(jobs)
 
