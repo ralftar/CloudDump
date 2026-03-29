@@ -152,7 +152,9 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
         f"{'See attached log for details.' if email_log_attached else 'Log available when email_log_attached is set to true.'}\n\n"
+        f"----\n"
         f"CloudDump v{version}\n"
+        f"https://github.com/ralftar/CloudDump\n"
     )
 
     attachments = []
