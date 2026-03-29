@@ -41,7 +41,7 @@ class _Handler(BaseHTTPRequestHandler):
 def start_health_server(port=8080):
     """Start the health HTTP server in a daemon thread."""
     try:
-        server = HTTPServer(("127.0.0.1", port), _Handler)
+        server = HTTPServer(("", port), _Handler)
     except OSError as exc:
         log.warning("Could not start health endpoint on port %d: %s", port, exc)
         return
