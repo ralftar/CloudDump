@@ -147,7 +147,7 @@ No other installation is needed. The image includes all bundled tools
 
 ## Quick start
 
-**1. Create a config file** (see [Configuration reference](CONFIGURATION.md) for all options)
+**1. Create a config file** (see [Configuration reference](CONFIGURATION.md) for all options, [JSON Schema](config.schema.json) for editor validation)
 
 ```json
 {

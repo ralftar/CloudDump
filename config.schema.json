@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CloudDump configuration",
+  "description": "Configuration file for CloudDump backup orchestrator.",
+  "type": "object",
+  "required": ["host", "crontab", "jobs"],
+  "properties": {
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Instance name shown in emails and logs."
+    },
+    "crontab": {
+      "type": "string",
+      "pattern": "^[0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+$",
+      "description": "Standard 5-field cron expression."
+    },
+    "debug": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable verbose tool output and debug log lines."
+    },
+    "health_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 8080,
+      "description": "Port for the /healthz HTTP endpoint."
+    },
+    "smtp_server": { "type": "string", "description": "SMTP server hostname." },
+    "smtp_port": {
+      "oneOf": [{ "type": "string" }, { "type": "integer" }],
+      "description": "SMTP port (465 for SSL, 587 for STARTTLS, 25 for plain)."
+    },
+    "smtp_user": { "type": "string", "description": "SMTP username." },
+    "smtp_pass": { "type": "string", "description": "SMTP password." },
+    "smtp_security": {
+      "type": "string",
+      "enum": ["ssl", "starttls", "none"],
+      "default": "ssl",
+      "description": "SMTP encryption mode."
+    },
+    "smtp_ssl": {
+      "type": "boolean",
+      "description": "Legacy alias: true = ssl, false = starttls."
+    },
+    "mail_from": { "type": "string", "description": "Sender email address." },
+    "mail_to": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Recipient(s) — comma-separated string or array."
+    },
+    "email_log_attached": {
+      "type": "boolean",
+      "default": false,
+      "description": "Attach log file to job report emails."
+    },
+    "jobs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/job" },
+      "description": "List of backup jobs."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "job": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "Unique job identifier." },
+        "type": {
+          "type": "string",
+          "enum": ["s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"],
+          "description": "Job type."
+        },
+        "timeout": { "type": "integer", "minimum": 1, "default": 604800, "description": "Timeout in seconds." },
+        "retries": { "type": "integer", "minimum": 1, "default": 3, "description": "Number of retry attempts." },
+        "buckets": { "type": "array", "items": { "$ref": "#/$defs/s3_bucket" } },
+        "blobstorages": { "type": "array", "items": { "$ref": "#/$defs/azure_blob" } },
+        "servers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/db_server" }
+        },
+        "organizations": { "type": "array", "items": { "$ref": "#/$defs/github_org" } },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/rsync_target" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "s3bucket" } } }, "then": { "required": ["buckets"] } },
+        { "if": { "properties": { "type": { "const": "azstorage" } } }, "then": { "required": ["blobstorages"] } },
+        { "if": { "properties": { "type": { "const": "pgsql" } } }, "then": { "required": ["servers"] } },
+        { "if": { "properties": { "type": { "const": "mysql" } } }, "then": { "required": ["servers"] } },
+        { "if": { "properties": { "type": { "const": "github" } } }, "then": { "required": ["organizations"] } },
+        { "if": { "properties": { "type": { "const": "rsync" } } }, "then": { "required": ["targets"] } }
+      ]
+    },
+    "s3_bucket": {
+      "type": "object",
+      "required": ["source", "destination"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^s3://", "description": "S3 bucket URI." },
+        "destination": { "type": "string", "description": "Local backup directory." },
+        "delete_destination": { "type": "boolean", "default": true, "description": "Mirror mode — delete files not in source." },
+        "aws_access_key_id": { "type": "string" },
+        "aws_secret_access_key": { "type": "string" },
+        "aws_region": { "type": "string", "default": "us-east-1" },
+        "endpoint_url": { "type": "string", "description": "S3-compatible endpoint (MinIO, etc.)." }
+      },
+      "additionalProperties": false
+    },
+    "azure_blob": {
+      "type": "object",
+      "required": ["source", "destination"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^https://", "description": "Azure Blob URL with SAS token." },
+        "destination": { "type": "string", "description": "Local backup directory." },
+        "delete_destination": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "db_server": {
+      "type": "object",
+      "required": ["host", "pass", "backuppath"],
+      "properties": {
+        "host": { "type": "string" },
+        "port": { "type": "integer" },
+        "user": { "type": "string" },
+        "pass": { "type": "string" },
+        "backuppath": { "type": "string" },
+        "databases": { "type": "array", "description": "Explicit database list. For pgsql, items can be objects with table filters." },
+        "databases_excluded": { "type": "array", "items": { "type": "string" } },
+        "db_retries": { "type": "integer", "minimum": 1, "default": 3 },
+        "filenamedate": { "type": "boolean", "default": false },
+        "compress": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "github_org": {
+      "type": "object",
+      "required": ["name", "destination", "token"],
+      "properties": {
+        "name": { "type": "string", "description": "Organization or user name." },
+        "destination": { "type": "string" },
+        "token": { "type": "string", "description": "GitHub personal access token." },
+        "account_type": { "type": "string", "enum": ["org", "user"], "default": "org" },
+        "repositories": { "type": "array", "items": { "type": "string" }, "description": "Filter to specific repos." },
+        "include_repos": { "type": "boolean", "default": true },
+        "include_issues": { "type": "boolean", "default": false },
+        "include_pulls": { "type": "boolean", "default": false },
+        "include_labels": { "type": "boolean", "default": false },
+        "include_milestones": { "type": "boolean", "default": false },
+        "include_releases": { "type": "boolean", "default": false },
+        "include_wikis": { "type": "boolean", "default": false },
+        "include_forks": { "type": "boolean", "default": false },
+        "include_archived": { "type": "boolean", "default": true },
+        "include_lfs": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+    "rsync_target": {
+      "type": "object",
+      "required": ["source", "destination", "ssh_key"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:/", "description": "Remote path as user@host:/path." },
+        "destination": { "type": "string" },
+        "ssh_key": { "type": "string", "description": "Path to SSH private key." },
+        "ssh_port": { "type": "integer", "default": 22 },
+        "delete_destination": { "type": "boolean", "default": true },
+        "exclude": { "type": "array", "items": { "type": "string" }, "description": "Rsync exclude patterns." },
+        "min_age_days": { "type": "integer", "minimum": 1, "description": "Only sync files older than N days." }
+      },
+      "additionalProperties": false
+    }
+  }
+}
