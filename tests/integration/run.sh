@@ -142,9 +142,9 @@ check "subdir/nested/file3.txt exists"  test -f "$BACKUP_DIR/s3/subdir/nested/fi
 
 echo ""
 echo "  PostgreSQL dump:"
-check "testuser dump exists and non-empty"  test -s "$BACKUP_DIR/pgsql/testuser.tar.bz2"
-check "testdb1 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb1.tar.bz2"
-check "testdb2 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb2.tar.bz2"
+check "testuser dump exists and non-empty"  test -s "$BACKUP_DIR/pgsql/testuser.dump.bz2"
+check "testdb1 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb1.dump.bz2"
+check "testdb2 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb2.dump.bz2"
 
 echo ""
 echo "  MySQL dump:"
