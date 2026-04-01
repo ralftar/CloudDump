@@ -10,7 +10,7 @@ import urllib.request
 
 import pytest
 
-from clouddump import redact, fmt_bytes, validate_backup_path, _JsonFormatter
+from clouddump import redact, fmt_bytes, validate_backup_path, _TextFormatter, _JsonFormatter, _LOG_FORMAT, _LOG_DATEFMT
 from clouddump.email import format_job_config
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
@@ -159,6 +159,29 @@ def test_log_format_unknown_extra_fields_excluded(_log_capture):
     record.secret_internal = "should not appear"
     obj = _parse(handler, record)
     assert "secret_internal" not in obj
+
+
+# ── text formatter ─────────────────────────────────────────────────────────
+
+
+def test_text_formatter_output():
+    """Text formatter produces human-readable output with level and job prefix."""
+    import clouddump
+    formatter = _TextFormatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logger = logging.getLogger("clouddump.test_text")
+    logger.addHandler(handler)
+    old = clouddump.current_job
+    clouddump.current_job = "my-job"
+    try:
+        record = logger.makeRecord(logger.name, logging.WARNING, "test", 0, "something broke", (), None)
+        output = handler.format(record)
+        assert "level=warn" in output
+        assert "[my-job] something broke" in output
+    finally:
+        clouddump.current_job = old
+        logger.removeHandler(handler)
 
 
 # ── debug log suppression ───────────────────────────────────────────────────
