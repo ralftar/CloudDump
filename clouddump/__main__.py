@@ -13,7 +13,7 @@ import traceback
 from datetime import datetime, timezone
 
 import clouddump
-from clouddump import cfg, net_bytes, redact, log, set_log_format, set_debug, _safe_remove, _LOG_DATEFMT
+from clouddump import cfg, net_bytes, job_backup_size, redact, log, set_log_format, set_debug, _safe_remove, _LOG_DATEFMT
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
@@ -252,10 +252,13 @@ def main():
                 else:
                     job_status = "Failure"
 
+                backup_bytes = job_backup_size(job)
+
                 send_job_report(config, version, host, job, result,
                                 job_t_start, job_t_end, logfile_paths,
                                 status=job_status, attempts_used=final_attempt,
-                                max_attempts=max_attempts)
+                                max_attempts=max_attempts,
+                                backup_bytes=backup_bytes)
 
                 for lf in logfile_paths:
                     _safe_remove(lf)

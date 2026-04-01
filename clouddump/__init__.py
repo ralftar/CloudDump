@@ -148,6 +148,36 @@ def fmt_bytes(n):
     return f"{n / 1024:.1f} KB"
 
 
+_PATH_KEYS = {
+    "s3bucket": ("buckets", "destination"),
+    "azstorage": ("blobstorages", "destination"),
+    "pgsql": ("servers", "backuppath"),
+    "mysql": ("servers", "backuppath"),
+    "github": ("organizations", "destination"),
+    "rsync": ("targets", "destination"),
+}
+
+
+def job_backup_size(job):
+    """Return total bytes stored in all backup destinations for *job*."""
+    job_type = cfg(job, "type")
+    mapping = _PATH_KEYS.get(job_type)
+    if not mapping:
+        return None
+    collection_key, field = mapping
+    total = 0
+    for target in cfg(job, collection_key, []):
+        path = cfg(target, field)
+        if path and os.path.isdir(path):
+            for dirpath, _dirnames, filenames in os.walk(path):
+                for f in filenames:
+                    try:
+                        total += os.path.getsize(os.path.join(dirpath, f))
+                    except OSError:
+                        pass
+    return total
+
+
 def net_bytes():
     """Read total rx/tx bytes from /proc/net/dev. Returns (rx, tx) or None."""
     try:
