@@ -27,6 +27,11 @@
       "default": 8080,
       "description": "Port for the /healthz HTTP endpoint."
     },
+    "health_log": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log health-check HTTP requests at DEBUG level."
+    },
     "smtp_server": { "type": "string", "description": "SMTP server hostname." },
     "smtp_port": {
       "oneOf": [{ "type": "string" }, { "type": "integer" }],

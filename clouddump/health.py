@@ -7,7 +7,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from clouddump import log
 
 # Module-level state, updated by __main__ after each run completes.
-_state = {"last_run": None, "jobs": {}}
+_state = {
+    "last_run": {"jobs": 0, "succeeded": 0, "failed": 0, "has_run": False},
+    "jobs": {},
+    "log_requests": False,
+}
 
 
 def update_last_run(started, finished, succeeded, failed, total):
@@ -19,6 +23,7 @@ def update_last_run(started, finished, succeeded, failed, total):
         "jobs": total,
         "succeeded": succeeded,
         "failed": failed,
+        "has_run": True,
     }
 
 
@@ -53,11 +58,13 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def log_message(self, fmt, *args):
-        log.debug("health: %s", fmt % args)
+        if _state["log_requests"]:
+            log.debug("health: %s", fmt % args)
 
 
-def start_health_server(port=8080):
+def start_health_server(port=8080, log_requests=False):
     """Start the health HTTP server in a daemon thread."""
+    _state["log_requests"] = log_requests
     try:
         server = HTTPServer(("", port), _Handler)
     except OSError as exc:
