@@ -13,7 +13,7 @@ import traceback
 from datetime import datetime, timezone
 
 import clouddump
-from clouddump import cfg, net_bytes, redact, log, set_log_format, _safe_remove
+from clouddump import cfg, net_bytes, redact, log, set_log_format, set_debug, _safe_remove, _LOG_DATEFMT
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
@@ -39,7 +39,7 @@ def _add_file_handler(path):
     """Add a DEBUG-level FileHandler to the logger. Returns the handler."""
     handler = logging.FileHandler(path, mode="a")
     handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt=_LOG_DATEFMT))
     log.addHandler(handler)
     return handler
 
@@ -85,8 +85,7 @@ def main():
     debug = cfg(config, "debug", False)
 
     clouddump.debug = debug
-    if debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+    set_debug(debug)
 
     set_log_format(cfg(config, "log_format", "text"))
 

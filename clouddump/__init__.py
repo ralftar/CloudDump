@@ -98,7 +98,7 @@ _text_fmt = _TextFormatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
 
 # INFO and below → stdout
 _stdout_handler = logging.StreamHandler(sys.stdout)
-_stdout_handler.setLevel(logging.DEBUG)
+_stdout_handler.setLevel(logging.INFO)
 _stdout_handler.addFilter(lambda r: r.levelno < logging.WARNING)
 _stdout_handler.setFormatter(_text_fmt)
 
@@ -117,8 +117,16 @@ def set_log_format(fmt):
     _stdout_handler.setFormatter(formatter)
     _stderr_handler.setFormatter(formatter)
 
+
+def set_debug(enabled):
+    """Enable debug-level output on the console."""
+    if enabled:
+        logging.getLogger().setLevel(logging.DEBUG)
+        _stdout_handler.setLevel(logging.DEBUG)
+
 logging.basicConfig(level=logging.INFO, handlers=[_stdout_handler, _stderr_handler])
 log = logging.getLogger("clouddump")
+log.setLevel(logging.DEBUG)
 
 
 # ---------------------------------------------------------------------------
@@ -246,12 +254,9 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
             pipe = proc.stderr
 
         def _stream():
-            with open(logfile_path, "a") as logf:
-                for raw_line in pipe:
-                    line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
-                    logf.write(redact(line) + "\n")
-                    logf.flush()
-                    log.debug("  %s", line)
+            for raw_line in pipe:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
+                log.debug("  %s", redact(line))
 
         reader = threading.Thread(target=_stream, daemon=True)
         reader.start()
