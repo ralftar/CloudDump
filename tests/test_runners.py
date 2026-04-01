@@ -227,14 +227,10 @@ class TestPgSQLRunner:
         attempts = []
 
         def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "psql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("testdb\n")
-                return 0
             attempts.append(1)
             return 1  # pg_dump always fails
 
+        monkeypatch.setattr("clouddump.job_pgsql._list_databases", lambda *a: ["testdb"])
         monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
         monkeypatch.setattr("clouddump.job_pgsql.time.sleep", lambda _: None)
 
@@ -249,14 +245,10 @@ class TestPgSQLRunner:
         attempts = []
 
         def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "psql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("testdb\n")
-                return 0
             attempts.append(1)
             return 1
 
+        monkeypatch.setattr("clouddump.job_pgsql._list_databases", lambda *a: ["testdb"])
         monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
         monkeypatch.setattr("clouddump.job_pgsql.time.sleep", lambda _: None)
 
@@ -269,15 +261,7 @@ class TestPgSQLRunner:
 
         dest = str(tmp_path / "pgout")
 
-        def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "psql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("postgres\n")
-                return 0
-            return 0
-
-        monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
+        monkeypatch.setattr("clouddump.job_pgsql._list_databases", lambda *a: ["postgres"])
 
         rc = run_pg_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
         assert rc == 0
@@ -304,17 +288,13 @@ class TestMySQLRunner:
 
     @staticmethod
     def _fake_mysql_run_cmd(recorded=None):
-        """Return a fake run_cmd that simulates mysql and mysqldump."""
+        """Return a fake run_cmd that simulates mysqldump."""
         if recorded is None:
             recorded = []
 
         def fake(cmd, **kwargs):
             recorded.append((cmd, kwargs))
-            if cmd[0] == "mysql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("testdb\n")
-            elif cmd[0] == "mysqldump":
+            if cmd[0] == "mysqldump":
                 stdout = kwargs.get("stdout")
                 if stdout:
                     stdout.write("-- MySQL dump\nCREATE TABLE...\n")
@@ -328,15 +308,15 @@ class TestMySQLRunner:
 
         dest = str(tmp_path / "mysqlout")
         fake, recorded = self._fake_mysql_run_cmd()
+        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
 
         rc = run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
 
         assert rc == 0
-        assert len(recorded) == 2
-        assert recorded[0][0][0] == "mysql"
-        assert recorded[1][0][0] == "mysqldump"
-        cmd = recorded[1][0]
+        assert len(recorded) == 1
+        assert recorded[0][0][0] == "mysqldump"
+        cmd = recorded[0][0]
         assert "-h" in cmd
         assert "mysql.example.com" in cmd
         assert "--single-transaction" in cmd
@@ -349,6 +329,7 @@ class TestMySQLRunner:
 
         dest = str(tmp_path / "mysqlout")
         fake, recorded = self._fake_mysql_run_cmd()
+        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
 
         run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
@@ -364,17 +345,15 @@ class TestMySQLRunner:
         dumped = []
 
         def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("information_schema\nperformance_schema\nsys\nuserdb\n")
-            elif cmd[0] == "mysqldump":
+            if cmd[0] == "mysqldump":
                 dumped.append(cmd[-1])
                 stdout = kwargs.get("stdout")
                 if stdout:
                     stdout.write("-- dump\n")
             return 0
 
+        monkeypatch.setattr("clouddump.job_mysql._list_databases",
+                            lambda *a: ["information_schema", "performance_schema", "sys", "userdb"])
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
 
         run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
@@ -388,17 +367,14 @@ class TestMySQLRunner:
         dumped = []
 
         def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("db1\ndb2\ndb3\n")
-            elif cmd[0] == "mysqldump":
+            if cmd[0] == "mysqldump":
                 dumped.append(cmd[-1])
                 stdout = kwargs.get("stdout")
                 if stdout:
                     stdout.write("-- dump\n")
             return 0
 
+        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["db1", "db2", "db3"])
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
 
         run_mysql_dump(self._cfg(backuppath=dest, compress=False, databases=["db1", "db3"]), _tmp_logfile)
@@ -422,15 +398,8 @@ class TestMySQLRunner:
 
         dest = str(tmp_path / "mysqlout")
 
-        def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("testdb\n")
-                return 0
-            return 1  # mysqldump fails
-
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
+        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
+        monkeypatch.setattr("clouddump.job_mysql.run_cmd", lambda cmd, **kw: 1)
         monkeypatch.setattr("clouddump.job_mysql.time.sleep", lambda _: None)
 
         rc = run_mysql_dump(self._cfg(backuppath=dest), _tmp_logfile)
@@ -443,14 +412,10 @@ class TestMySQLRunner:
         attempts = []
 
         def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("testdb\n")
-                return 0
             attempts.append(1)
             return 1  # mysqldump always fails
 
+        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
         monkeypatch.setattr("clouddump.job_mysql.time.sleep", lambda _: None)
 
@@ -463,6 +428,7 @@ class TestMySQLRunner:
 
         dest = str(tmp_path / "deep" / "nested")
         fake, _ = self._fake_mysql_run_cmd()
+        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
         monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
 
         run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
@@ -473,15 +439,8 @@ class TestMySQLRunner:
 
         dest = str(tmp_path / "mysqlout")
 
-        def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysql":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("information_schema\nmysql\nperformance_schema\nsys\n")
-                return 0
-            return 0
-
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
+        monkeypatch.setattr("clouddump.job_mysql._list_databases",
+                            lambda *a: ["information_schema", "mysql", "performance_schema", "sys"])
 
         rc = run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
         assert rc == 0

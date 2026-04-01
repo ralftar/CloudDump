@@ -91,7 +91,7 @@ def run_rsync_sync(target, logfile_path):
             return 0
 
         log.info("Found %d file(s) older than %d days.", len(files), min_age_days)
-        fd, filelist_path = tempfile.mkstemp(suffix=".txt", prefix="clouddump_rsync_")
+        fd, filelist_path = tempfile.mkstemp(suffix=".txt", prefix="clouddump_rsync_", dir=destination)
         with os.fdopen(fd, "w") as f:
             f.write("\n".join(files) + "\n")
 
