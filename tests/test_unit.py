@@ -638,6 +638,7 @@ def test_update_last_run_populates_state():
     assert "2026-03-28" in lr["started"]
     assert "2026-03-28" in lr["finished"]
     assert lr["finished_epoch"] == int(finished.timestamp())
+    assert lr["has_run"] is True
 
 
 def test_update_job_metric():
@@ -665,11 +666,12 @@ def test_update_job_metric_without_net():
         _state["jobs"] = old
 
 
-def test_update_last_run_initially_null():
+def test_update_last_run_initial_defaults():
     old = _state["last_run"]
-    _state["last_run"] = None
+    _state["last_run"] = {"jobs": 0, "succeeded": 0, "failed": 0, "has_run": False}
     try:
-        assert _state["last_run"] is None
+        assert _state["last_run"]["has_run"] is False
+        assert _state["last_run"]["jobs"] == 0
     finally:
         _state["last_run"] = old
 
@@ -679,7 +681,7 @@ def test_healthz_returns_200():
     import http.server
     import threading
 
-    _state["last_run"] = None
+    _state["last_run"] = {"jobs": 0, "succeeded": 0, "failed": 0, "has_run": False}
     server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
     port = server.server_address[1]
     t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -690,7 +692,8 @@ def test_healthz_returns_200():
             assert resp.status == 200
             body = json.loads(resp.read())
             assert body["status"] == "ok"
-            assert body["last_run"] is None
+            assert body["last_run"]["has_run"] is False
+            assert body["last_run"]["jobs"] == 0
     finally:
         server.shutdown()
 

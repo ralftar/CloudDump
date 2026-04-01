@@ -140,7 +140,10 @@ def main():
         log.info("Email not configured, skipping.")
     # result is False: send_email already logged the error
 
-    start_health_server(int(cfg(config, "health_port", 8080)))
+    start_health_server(
+        int(cfg(config, "health_port", 8080)),
+        log_requests=bool(cfg(config, "health_log", False)),
+    )
 
     # Main loop
     log.info("Starting main loop...")
