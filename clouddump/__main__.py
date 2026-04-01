@@ -13,7 +13,7 @@ import traceback
 from datetime import datetime, timezone
 
 import clouddump
-from clouddump import cfg, fmt_bytes, net_bytes, redact, log, _safe_remove
+from clouddump import cfg, net_bytes, redact, log, _safe_remove
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
@@ -168,7 +168,7 @@ def main():
 
                 job_type = cfg(job, "type")
                 clouddump.current_job = job_id
-                log.info("Starting (type: %s)", job_type)
+                log.info("Starting job", extra={"job_type": job_type})
 
                 timeout = int(cfg(job, "timeout", 604800))
                 max_attempts = int(cfg(job, "retries", 3))
@@ -189,7 +189,7 @@ def main():
                     clouddump.job_deadline = t_start + timeout
 
                     file_handler = _add_file_handler(logfile_path)
-                    log.info("--- Attempt %d/%d ---", attempt, max_attempts)
+                    log.info("Starting attempt", extra={"attempt": attempt, "max_attempts": max_attempts})
 
                     net_before = net_bytes()
 
@@ -210,30 +210,34 @@ def main():
                     minutes, seconds = divmod(elapsed, 60)
 
                     net_after = net_bytes()
-                    net_info = ""
                     if net_before and net_after:
-                        rx = net_after[0] - net_before[0]
-                        tx = net_after[1] - net_before[1]
-                        total_rx += rx
-                        total_tx += tx
-                        net_info = f", rx {fmt_bytes(rx)}, tx {fmt_bytes(tx)}"
+                        total_rx += net_after[0] - net_before[0]
+                        total_tx += net_after[1] - net_before[1]
 
                     rx_bytes = (net_after[0] - net_before[0]) if net_before and net_after else None
                     tx_bytes = (net_after[1] - net_before[1]) if net_before and net_after else None
                     metric_status = "success" if result == 0 else "failure"
                     update_job_metric(job_id, job_type, metric_status, elapsed, rx=rx_bytes, tx=tx_bytes)
 
+                    extras = {"status": metric_status, "elapsed_s": elapsed,
+                              "attempt": attempt, "max_attempts": max_attempts}
+                    if rx_bytes is not None:
+                        extras["rx_bytes"] = rx_bytes
+                    if tx_bytes is not None:
+                        extras["tx_bytes"] = tx_bytes
+
                     if result == 0:
-                        log.info("Completed successfully (%dm %ds%s)", minutes, seconds, net_info)
+                        log.info("Attempt completed successfully", extra=extras)
                         break
                     else:
-                        log.warning("Completed with errors (exit code: %d, %dm %ds%s)",
-                                    result, minutes, seconds, net_info)
+                        extras["exit_code"] = result
+                        log.warning("Attempt completed with errors", extra=extras)
                         if attempt < max_attempts:
                             log.warning("Retrying in 60s...")
                             time.sleep(60)
                         else:
-                            log.error("Failed after %d attempts", max_attempts)
+                            log.error("Failed after all attempts",
+                                      extra={"max_attempts": max_attempts})
 
                 # Determine three-tier status and send one email
                 job_t_end = time.time()
@@ -263,12 +267,12 @@ def main():
                 run_end = datetime.now(timezone.utc)
                 run_elapsed = int((run_end - run_start).total_seconds())
                 run_min, run_sec = divmod(run_elapsed, 60)
+                run_extras = {"succeeded": succeeded, "failed": failed,
+                              "total": len(jobs), "elapsed_s": run_elapsed}
                 if failed:
-                    log.warning("Jobs completed: %d succeeded, %d failed, %d total (%dm %ds)",
-                                succeeded, failed, len(jobs), run_min, run_sec)
+                    log.warning("Jobs completed with failures", extra=run_extras)
                 else:
-                    log.info("Jobs completed: %d/%d succeeded (%dm %ds)",
-                             succeeded, len(jobs), run_min, run_sec)
+                    log.info("All jobs completed", extra=run_extras)
                 update_last_run(
                     started=run_start,
                     finished=run_end,

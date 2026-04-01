@@ -10,7 +10,7 @@ import urllib.request
 
 import pytest
 
-from clouddump import redact, fmt_bytes, validate_backup_path, _LevelFormatter, _LOG_FORMAT, _LOG_DATEFMT
+from clouddump import redact, fmt_bytes, validate_backup_path, _JsonFormatter
 from clouddump.email import format_job_config
 from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
@@ -22,8 +22,8 @@ from clouddump.health import _state, update_last_run, update_job_metric, _Handle
 
 @pytest.fixture()
 def _log_capture():
-    """Yield a (logger, handler) that captures formatted output."""
-    formatter = _LevelFormatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
+    """Yield a (logger, handler) that captures formatted JSON output."""
+    formatter = _JsonFormatter()
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
     logger = logging.getLogger("clouddump.test_format")
@@ -33,45 +33,46 @@ def _log_capture():
     logger.removeHandler(handler)
 
 
+def _parse(handler, record):
+    """Format a record and parse the JSON output."""
+    return json.loads(handler.format(record))
+
+
 def test_log_format_info(_log_capture):
     logger, handler = _log_capture
-    record = logger.makeRecord(
-        logger.name, logging.INFO, "test", 0, "hello", (), None)
-    output = handler.format(record)
-    assert "level=info" in output
-    assert "hello" in output
+    record = logger.makeRecord(logger.name, logging.INFO, "test", 0, "hello", (), None)
+    obj = _parse(handler, record)
+    assert obj["level"] == "info"
+    assert obj["message"] == "hello"
+    assert "timestamp" in obj
 
 
 def test_log_format_warning(_log_capture):
     logger, handler = _log_capture
-    record = logger.makeRecord(
-        logger.name, logging.WARNING, "test", 0, "caution", (), None)
-    output = handler.format(record)
-    assert "level=warn" in output
-    assert "caution" in output
+    record = logger.makeRecord(logger.name, logging.WARNING, "test", 0, "caution", (), None)
+    obj = _parse(handler, record)
+    assert obj["level"] == "warn"
+    assert obj["message"] == "caution"
 
 
 def test_log_format_error(_log_capture):
     logger, handler = _log_capture
-    record = logger.makeRecord(
-        logger.name, logging.ERROR, "test", 0, "boom", (), None)
-    output = handler.format(record)
-    assert "level=error" in output
-    assert "boom" in output
+    record = logger.makeRecord(logger.name, logging.ERROR, "test", 0, "boom", (), None)
+    obj = _parse(handler, record)
+    assert obj["level"] == "error"
+    assert obj["message"] == "boom"
 
 
 def test_log_format_critical(_log_capture):
     logger, handler = _log_capture
-    record = logger.makeRecord(
-        logger.name, logging.CRITICAL, "test", 0, "critical issue", (), None)
-    output = handler.format(record)
-    assert "level=crit" in output
+    record = logger.makeRecord(logger.name, logging.CRITICAL, "test", 0, "critical issue", (), None)
+    obj = _parse(handler, record)
+    assert obj["level"] == "crit"
 
 
 def test_log_format_restores_levelname(_log_capture):
     logger, handler = _log_capture
-    record = logger.makeRecord(
-        logger.name, logging.WARNING, "test", 0, "test msg", (), None)
+    record = logger.makeRecord(logger.name, logging.WARNING, "test", 0, "test msg", (), None)
     handler.format(record)
     assert record.levelname == "WARNING"
 
@@ -91,10 +92,11 @@ def test_log_format_redacts_secrets(_log_capture, secret, label):
     output = handler.format(record)
     assert label not in output
     assert "REDACTED" in output
+    json.loads(output)  # must be valid JSON
 
 
 def test_log_format_includes_job_context(_log_capture):
-    """When current_job is set, log lines get a [job_id] prefix."""
+    """When current_job is set, a 'job' field appears in JSON."""
     import clouddump
     logger, handler = _log_capture
     old = clouddump.current_job
@@ -102,14 +104,15 @@ def test_log_format_includes_job_context(_log_capture):
     try:
         record = logger.makeRecord(
             logger.name, logging.WARNING, "test", 0, "No databases to backup.", (), None)
-        output = handler.format(record)
-        assert "[sleipner-pg] No databases to backup." in output
+        obj = _parse(handler, record)
+        assert obj["job"] == "sleipner-pg"
+        assert obj["message"] == "No databases to backup."
     finally:
         clouddump.current_job = old
 
 
 def test_log_format_no_prefix_without_job(_log_capture):
-    """When current_job is empty, no prefix is added."""
+    """When current_job is empty, no 'job' field appears."""
     import clouddump
     logger, handler = _log_capture
     old = clouddump.current_job
@@ -117,9 +120,9 @@ def test_log_format_no_prefix_without_job(_log_capture):
     try:
         record = logger.makeRecord(
             logger.name, logging.INFO, "test", 0, "Starting main loop...", (), None)
-        output = handler.format(record)
-        assert "[" not in output.split("]", 1)[1]  # no bracket after timestamp
-        assert "Starting main loop..." in output
+        obj = _parse(handler, record)
+        assert "job" not in obj
+        assert obj["message"] == "Starting main loop..."
     finally:
         clouddump.current_job = old
 
@@ -131,12 +134,31 @@ def test_log_format_restores_msg_after_job_context(_log_capture):
     old = clouddump.current_job
     clouddump.current_job = "test-job"
     try:
-        record = logger.makeRecord(
-            logger.name, logging.INFO, "test", 0, "original msg", (), None)
+        record = logger.makeRecord(logger.name, logging.INFO, "test", 0, "original msg", (), None)
         handler.format(record)
         assert record.msg == "original msg"
     finally:
         clouddump.current_job = old
+
+
+def test_log_format_extra_fields(_log_capture):
+    """Extra fields from log calls appear in JSON output."""
+    logger, handler = _log_capture
+    record = logger.makeRecord(logger.name, logging.INFO, "test", 0, "dump done", (), None)
+    record.database = "mydb"
+    record.bytes = 1024
+    obj = _parse(handler, record)
+    assert obj["database"] == "mydb"
+    assert obj["bytes"] == 1024
+
+
+def test_log_format_unknown_extra_fields_excluded(_log_capture):
+    """Fields not in _EXTRA_FIELDS are not included in JSON."""
+    logger, handler = _log_capture
+    record = logger.makeRecord(logger.name, logging.INFO, "test", 0, "msg", (), None)
+    record.secret_internal = "should not appear"
+    obj = _parse(handler, record)
+    assert "secret_internal" not in obj
 
 
 # ── debug log suppression ───────────────────────────────────────────────────
