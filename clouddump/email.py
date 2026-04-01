@@ -8,7 +8,7 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from clouddump import cfg, log, redact
+from clouddump import cfg, fmt_bytes, log, redact
 
 
 def _resolve_smtp_security(config):
@@ -112,7 +112,8 @@ def format_job_config(job):
 
 
 def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfile_paths,
-                    status=None, attempts_used=None, max_attempts=None):
+                    status=None, attempts_used=None, max_attempts=None,
+                    backup_bytes=None):
     """Send job completion email, optionally with log attachments.
 
     *logfile_paths* is a list of log files (one per attempt).  All are
@@ -149,7 +150,9 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"{attempt_info}"
         f"Started: {start_str}\n"
         f"Completed: {end_str}\n"
-        f"Time elapsed: {minutes} minutes {seconds} seconds\n\n"
+        f"Time elapsed: {minutes} minutes {seconds} seconds\n"
+        f"{f'Backup size: {fmt_bytes(backup_bytes)}\n' if backup_bytes is not None else ''}"
+        f"\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
         f"{'See attached log(s) for details.' if email_log_attached else 'Logs available when email_log_attached is set to true.'}\n\n"
