@@ -111,19 +111,20 @@ def format_job_config(job):
     return redact(json.dumps(job, indent=2, default=str))
 
 
-def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfile_path,
-                    attempt=None, max_attempts=None):
-    """Send job completion email, optionally with log attachment.
+def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfile_paths,
+                    status=None, attempts_used=None, max_attempts=None):
+    """Send job completion email, optionally with log attachments.
 
-    When *attempt* and *max_attempts* are given, the subject and body include
-    attempt information (e.g. ``[Failure - Attempt 1/3]``).
+    *logfile_paths* is a list of log files (one per attempt).  All are
+    attached when ``email_log_attached`` is true in config.
 
-    Attaches the log file when ``email_log_attached`` is true in config.
+    *status* is one of ``"Success"``, ``"Warning"``, or ``"Failure"``.
     """
     email_log_attached = cfg(config, "email_log_attached", False)
     job_id = cfg(job, "id")
     job_type = cfg(job, "type")
-    status = "Success" if exit_code == 0 else "Failure"
+    if status is None:
+        status = "Success" if exit_code == 0 else "Failure"
     elapsed = int(t_end - t_start)
     minutes, seconds = divmod(elapsed, 60)
     start_str = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
@@ -132,12 +133,12 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     job_config_text = format_job_config(job)
 
     attempt_info = ""
-    if attempt is not None and max_attempts is not None:
-        attempt_info = f"Attempt: {attempt}/{max_attempts}\n"
+    if attempts_used is not None and max_attempts is not None:
+        attempt_info = f"Attempts: {attempts_used}/{max_attempts}\n"
 
     summary = f"{status} | {job_id} ({job_type}) | {minutes}m {seconds}s"
-    if attempt is not None and max_attempts is not None:
-        summary += f" | attempt {attempt}/{max_attempts}"
+    if attempts_used is not None and max_attempts is not None:
+        summary += f" | attempt {attempts_used}/{max_attempts}"
     log.info("Job report: %s", summary)
 
     body = (
@@ -151,17 +152,22 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"Time elapsed: {minutes} minutes {seconds} seconds\n\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
-        f"{'See attached log for details.' if email_log_attached else 'Log available when email_log_attached is set to true.'}\n\n"
+        f"{'See attached log(s) for details.' if email_log_attached else 'Logs available when email_log_attached is set to true.'}\n\n"
         f"----\n"
         f"CloudDump v{version} | {host}\n"
         f"https://github.com/ralftar/CloudDump\n"
     )
 
     attachments = []
-    if email_log_attached and os.path.isfile(logfile_path):
+    if email_log_attached:
+        # Support both a single path (string) and a list of paths
+        paths = logfile_paths if isinstance(logfile_paths, list) else [logfile_paths]
         timestamp = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
-        log_attachment_name = f"clouddump-{job_id}-{timestamp}.log"
-        attachments.append((logfile_path, log_attachment_name))
+        for i, path in enumerate(paths, 1):
+            if os.path.isfile(path):
+                suffix = f"-attempt{i}" if len(paths) > 1 else ""
+                name = f"clouddump-{job_id}-{timestamp}{suffix}.log"
+                attachments.append((path, name))
 
     subject = f"[{status}] CloudDump {host}: {job_id}"
     send_email(config, subject, body, attachments)
