@@ -173,14 +173,23 @@ def main():
                 timeout = int(cfg(job, "timeout", 604800))
                 max_attempts = int(cfg(job, "retries", 3))
 
+                job_t_start = time.time()
+                logfile_paths = []
+                total_rx = 0
+                total_tx = 0
+                final_attempt = 0
+
                 for attempt in range(1, max_attempts + 1):
+                    final_attempt = attempt
                     fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
                     os.close(fd)
+                    logfile_paths.append(logfile_path)
 
                     t_start = time.time()
                     clouddump.job_deadline = t_start + timeout
 
                     file_handler = _add_file_handler(logfile_path)
+                    log.info("--- Attempt %d/%d ---", attempt, max_attempts)
 
                     net_before = net_bytes()
 
@@ -205,34 +214,48 @@ def main():
                     if net_before and net_after:
                         rx = net_after[0] - net_before[0]
                         tx = net_after[1] - net_before[1]
+                        total_rx += rx
+                        total_tx += tx
                         net_info = f", rx {fmt_bytes(rx)}, tx {fmt_bytes(tx)}"
 
                     rx_bytes = (net_after[0] - net_before[0]) if net_before and net_after else None
                     tx_bytes = (net_after[1] - net_before[1]) if net_before and net_after else None
-                    status = "success" if result == 0 else "failure"
-                    update_job_metric(job_id, job_type, status, elapsed, rx=rx_bytes, tx=tx_bytes)
+                    metric_status = "success" if result == 0 else "failure"
+                    update_job_metric(job_id, job_type, metric_status, elapsed, rx=rx_bytes, tx=tx_bytes)
 
                     if result == 0:
                         log.info("Completed successfully (%dm %ds%s)", minutes, seconds, net_info)
+                        break
                     else:
                         log.warning("Completed with errors (exit code: %d, %dm %ds%s)",
                                     result, minutes, seconds, net_info)
+                        if attempt < max_attempts:
+                            log.warning("Retrying in 60s...")
+                            time.sleep(60)
+                        else:
+                            log.error("Failed after %d attempts", max_attempts)
 
-                    send_job_report(config, version, host, job, result, t_start, t_end, logfile_path,
-                                    attempt=attempt, max_attempts=max_attempts)
+                # Determine three-tier status and send one email
+                job_t_end = time.time()
+                if result == 0 and final_attempt == 1:
+                    job_status = "Success"
+                elif result == 0:
+                    job_status = "Warning"
+                else:
+                    job_status = "Failure"
 
-                    _safe_remove(logfile_path)
+                send_job_report(config, version, host, job, result,
+                                job_t_start, job_t_end, logfile_paths,
+                                status=job_status, attempts_used=final_attempt,
+                                max_attempts=max_attempts)
 
-                    if result == 0:
-                        succeeded += 1
-                        break
-                    elif attempt < max_attempts:
-                        log.warning("Failed (attempt %d/%d), retrying in 60s...",
-                                    attempt, max_attempts)
-                        time.sleep(60)
-                    else:
-                        failed += 1
-                        log.error("Failed after %d attempts", max_attempts)
+                for lf in logfile_paths:
+                    _safe_remove(lf)
+
+                if result == 0:
+                    succeeded += 1
+                else:
+                    failed += 1
 
                 clouddump.current_job = ""
 
