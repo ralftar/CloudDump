@@ -3,7 +3,9 @@
 import json
 import logging
 import os
+import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -40,6 +42,29 @@ def _add_file_handler(path):
     handler.setFormatter(logging.Formatter("%(message)s"))
     log.addHandler(handler)
     return handler
+
+
+def _tool_versions():
+    """Collect version strings for installed backup tools."""
+    tools = [
+        ("pg_dump", ["pg_dump", "--version"]),
+        ("mysqldump", ["mysqldump", "--version"]),
+        ("aws", ["aws", "--version"]),
+        ("azcopy", ["azcopy", "--version"]),
+        ("rsync", ["rsync", "--version"]),
+        ("git", ["git", "--version"]),
+    ]
+    versions = []
+    for name, cmd in tools:
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=10)
+            version_line = out.decode("utf-8", errors="replace").strip().splitlines()[0]
+            versions.append(f"  {name}: {version_line}")
+        except Exception:
+            versions.append(f"  {name}: installed (version unknown)")
+    return "\n".join(versions)
 
 
 def main():
@@ -86,7 +111,10 @@ def main():
     startup_config = redact(json.dumps(settings, indent=2, default=str))
     jobs_summary = redact(jobs_summary)
 
+    tool_versions = _tool_versions()
+
     log.info("Configuration:\n%s", startup_config)
+    log.info("Tools:\n%s", tool_versions)
     log.info("Jobs:\n%s", jobs_summary)
 
     verify_connectivity(jobs)
@@ -95,6 +123,8 @@ def main():
         f"CloudDump started!\n\n"
         f"CONFIGURATION\n\n"
         f"{startup_config}\n\n"
+        f"TOOLS\n\n"
+        f"{tool_versions}\n\n"
         f"JOBS\n\n"
         f"{jobs_summary}\n\n"
         f"----\n"
