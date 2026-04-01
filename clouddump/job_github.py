@@ -24,7 +24,7 @@ def run_github_backup(org, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Backing up %s %s → %s", account_type, name, destination)
+    log.info("Backing up GitHub account", extra={"account": name, "account_type": account_type, "destination": destination})
     log.debug("Token: %s", redact(f"token={token}"))
 
     # Write token to a temp file to keep it out of process arguments
@@ -91,7 +91,7 @@ def run_github_backup(org, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("GitHub backup of %s '%s' failed after %ds.", account_type, name, elapsed)
+        log.error("GitHub backup failed", extra={"account": name, "account_type": account_type, "elapsed_s": elapsed})
     else:
-        log.info("GitHub backup of %s '%s' completed in %ds.", account_type, name, elapsed)
+        log.info("GitHub backup completed", extra={"account": name, "account_type": account_type, "elapsed_s": elapsed})
     return rc

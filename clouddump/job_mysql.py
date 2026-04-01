@@ -64,7 +64,7 @@ def run_mysql_dump(server, logfile_path):
 
     os.makedirs(backuppath, exist_ok=True)
 
-    log.info("Dumping %s:%s → %s", host, port, backuppath)
+    log.info("Dumping MySQL server", extra={"host": host, "port": int(port), "destination": backuppath})
     log.debug("Username: %s, filenamedate: %s, compress: %s", user, filenamedate, compress)
 
     all_dbs = _list_databases(host, port, user, password)
@@ -85,7 +85,8 @@ def run_mysql_dump(server, logfile_path):
         log.warning("No databases to backup.")
         return 0
 
-    log.info("Databases to backup: %s", " ".join(databases_to_backup))
+    log.info("Databases to backup: %s", " ".join(databases_to_backup),
+             extra={"database_count": len(databases_to_backup)})
 
     env = {**os.environ, "MYSQL_PWD": password}
     overall_result = 0
@@ -133,7 +134,7 @@ def run_mysql_dump(server, logfile_path):
 
         size = os.path.getsize(temp_file)
         total_bytes += size
-        log.info("mysqldump of %s completed. Size: %d bytes.", database, size)
+        log.info("mysqldump completed", extra={"database": database, "bytes": size})
 
         if filenamedate:
             final_file = temp_file
@@ -166,7 +167,7 @@ def run_mysql_dump(server, logfile_path):
         log.debug("Backup completed successfully: %s", final_file)
 
     if total_bytes > 0:
-        log.info("Total dump size: %s", fmt_bytes(total_bytes))
+        log.info("Total dump size: %s", fmt_bytes(total_bytes), extra={"bytes": total_bytes})
     if overall_result == 0:
         log.info("All %d database(s) backed up successfully.", len(databases_to_backup))
     else:

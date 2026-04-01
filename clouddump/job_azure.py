@@ -23,7 +23,7 @@ def run_az_sync(blobstorage, logfile_path):
     source_stripped = source.split("?")[0]
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Syncing %s → %s (delete=%s)", source_stripped, destination, delete)
+    log.info("Syncing Azure Blob Storage", extra={"source": source_stripped, "destination": destination})
 
     cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={'true' if delete else 'false'}", source, destination]
 
@@ -32,7 +32,7 @@ def run_az_sync(blobstorage, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("Sync of %s failed after %ds.", source_stripped, elapsed)
+        log.error("Azure sync failed", extra={"source": source_stripped, "elapsed_s": elapsed})
     else:
-        log.info("Sync of %s completed in %ds.", source_stripped, elapsed)
+        log.info("Azure sync completed", extra={"source": source_stripped, "elapsed_s": elapsed})
     return rc

@@ -71,7 +71,7 @@ def run_rsync_sync(target, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Syncing %s → %s (delete=%s)", source, destination, delete)
+    log.info("Syncing via rsync", extra={"source": source, "destination": destination})
     log.debug("SSH key: %s, port: %s", ssh_key, ssh_port)
     if min_age_days:
         log.info("Min age filter: %d days", min_age_days)
@@ -113,9 +113,9 @@ def run_rsync_sync(target, logfile_path):
         elapsed = int(time.time() - t0)
 
         if rc != 0:
-            log.error("Rsync of %s failed after %ds.", source, elapsed)
+            log.error("Rsync failed", extra={"source": source, "elapsed_s": elapsed})
         else:
-            log.info("Rsync of %s completed in %ds.", source, elapsed)
+            log.info("Rsync completed", extra={"source": source, "elapsed_s": elapsed})
         return rc
     finally:
         if filelist_path:

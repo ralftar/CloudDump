@@ -26,7 +26,7 @@ def run_s3_sync(bucket, logfile_path):
 
     os.makedirs(destination, exist_ok=True)
 
-    log.info("Syncing %s → %s (delete=%s)", source, destination, delete)
+    log.info("Syncing S3 bucket", extra={"source": source, "destination": destination})
     log.debug("AWS Region: %s", region)
     if endpoint:
         log.debug("Endpoint URL: %s", endpoint)
@@ -51,7 +51,7 @@ def run_s3_sync(bucket, logfile_path):
     elapsed = int(time.time() - t0)
 
     if rc != 0:
-        log.error("Sync of %s failed after %ds.", source, elapsed)
+        log.error("S3 sync failed", extra={"source": source, "elapsed_s": elapsed})
     else:
-        log.info("Sync of %s completed in %ds.", source, elapsed)
+        log.info("S3 sync completed", extra={"source": source, "elapsed_s": elapsed})
     return rc
