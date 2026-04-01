@@ -2,7 +2,7 @@
 
 import os
 import shutil
-import tempfile
+import subprocess
 import time
 from datetime import datetime, timezone
 
@@ -22,30 +22,20 @@ def _list_databases(host, port, user, password):
     """
     env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "30"}
 
-    fd, tmppath = tempfile.mkstemp(prefix="psql-list-")
-    fd_err, errpath = tempfile.mkstemp(prefix="psql-err-")
-    try:
-        with os.fdopen(fd, "w") as tmp, os.fdopen(fd_err, "w") as err:
-            rc = run_cmd(
-                ["psql", "-h", host, "-p", str(port), "-U", user,
-                 "-d", "postgres", "-t", "-A",
-                 "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"],
-                env=env, stdout=tmp, stderr=err,
-            )
-        if rc != 0:
-            with open(errpath) as f:
-                err_msg = f.read().strip()
-            if err_msg:
-                log.error("psql: %s", err_msg)
-            return None
-        with open(tmppath) as f:
-            output = f.read()
-    finally:
-        _safe_remove(tmppath)
-        _safe_remove(errpath)
+    proc = subprocess.run(
+        ["psql", "-h", host, "-p", str(port), "-U", user,
+         "-d", "postgres", "-t", "-A",
+         "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"],
+        env=env, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        err_msg = proc.stderr.strip()
+        if err_msg:
+            log.error("psql: %s", err_msg)
+        return None
 
     databases = []
-    for line in output.splitlines():
+    for line in proc.stdout.splitlines():
         name = line.strip()
         if name:
             databases.append(name)
@@ -118,7 +108,7 @@ def run_pg_dump(server, logfile_path):
         tables_included = tbl_cfg.get("tables_included", [])
         tables_excluded = tbl_cfg.get("tables_excluded", [])
 
-        cmd = ["pg_dump", "-h", host, "-p", port, "-U", user, "-d", database, "-F", "tar"]
+        cmd = ["pg_dump", "-h", host, "-p", port, "-U", user, "-d", database, "-F", "custom"]
         if clouddump.debug:
             cmd.append("-v")
         for t in tables_included:
@@ -133,7 +123,7 @@ def run_pg_dump(server, logfile_path):
         dump_ok = False
         for db_attempt in range(1, max_db_retries + 1):
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            temp_file = os.path.join(backuppath, f"{database}-{timestamp}.tar")
+            temp_file = os.path.join(backuppath, f"{database}-{timestamp}.dump")
 
             log.debug("Running pg_dump of %s (attempt %d/%d)...", database, db_attempt, max_db_retries)
 
@@ -166,7 +156,7 @@ def run_pg_dump(server, logfile_path):
         if filenamedate:
             final_file = temp_file
         else:
-            final_file = os.path.join(backuppath, f"{database}.tar")
+            final_file = os.path.join(backuppath, f"{database}.dump")
 
         if compress:
             log.debug("Compressing backupfile %s...", temp_file)
@@ -179,7 +169,7 @@ def run_pg_dump(server, logfile_path):
             if filenamedate:
                 final_file += ".bz2"
             else:
-                final_file = os.path.join(backuppath, f"{database}.tar.bz2")
+                final_file = os.path.join(backuppath, f"{database}.dump.bz2")
             log.debug("Compression completed. Compressed file: %s", temp_file)
 
         if temp_file != final_file:

@@ -29,7 +29,7 @@ def run_github_backup(org, logfile_path):
 
     # Write token to a temp file to keep it out of process arguments
     # (visible via ps aux). github-backup doesn't support env vars.
-    fd, token_path = tempfile.mkstemp(prefix="gh-token-")
+    fd, token_path = tempfile.mkstemp(prefix="gh-token-", dir=destination)
     os.chmod(token_path, 0o600)
     os.write(fd, token.encode())
     os.close(fd)
