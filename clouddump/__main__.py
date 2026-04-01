@@ -13,7 +13,7 @@ import traceback
 from datetime import datetime, timezone
 
 import clouddump
-from clouddump import cfg, net_bytes, redact, log, _safe_remove
+from clouddump import cfg, net_bytes, redact, log, set_log_format, _safe_remove
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
@@ -87,6 +87,8 @@ def main():
     clouddump.debug = debug
     if debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    set_log_format(cfg(config, "log_format", "text"))
 
     crontab = cfg(config, "crontab")
     if not crontab:

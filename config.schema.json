@@ -52,6 +52,12 @@
       ],
       "description": "Recipient(s) — comma-separated string or array."
     },
+    "log_format": {
+      "type": "string",
+      "enum": ["text", "json"],
+      "default": "text",
+      "description": "Log output format. 'text' for human-readable, 'json' for structured logging."
+    },
     "email_log_attached": {
       "type": "boolean",
       "default": false,

@@ -55,6 +55,7 @@ def _check_github(name, token, account_type="org", timeout=10):
         return f"cannot reach GitHub API: {exc.reason}"
 
 VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
+VALID_LOG_FORMATS = {"text", "json"}
 CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"}
 TOOL_REQUIREMENTS = {
@@ -93,6 +94,12 @@ def validate_settings(config):
     if smtp_security is not None and smtp_security not in VALID_SMTP_SECURITY:
         log.error("Invalid smtp_security '%s'. Must be one of: %s.",
                   smtp_security, ", ".join(sorted(VALID_SMTP_SECURITY)))
+        errors += 1
+
+    log_format = config.get("log_format")
+    if log_format is not None and log_format not in VALID_LOG_FORMATS:
+        log.error("Invalid log_format '%s'. Must be one of: %s.",
+                  log_format, ", ".join(sorted(VALID_LOG_FORMATS)))
         errors += 1
 
     crontab = config.get("crontab")

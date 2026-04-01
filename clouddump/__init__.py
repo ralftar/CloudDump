@@ -44,6 +44,27 @@ _EXTRA_FIELDS = frozenset({
 _LEVEL_NAMES = {"WARNING": "warn", "CRITICAL": "crit"}
 
 
+_LOG_FORMAT = "[%(asctime)s] level=%(levelname)-7s %(message)s"
+_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+
+class _TextFormatter(logging.Formatter):
+    """Human-readable text formatter with short level names and job context."""
+
+    def format(self, record):
+        original_level = record.levelname
+        original_msg = record.msg
+        record.levelname = _LEVEL_NAMES.get(original_level, original_level.lower())
+        if current_job:
+            record.msg = f"[{current_job}] {record.msg}"
+        try:
+            result = super().format(record)
+            return redact(result)
+        finally:
+            record.levelname = original_level
+            record.msg = original_msg
+
+
 class _JsonFormatter(logging.Formatter):
     """Emit each log record as a single JSON object per line."""
 
@@ -72,18 +93,29 @@ class _JsonFormatter(logging.Formatter):
         return _json.dumps(obj, default=str)
 
 
-_json_fmt = _JsonFormatter()
+# Default to text format — switched to json via set_log_format() if configured
+_text_fmt = _TextFormatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
 
 # INFO and below → stdout
 _stdout_handler = logging.StreamHandler(sys.stdout)
 _stdout_handler.setLevel(logging.DEBUG)
 _stdout_handler.addFilter(lambda r: r.levelno < logging.WARNING)
-_stdout_handler.setFormatter(_json_fmt)
+_stdout_handler.setFormatter(_text_fmt)
 
 # WARNING and above → stderr
 _stderr_handler = logging.StreamHandler(sys.stderr)
 _stderr_handler.setLevel(logging.WARNING)
-_stderr_handler.setFormatter(_json_fmt)
+_stderr_handler.setFormatter(_text_fmt)
+
+
+def set_log_format(fmt):
+    """Switch console log format. *fmt* is ``"text"`` or ``"json"``."""
+    if fmt == "json":
+        formatter = _JsonFormatter()
+    else:
+        formatter = _text_fmt
+    _stdout_handler.setFormatter(formatter)
+    _stderr_handler.setFormatter(formatter)
 
 logging.basicConfig(level=logging.INFO, handlers=[_stdout_handler, _stderr_handler])
 log = logging.getLogger("clouddump")
