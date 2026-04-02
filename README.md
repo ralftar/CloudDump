@@ -29,8 +29,7 @@ you get an email.
 
 | Source | Job type | Tool used | Auth |
 |--------|----------|-----------|------|
-| AWS S3 | `s3bucket` | [AWS CLI](https://aws.amazon.com/cli/) | Access key + secret |
-| S3-compatible (MinIO, etc.) | `s3bucket` | [AWS CLI](https://aws.amazon.com/cli/) | Access key + secret + `endpoint_url` |
+| AWS S3 / S3-compatible (MinIO, etc.) | `s3bucket` | [AWS CLI](https://aws.amazon.com/cli/) | Access key + secret |
 | Azure Blob Storage | `azstorage` | [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | SAS token in source URL |
 | PostgreSQL | `pgsql` | [pg_dump / psql](https://www.postgresql.org/docs/current/app-pgdump.html) | Host, port, user, password |
 | MySQL / MariaDB | `mysql` | [mysqldump / mysql](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Host, port, user, password |
