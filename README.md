@@ -29,13 +29,13 @@ you get an email.
 
 | Source | Job type | Tool used | Auth |
 |--------|----------|-----------|------|
-| AWS S3 | `s3bucket` | AWS CLI | Access key + secret |
-| S3-compatible (MinIO, etc.) | `s3bucket` | AWS CLI | Access key + secret + `endpoint_url` |
-| Azure Blob Storage | `azstorage` | AzCopy | SAS token in source URL |
-| PostgreSQL | `pgsql` | pg_dump / psql | Host, port, user, password |
-| MySQL / MariaDB | `mysql` | mysqldump / mysql | Host, port, user, password |
-| GitHub (org or user) | `github` | github-backup | Personal access token |
-| Remote server (SSH) | `rsync` | rsync | SSH private key |
+| AWS S3 | `s3bucket` | [AWS CLI](https://aws.amazon.com/cli/) | Access key + secret |
+| S3-compatible (MinIO, etc.) | `s3bucket` | [AWS CLI](https://aws.amazon.com/cli/) | Access key + secret + `endpoint_url` |
+| Azure Blob Storage | `azstorage` | [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | SAS token in source URL |
+| PostgreSQL | `pgsql` | [pg_dump / psql](https://www.postgresql.org/docs/current/app-pgdump.html) | Host, port, user, password |
+| MySQL / MariaDB | `mysql` | [mysqldump / mysql](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Host, port, user, password |
+| GitHub (org or user) | `github` | [github-backup](https://github.com/josegonzalez/python-github-backup) | Personal access token |
+| Remote server (SSH) | `rsync` | [rsync](https://rsync.samba.org/) | SSH private key |
 
 ## Not a backup system
 
@@ -105,11 +105,11 @@ CloudDump instances with separate configurations.
 
 | Tool | Source | Update mechanism |
 |------|--------|-----------------|
-| AWS CLI | Debian apt (v1) | Debian base image |
-| AzCopy | Microsoft apt repo | Debian base image |
-| PostgreSQL client | Debian apt (v15) | Manual (pinned to major version in Dockerfile) |
-| MySQL client | Debian apt (default-mysql-client) | Debian base image |
-| github-backup | pip (requirements.txt) | Dependabot (pip) |
+| [AWS CLI](https://aws.amazon.com/cli/) | Debian apt (v1) | Debian base image |
+| [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | Microsoft apt repo | Debian base image |
+| [PostgreSQL client](https://www.postgresql.org/docs/current/app-pgdump.html) | Debian apt (v15) | Manual (pinned to major version in Dockerfile) |
+| [MySQL client](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Debian apt (default-mysql-client) | Debian base image |
+| [github-backup](https://github.com/josegonzalez/python-github-backup) | pip (requirements.txt) | Dependabot (pip) |
 
 ### Dependency update strategy
 
