@@ -64,6 +64,16 @@ def _tool_versions():
             versions.append(f"- {name}: {version_line}")
         except Exception:
             versions.append(f"- {name}: installed (version unknown)")
+
+    from importlib.metadata import version as pkg_version
+    pip_packages = ["croniter", "github-backup"]
+    for pkg in pip_packages:
+        try:
+            ver = pkg_version(pkg)
+            versions.append(f"- {pkg}: {ver}")
+        except Exception:
+            pass
+
     return "\n".join(versions)
 
 
