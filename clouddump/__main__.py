@@ -131,7 +131,7 @@ def main():
     verify_connectivity(jobs)
 
     startup_body = (
-        f"CloudDump started!\n\n"
+        f"CloudDump at {host} has started!\n\n"
         f"CONFIGURATION\n\n"
         f"{startup_config}\n\n"
         f"JOBS\n\n"
