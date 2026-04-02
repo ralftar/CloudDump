@@ -137,6 +137,10 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     if attempts_used is not None and max_attempts is not None:
         attempt_info = f"Attempts: {attempts_used}/{max_attempts}\n"
 
+    backup_size_info = ""
+    if backup_bytes is not None:
+        backup_size_info = f"Backup size: {fmt_bytes(backup_bytes)}\n"
+
     summary = f"{status} | {job_id} ({job_type}) | {minutes}m {seconds}s"
     if attempts_used is not None and max_attempts is not None:
         summary += f" | attempt {attempts_used}/{max_attempts}"
@@ -151,7 +155,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"Started: {start_str}\n"
         f"Completed: {end_str}\n"
         f"Time elapsed: {minutes} minutes {seconds} seconds\n"
-        f"{f'Backup size: {fmt_bytes(backup_bytes)}\n' if backup_bytes is not None else ''}"
+        f"{backup_size_info}"
         f"\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"
