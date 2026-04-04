@@ -45,10 +45,6 @@
       "default": "ssl",
       "description": "SMTP encryption mode."
     },
-    "smtp_ssl": {
-      "type": "boolean",
-      "description": "Legacy alias: true = ssl, false = starttls."
-    },
     "mail_from": { "type": "string", "description": "Sender email address." },
     "mail_to": {
       "oneOf": [

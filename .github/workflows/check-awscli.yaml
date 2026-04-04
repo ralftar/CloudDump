@@ -1,0 +1,61 @@
+name: Check AWS CLI v2
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check if AWS CLI v2 is available in Debian apt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          codename=$(grep -oP 'debian:\d[\d.]*-slim' Dockerfile | head -1 | grep -oP '\d+')
+          echo "Debian major version: $codename"
+
+          docker run --rm "debian:${codename}-slim" bash -c '
+            apt-get update -qq 2>/dev/null
+            pkg=$(apt-cache show awscli 2>/dev/null | grep -oP "^Version: \K.*" | head -1)
+            echo "AWSCLI_VERSION=$pkg"
+          ' | tee /tmp/result
+
+          version=$(grep -oP 'AWSCLI_VERSION=\K.*' /tmp/result)
+
+          if [ -z "$version" ]; then
+            echo "awscli package not found in Debian $codename."
+            exit 0
+          fi
+
+          major=$(echo "$version" | grep -oP '^\d+')
+          echo "Found awscli version: $version (major: $major)"
+
+          if [ "$major" -lt 2 ]; then
+            echo "Still v1. Nothing to do."
+            exit 0
+          fi
+
+          label="awscli-v2"
+          existing=$(gh issue list --label "$label" --state open --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo "Open issue already exists."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "AWS CLI v2 is now available in Debian $codename" \
+            --label "$label" \
+            --body "AWS CLI v2 (\`$version\`) is available in the Debian $codename apt repository.
+
+          The Dockerfile currently uses v1 via \`awscli\` from apt. No code changes should
+          be needed — the package name stays the same — but verify that all s3bucket jobs
+          work correctly with v2 before merging a Debian bump that pulls it in.
+
+          This issue was created automatically by the \`check-awscli\` workflow."
