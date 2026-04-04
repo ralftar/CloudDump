@@ -23,7 +23,6 @@ from clouddump.jobs import execute_job
 
 def _signal_handler(sig, _frame):
     """Handle SIGTERM/SIGINT: flag shutdown and terminate any running child process."""
-    log.info("Received shutdown signal, exiting gracefully...")
     clouddump.shutdown_requested = True
     if clouddump.child_proc is not None:
         clouddump.child_proc.terminate()
@@ -31,7 +30,6 @@ def _signal_handler(sig, _frame):
 
 def _run_now_handler(sig, _frame):
     """Handle SIGUSR1: run all jobs immediately on next loop iteration."""
-    log.info("Received SIGUSR1, running all jobs now...")
     clouddump.run_now_requested = True
 
 
@@ -128,7 +126,8 @@ def main():
     log.info("Tools:\n%s", tool_versions)
     log.info("Jobs:\n%s", jobs_summary)
 
-    verify_connectivity(jobs)
+    connectivity = verify_connectivity(jobs)
+    connectivity_text = "\n".join(connectivity) if connectivity else "No endpoints to check."
 
     startup_body = (
         f"CloudDump at {host} has started!\n\n"
@@ -136,6 +135,8 @@ def main():
         f"{startup_config}\n\n"
         f"JOBS\n\n"
         f"{jobs_summary}\n\n"
+        f"CONNECTIVITY\n\n"
+        f"{connectivity_text}\n\n"
         f"TOOLS\n\n"
         f"{tool_versions}\n\n"
         f"----\n"
@@ -162,6 +163,7 @@ def main():
         force_run = clouddump.run_now_requested
         if force_run:
             clouddump.run_now_requested = False
+            log.info("Received SIGUSR1, running all jobs now...")
 
         if not force_run and not should_run(crontab, last_run_ts):
             pass  # Not time yet — skip to sleep
@@ -225,11 +227,11 @@ def main():
 
                     net_after = net_bytes()
                     if net_before and net_after:
-                        total_rx += net_after[0] - net_before[0]
-                        total_tx += net_after[1] - net_before[1]
+                        total_rx += max(0, net_after[0] - net_before[0])
+                        total_tx += max(0, net_after[1] - net_before[1])
 
-                    rx_bytes = (net_after[0] - net_before[0]) if net_before and net_after else None
-                    tx_bytes = (net_after[1] - net_before[1]) if net_before and net_after else None
+                    rx_bytes = max(0, net_after[0] - net_before[0]) if net_before and net_after else None
+                    tx_bytes = max(0, net_after[1] - net_before[1]) if net_before and net_after else None
                     metric_status = "success" if result == 0 else "failure"
                     update_job_metric(job_id, job_type, metric_status, elapsed, rx=rx_bytes, tx=tx_bytes)
 
@@ -248,7 +250,10 @@ def main():
                         log.warning("Attempt completed with errors", extra=extras)
                         if attempt < max_attempts:
                             log.warning("Retrying in 60s...")
-                            time.sleep(60)
+                            for _ in range(60):
+                                if clouddump.shutdown_requested:
+                                    break
+                                time.sleep(1)
                         else:
                             log.error("Failed after all attempts",
                                       extra={"max_attempts": max_attempts})
@@ -299,6 +304,7 @@ def main():
                 )
 
         if clouddump.shutdown_requested:
+            log.info("Received shutdown signal, exiting gracefully...")
             break
 
         # Sleep until next minute boundary, waking every second to

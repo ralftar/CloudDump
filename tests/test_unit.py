@@ -12,7 +12,7 @@ import pytest
 
 from clouddump import redact, fmt_bytes, validate_backup_path, _TextFormatter, _JsonFormatter, _LOG_FORMAT, _LOG_DATEFMT
 from clouddump.email import format_job_config
-from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
+from clouddump.config import validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 from clouddump.health import _state, update_last_run, update_job_metric, _Handler
 
@@ -483,57 +483,6 @@ def test_redact_ignores_clean_text():
     assert redact(text) == text
 
 
-# ── _check_github ───────────────────────────────────────────────────────────
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_org_success(mock_urlopen):
-    mock_urlopen.return_value.__enter__ = lambda s: s
-    mock_urlopen.return_value.__exit__ = lambda s, *a: None
-    assert _check_github("my-org", "ghp_validtoken", "org") is None
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_user_success(mock_urlopen):
-    mock_urlopen.return_value.__enter__ = lambda s: s
-    mock_urlopen.return_value.__exit__ = lambda s, *a: None
-    assert _check_github("my-user", "ghp_validtoken", "user") is None
-    # Verify it used /users/ not /orgs/
-    url = mock_urlopen.call_args[0][0].full_url
-    assert "/users/my-user" in url
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_bad_token(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 401, "Unauthorized", {}, None)
-    result = _check_github("my-org", "ghp_badtoken")
-    assert "authentication failed" in result
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_forbidden(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 403, "Forbidden", {}, None)
-    result = _check_github("my-org", "ghp_limited")
-    assert "forbidden" in result
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_not_found(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 404, "Not Found", {}, None)
-    result = _check_github("no-such-org", "ghp_token")
-    assert "not found" in result
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_network_error(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.URLError("Name or service not known")
-    result = _check_github("my-org", "ghp_token")
-    assert "cannot reach" in result
-
-
 def test_validate_jobs_github_invalid_account_type():
     job = _job(type="github", organizations=[
         {"name": "x", "token": "ghp_x", "account_type": "team"}])
@@ -544,36 +493,153 @@ def test_validate_jobs_github_invalid_account_type():
 # ── verify_connectivity ─────────────────────────────────────────────────────
 
 
-@patch("clouddump.config._check_github", return_value=None)
-def test_verify_connectivity_github_org(mock_gh):
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_connectivity_github_token(mock_urlopen):
+    mock_urlopen.return_value.__enter__ = lambda s: s
+    mock_urlopen.return_value.__exit__ = lambda s, *a: None
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
-    verify_connectivity([job])
-    mock_gh.assert_called_once_with("my-org", "ghp_xxx", "org")
+    results = verify_connectivity([job])
+    assert any("OK" in r and "GitHub" in r for r in results)
 
 
-@patch("clouddump.config._check_github", return_value=None)
-def test_verify_connectivity_github_user(mock_gh):
-    job = _job(type="github", organizations=[
-        {"name": "my-user", "token": "ghp_xxx", "account_type": "user"}])
-    verify_connectivity([job])
-    mock_gh.assert_called_once_with("my-user", "ghp_xxx", "user")
-
-
-@patch("clouddump.config._check_github", return_value="auth failed")
-def test_verify_connectivity_github_warns_on_failure(mock_gh):
-    """GitHub check failure is a warning, not a crash."""
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_connectivity_github_warns_on_failure(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://api.github.com/orgs/x", 401, "Unauthorized", {}, None)
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
-    verify_connectivity([job])  # should not raise
-    mock_gh.assert_called_once()
+    results = verify_connectivity([job])
+    assert any("WARN" in r for r in results)
 
 
-@patch("clouddump.config._check_github")
-def test_verify_connectivity_skips_invalid_account_type(mock_gh):
-    """Invalid account_type is caught by validate_jobs, not verify_connectivity."""
-    job = _job(type="github", organizations=[
-        {"name": "x", "token": "ghp_x", "account_type": "team"}])
-    verify_connectivity([job])
-    mock_gh.assert_not_called()
+@patch("subprocess.run")
+def test_verify_connectivity_db_connection(mock_run):
+    """DB without configured databases verifies credentials."""
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "1\n"
+    mock_run.return_value.stderr = ""
+    job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432, "pass": "secret"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "pgsql" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_connectivity_db_connection_failure(mock_run):
+    """DB connection failure is a warning."""
+    mock_run.return_value.returncode = 2
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "connection refused\n"
+    job = _job(type="mysql", servers=[{"host": "mysql.example.com", "port": 3306, "user": "backup", "pass": "secret"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_s3_bucket_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+    job = _job(type="s3bucket", buckets=[{
+        "source": "s3://my-bucket/prefix",
+        "aws_access_key_id": "AKIA...", "aws_secret_access_key": "secret", "aws_region": "eu-west-1"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "S3" in r for r in results)
+    cmd = mock_run.call_args[0][0]
+    assert "head-bucket" in cmd
+    assert "my-bucket" in cmd
+
+
+@patch("subprocess.run")
+def test_verify_s3_bucket_failure(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "404 Not Found\n"
+    job = _job(type="s3bucket", buckets=[{"source": "s3://bad-bucket"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "S3" in r for r in results)
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_az_container_ok(mock_urlopen):
+    mock_urlopen.return_value.__enter__ = lambda s: s
+    mock_urlopen.return_value.__exit__ = lambda s, *a: None
+    job = _job(type="azstorage", blobstorages=[{
+        "source": "https://account.blob.core.windows.net/container?sv=2021&sig=xxx"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "Azure" in r for r in results)
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_az_container_failure(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://account.blob.core.windows.net/", 403, "Forbidden", {}, None)
+    job = _job(type="azstorage", blobstorages=[{
+        "source": "https://account.blob.core.windows.net/container?sv=2021&sig=bad"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "Azure" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_rsync_ssh_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+    job = _job(type="rsync", targets=[{
+        "source": "user@host.example.com:/data", "ssh_key": "/config/id_ed25519"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "SSH" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_rsync_ssh_failure(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "Permission denied\n"
+    job = _job(type="rsync", targets=[{
+        "source": "user@host.example.com:/data", "ssh_key": "/config/id_ed25519"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "SSH" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_pgsql_databases_and_tables(mock_run):
+    """Configured databases + table filters verified in one flow."""
+    # First call: list databases. Second call: list tables.
+    db_list = type("Proc", (), {"returncode": 0, "stdout": "mydb\nother\n", "stderr": ""})()
+    tbl_list = type("Proc", (), {"returncode": 0, "stdout": "users\norders\n", "stderr": ""})()
+    mock_run.side_effect = [db_list, tbl_list]
+    job = _job(type="pgsql", servers=[{
+        "host": "pg.example.com", "pass": "secret",
+        "databases": [{"mydb": {"tables_excluded": ["missing_table"]}}]}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "pgsql" in r for r in results)
+    assert any("WARN" in r and "missing_table" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_pgsql_skips_tables_when_db_missing(mock_run):
+    """Table filter check skipped for databases that don't exist."""
+    db_list = type("Proc", (), {"returncode": 0, "stdout": "other\n", "stderr": ""})()
+    mock_run.return_value = db_list
+    job = _job(type="pgsql", servers=[{
+        "host": "pg.example.com", "pass": "secret",
+        "databases": [{"noexist": {"tables_included": ["t1"]}}]}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "noexist" in r for r in results)
+    assert not any("t1" in r for r in results)  # table check skipped
+    assert mock_run.call_count == 1  # only the DB list query
+
+
+@patch("subprocess.run")
+def test_verify_mysql_databases(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "app_db\nanalytics\n"
+    mock_run.return_value.stderr = ""
+    job = _job(type="mysql", servers=[{
+        "host": "mysql.example.com", "user": "backup", "pass": "secret",
+        "databases": ["app_db", "gone_db"]}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "mysql" in r for r in results)
+    assert any("WARN" in r and "gone_db" in r for r in results)
 
 
 # ── fmt_bytes ───────────────────────────────────────────────────────────────

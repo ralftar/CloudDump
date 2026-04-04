@@ -3,61 +3,23 @@
 import json
 import os
 import shutil
-import socket
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from urllib.parse import urlparse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
 
 
-def _check_connectivity(host, port, timeout=5):
-    """Test TCP connectivity. Returns True if reachable."""
-    try:
-        with socket.create_connection((host, int(port)), timeout=timeout):
-            return True
-    except (OSError, ValueError):
-        return False
-
-
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
 
-
-def _check_github(name, token, account_type="org", timeout=10):
-    """Verify a GitHub token and account are accessible.
-
-    *account_type* is ``"org"`` (default) or ``"user"``.
-    Returns None on success, or an error message string on failure.
-    """
-    if account_type == "user":
-        url = f"https://api.github.com/users/{urllib.request.quote(name, safe='')}"
-    else:
-        url = f"https://api.github.com/orgs/{urllib.request.quote(name, safe='')}"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "CloudDump",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=timeout):
-            return None
-    except urllib.error.HTTPError as exc:
-        if exc.code == 401:
-            return "authentication failed (invalid or expired token)"
-        if exc.code == 403:
-            return "forbidden (token lacks required scopes — needs repo and read:org)"
-        if exc.code == 404:
-            return f"account '{name}' not found (or token lacks access)"
-        return f"HTTP {exc.code}: {exc.reason}"
-    except urllib.error.URLError as exc:
-        return f"cannot reach GitHub API: {exc.reason}"
 
 VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
 VALID_LOG_FORMATS = {"text", "json"}
 CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"}
+_VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
 TOOL_REQUIREMENTS = {
     "s3bucket": ["aws"],
     "azstorage": ["azcopy"],
@@ -238,6 +200,36 @@ def validate_jobs(jobs):
                         log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
                         errors += 1
 
+        # Validate PostgreSQL table filter syntax
+        if job_type == "pgsql":
+            for server in cfg(job, "servers", []):
+                for entry in cfg(server, "databases", []):
+                    if not isinstance(entry, dict):
+                        log.error("Database entry must be a dict in job ID %s, got %s.",
+                                  job_id, type(entry).__name__)
+                        errors += 1
+                        continue
+                    for dbname, tbl_cfg in entry.items():
+                        if tbl_cfg is None:
+                            continue
+                        if not isinstance(tbl_cfg, dict):
+                            log.error("Table filter for '%s' must be a dict in job ID %s, got %s.",
+                                      dbname, job_id, type(tbl_cfg).__name__)
+                            errors += 1
+                            continue
+                        unknown = set(tbl_cfg.keys()) - _VALID_TABLE_FILTER_KEYS
+                        if unknown:
+                            log.warning("Unknown table filter key(s) %s for '%s' in job ID %s. "
+                                        "Valid keys: %s.",
+                                        ", ".join(sorted(unknown)), dbname, job_id,
+                                        ", ".join(sorted(_VALID_TABLE_FILTER_KEYS)))
+                        for key in _VALID_TABLE_FILTER_KEYS:
+                            val = tbl_cfg.get(key)
+                            if val is not None and not isinstance(val, list):
+                                log.error("'%s' for '%s' must be a list in job ID %s, got %s.",
+                                          key, dbname, job_id, type(val).__name__)
+                                errors += 1
+
         # Validate account_type for GitHub jobs (config error, not connectivity)
         if job_type == "github":
             for account in cfg(job, "organizations", []):
@@ -253,20 +245,230 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
-def _check_tcp(host, port, job_id, label):
-    """TCP connectivity check with consistent logging."""
-    if _check_connectivity(host, port):
-        log.info("Connectivity OK: %s %s:%s (job %s).", label, host, port, job_id)
-    else:
-        log.warning("Cannot reach %s %s:%s for job %s.", label, host, port, job_id)
+def _run_verify(cmd, label, job_id, results, env=None, timeout=15):
+    """Run a command and log OK/WARN. Returns the CompletedProcess or None."""
+    import subprocess
+    try:
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        results.append(f"WARN: {label} timed out (job {job_id})")
+        log.warning("%s timed out (job %s).", label, job_id)
+        return None
+
+    if proc.returncode == 0:
+        results.append(f"OK: {label} (job {job_id})")
+        log.info("%s verified (job %s).", label, job_id)
+        return proc
+
+    err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "failed"
+    results.append(f"WARN: {label} — {err} (job {job_id})")
+    log.warning("%s failed (job %s): %s", label, job_id, err)
+    return None
+
+
+def _verify_s3_bucket(job, job_id, results):
+    """Verify S3 bucket accessibility and credentials (warn only)."""
+    for bucket in cfg(job, "buckets", []):
+        source = cfg(bucket, "source")
+        if not source:
+            continue
+        env = {**os.environ}
+        for key, envvar in [("aws_access_key_id", "AWS_ACCESS_KEY_ID"),
+                            ("aws_secret_access_key", "AWS_SECRET_ACCESS_KEY"),
+                            ("aws_region", "AWS_DEFAULT_REGION")]:
+            val = cfg(bucket, key)
+            if val:
+                env[envvar] = val
+        # Extract bucket name from s3://bucket/prefix
+        bucket_name = source.replace("s3://", "").split("/")[0]
+        cmd = ["aws", "s3api", "head-bucket", "--bucket", bucket_name]
+        endpoint = cfg(bucket, "endpoint_url")
+        if endpoint:
+            cmd += ["--endpoint-url", endpoint]
+        _run_verify(cmd, f"S3 '{source}'", job_id, results, env=env)
+
+
+def _verify_az_container(job, job_id, results):
+    """Verify Azure Blob Storage container accessibility (warn only).
+
+    Uses a HEAD request with the SAS-token URL. Azure returns 200 if the
+    container exists and the token is valid — no blobs are listed.
+    """
+    for blob in cfg(job, "blobstorages", []):
+        source = cfg(blob, "source")
+        if not source:
+            continue
+        label = f"Azure '{source.split('?')[0]}'"
+        # restype=container on the SAS URL returns container metadata only
+        sep = "&" if "?" in source else "?"
+        url = f"{source}{sep}restype=container&comp=metadata"
+        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "CloudDump"})
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                results.append(f"OK: {label} (job {job_id})")
+                log.info("%s verified (job %s).", label, job_id)
+        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+            reason = str(getattr(exc, "reason", exc))
+            results.append(f"WARN: {label} — {reason} (job {job_id})")
+            log.warning("%s failed (job %s): %s", label, job_id, reason)
+
+
+def _verify_rsync_ssh(job, job_id, results):
+    """Verify SSH connectivity and remote path exists (warn only)."""
+    for target in cfg(job, "targets", []):
+        source = cfg(target, "source")
+        ssh_key = cfg(target, "ssh_key")
+        ssh_port = str(cfg(target, "ssh_port", "22"))
+        if not source or not ssh_key or ":" not in source:
+            continue
+        host_part, remote_path = source.split(":", 1)
+        _run_verify([
+            "ssh", "-i", ssh_key, "-p", ssh_port,
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            host_part, f"test -d {remote_path}",
+        ], f"SSH '{source}'", job_id, results, timeout=10)
+
+
+def _verify_db_connection(job, job_id, job_type, results):
+    """Verify database credentials with SELECT 1 (warn only)."""
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        password = cfg(server, "pass")
+        if not host or not password:
+            continue
+        if job_type == "pgsql":
+            port, user = str(cfg(server, "port", "5432")), cfg(server, "user", "postgres")
+            env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+            cmd = ["psql", "-h", host, "-p", port, "-U", user,
+                   "-d", "postgres", "-t", "-A", "-c", "SELECT 1"]
+        else:
+            port, user = str(cfg(server, "port", "3306")), cfg(server, "user")
+            if not user:
+                continue
+            env = {**os.environ, "MYSQL_PWD": password}
+            cmd = ["mysql", "-h", host, "-P", port, "-u", user,
+                   "--batch", "--skip-column-names", "-e", "SELECT 1"]
+        _run_verify(cmd, f"{job_type} {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+
+
+def _verify_github_token(job, job_id, results):
+    """Verify GitHub tokens and accounts are accessible (warn only)."""
+    for account in cfg(job, "organizations", []):
+        acct_name = cfg(account, "name")
+        token = cfg(account, "token")
+        acct_type = cfg(account, "account_type", "org")
+        if not acct_name or not token or acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
+            continue
+        endpoint = "users" if acct_type == "user" else "orgs"
+        url = f"https://api.github.com/{endpoint}/{urllib.request.quote(acct_name, safe='')}"
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "CloudDump",
+        })
+        label = f"GitHub {acct_type} '{acct_name}'"
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                results.append(f"OK: {label} (job {job_id})")
+                log.info("%s verified (job %s).", label, job_id)
+        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+            reason = str(getattr(exc, "reason", exc))
+            results.append(f"WARN: {label} — {reason} (job {job_id})")
+            log.warning("%s failed (job %s): %s", label, job_id, reason)
+
+
+def _verify_pgsql(job, job_id, results):
+    """Verify configured PostgreSQL databases and table filters (warn only).
+
+    One connection to list databases, then one per database that has table
+    filters. Skips table checks if the server is unreachable.
+    """
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        port = str(cfg(server, "port", "5432"))
+        user = cfg(server, "user", "postgres")
+        password = cfg(server, "pass")
+        if not host or not password:
+            continue
+        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+
+        # Collect configured database names and their table filters
+        db_configs = {}  # {dbname: tbl_cfg or {}}
+        for entry in cfg(server, "databases", []):
+            if isinstance(entry, dict):
+                for dbname, tbl_cfg in entry.items():
+                    db_configs[dbname] = tbl_cfg if isinstance(tbl_cfg, dict) else {}
+        if not db_configs:
+            continue
+
+        # Verify databases exist
+        proc = _run_verify(
+            ["psql", "-h", host, "-p", port, "-U", user, "-d", "postgres", "-t", "-A",
+             "-c", "SELECT datname FROM pg_database WHERE datistemplate = false"],
+            f"pgsql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+        if not proc:
+            continue
+        actual_dbs = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+        for db in db_configs:
+            if db not in actual_dbs:
+                results.append(f"WARN: Database '{db}' not found on {host} (job {job_id})")
+                log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
+
+        # Verify table filters for databases that exist
+        for dbname, tbl_cfg in db_configs.items():
+            if dbname not in actual_dbs or not tbl_cfg:
+                continue
+            filters = tbl_cfg.get("tables_included", []) + tbl_cfg.get("tables_excluded", [])
+            if not any(t.strip() for t in filters):
+                continue
+            proc = _run_verify(
+                ["psql", "-h", host, "-p", port, "-U", user, "-d", dbname, "-t", "-A",
+                 "-c", "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
+                f"pgsql tables in '{dbname}'@{host}", job_id, results, env=env, timeout=10)
+            if not proc:
+                continue
+            actual_tables = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+            for key in ("tables_included", "tables_excluded"):
+                for t in tbl_cfg.get(key, []):
+                    t = t.strip()
+                    if t and t not in actual_tables:
+                        results.append(f"WARN: {key} '{t}' not found in {dbname}@{host} (job {job_id})")
+                        log.warning("%s '%s' not found in %s@%s (job %s).", key, t, dbname, host, job_id)
+
+
+def _verify_mysql(job, job_id, results):
+    """Verify configured MySQL databases exist on the server (warn only)."""
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        port = str(cfg(server, "port", "3306"))
+        user = cfg(server, "user")
+        password = cfg(server, "pass")
+        if not host or not user or not password:
+            continue
+        configured_dbs = list(cfg(server, "databases", []))
+        if not configured_dbs:
+            continue
+        env = {**os.environ, "MYSQL_PWD": password}
+        proc = _run_verify(
+            ["mysql", "-h", host, "-P", port, "-u", user,
+             "--batch", "--skip-column-names", "-e", "SHOW DATABASES"],
+            f"mysql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+        if not proc:
+            continue
+        actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+        for db in configured_dbs:
+            if db not in actual:
+                results.append(f"WARN: Database '{db}' not found on {host} (job {job_id})")
+                log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
 
 
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
 
-    Called after config and job listing have been logged, so the output
-    appears in a natural order: config → jobs → verification.
+    Returns a list of result strings for inclusion in the startup email.
     """
+    results = []
     for job in jobs:
         job_id = cfg(job, "id")
         job_type = cfg(job, "type")
@@ -274,51 +476,27 @@ def verify_connectivity(jobs):
             continue
 
         if job_type == "s3bucket":
-            for target in cfg(job, "buckets", []):
-                endpoint = cfg(target, "endpoint_url")
-                if endpoint:
-                    # Parse host:port from endpoint URL
-                    parsed = urlparse(endpoint)
-                    host = parsed.hostname
-                    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-                    if host:
-                        _check_tcp(host, port, job_id, "S3 endpoint")
+            _verify_s3_bucket(job, job_id, results)
 
         if job_type == "azstorage":
-            for target in cfg(job, "blobstorages", []):
-                source = cfg(target, "source")
-                if source:
-                    parsed = urlparse(source.split("?")[0])
-                    host = parsed.hostname
-                    if host:
-                        _check_tcp(host, 443, job_id, "Azure Blob")
+            _verify_az_container(job, job_id, results)
 
-        if job_type in ("pgsql", "mysql"):
-            for target in cfg(job, "servers", []):
-                host = cfg(target, "host")
-                port = cfg(target, "port", 5432 if job_type == "pgsql" else 3306)
-                if host:
-                    _check_tcp(host, port, job_id, job_type)
+        if job_type == "pgsql":
+            if any(cfg(s, "databases", []) for s in cfg(job, "servers", [])):
+                _verify_pgsql(job, job_id, results)
+            else:
+                _verify_db_connection(job, job_id, "pgsql", results)
+
+        if job_type == "mysql":
+            if any(cfg(s, "databases", []) for s in cfg(job, "servers", [])):
+                _verify_mysql(job, job_id, results)
+            else:
+                _verify_db_connection(job, job_id, "mysql", results)
 
         if job_type == "rsync":
-            for target in cfg(job, "targets", []):
-                source = cfg(target, "source")
-                port = cfg(target, "ssh_port", 22)
-                if source and ":" in source:
-                    host = source.split(":")[0].split("@")[-1]
-                    if host:
-                        _check_tcp(host, port, job_id, "SSH")
+            _verify_rsync_ssh(job, job_id, results)
 
         if job_type == "github":
-            for account in cfg(job, "organizations", []):
-                acct_name = cfg(account, "name")
-                token = cfg(account, "token")
-                acct_type = cfg(account, "account_type", "org")
-                if acct_name and token and acct_type in VALID_GITHUB_ACCOUNT_TYPES:
-                    gh_err = _check_github(acct_name, token, acct_type)
-                    if gh_err:
-                        log.warning("GitHub check failed for %s '%s' in job %s: %s",
-                                    acct_type, acct_name, job_id, gh_err)
-                    else:
-                        log.info("GitHub token verified for %s '%s' in job %s.",
-                                 acct_type, acct_name, job_id)
+            _verify_github_token(job, job_id, results)
+
+    return results

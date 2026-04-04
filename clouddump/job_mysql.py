@@ -39,7 +39,7 @@ def run_mysql_dump(server, logfile_path):
     """
     host = cfg(server, "host")
     port = str(cfg(server, "port", "3306"))
-    user = cfg(server, "user", "root")
+    user = cfg(server, "user")
     password = cfg(server, "pass")
     backuppath = cfg(server, "backuppath")
     filenamedate = cfg(server, "filenamedate", False)
