@@ -492,7 +492,7 @@ def test_validate_jobs_github_invalid_account_type():
 # ── verify_connectivity ─────────────────────────────────────────────────────
 
 
-@patch("clouddump.config._check_connectivity", return_value=True)
+@patch("clouddump.config._verify_tcp_connectivity", return_value=True)
 def test_verify_connectivity_github_tcp(mock_conn):
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
     results = verify_connectivity([job])
@@ -500,7 +500,7 @@ def test_verify_connectivity_github_tcp(mock_conn):
     assert any("OK" in r and "GitHub API" in r for r in results)
 
 
-@patch("clouddump.config._check_connectivity", return_value=False)
+@patch("clouddump.config._verify_tcp_connectivity", return_value=False)
 def test_verify_connectivity_warns_on_failure(mock_conn):
     """TCP check failure is a warning, not a crash."""
     job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432}])
@@ -508,7 +508,7 @@ def test_verify_connectivity_warns_on_failure(mock_conn):
     assert any("WARN" in r for r in results)
 
 
-@patch("clouddump.config._check_connectivity", return_value=True)
+@patch("clouddump.config._verify_tcp_connectivity", return_value=True)
 def test_verify_connectivity_returns_results(mock_conn):
     job = _job(type="mysql", servers=[{"host": "mysql.example.com", "port": 3306}])
     results = verify_connectivity([job])

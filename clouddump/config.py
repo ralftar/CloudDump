@@ -13,7 +13,7 @@ from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
 
 
-def _check_connectivity(host, port, timeout=5):
+def _verify_tcp_connectivity(host, port, timeout=5):
     """Test TCP connectivity. Returns True if reachable."""
     try:
         with socket.create_connection((host, int(port)), timeout=timeout):
@@ -417,9 +417,9 @@ def _verify_pgsql_tables(job, job_id, results):
                         results.append(msg)
 
 
-def _check_tcp(host, port, job_id, label, results=None):
+def _verify_tcp(host, port, job_id, label, results=None):
     """TCP connectivity check with consistent logging."""
-    if _check_connectivity(host, port):
+    if _verify_tcp_connectivity(host, port):
         log.info("Connectivity OK: %s %s:%s (job %s).", label, host, port, job_id)
         if results is not None:
             results.append(f"OK: {label} {host}:{port} (job {job_id})")
@@ -450,7 +450,7 @@ def verify_connectivity(jobs):
                     host = parsed.hostname
                     port = parsed.port or (443 if parsed.scheme == "https" else 80)
                     if host:
-                        _check_tcp(host, port, job_id, "S3 endpoint", results)
+                        _verify_tcp(host, port, job_id, "S3 endpoint", results)
 
         if job_type == "azstorage":
             for target in cfg(job, "blobstorages", []):
@@ -459,14 +459,14 @@ def verify_connectivity(jobs):
                     parsed = urlparse(source.split("?")[0])
                     host = parsed.hostname
                     if host:
-                        _check_tcp(host, 443, job_id, "Azure Blob", results)
+                        _verify_tcp(host, 443, job_id, "Azure Blob", results)
 
         if job_type in ("pgsql", "mysql"):
             for target in cfg(job, "servers", []):
                 host = cfg(target, "host")
                 port = cfg(target, "port", 5432 if job_type == "pgsql" else 3306)
                 if host:
-                    _check_tcp(host, port, job_id, job_type, results)
+                    _verify_tcp(host, port, job_id, job_type, results)
 
             if job_type == "pgsql":
                 _verify_pgsql_databases(job, job_id, results)
@@ -481,10 +481,10 @@ def verify_connectivity(jobs):
                 if source and ":" in source:
                     host = source.split(":")[0].split("@")[-1]
                     if host:
-                        _check_tcp(host, port, job_id, "SSH", results)
+                        _verify_tcp(host, port, job_id, "SSH", results)
 
         if job_type == "github":
-            _check_tcp("api.github.com", 443, job_id, "GitHub API", results)
+            _verify_tcp("api.github.com", 443, job_id, "GitHub API", results)
             _verify_github_token(job, job_id, results)
 
     return results
