@@ -1,0 +1,64 @@
+name: Check PostgreSQL client
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check for new PostgreSQL major version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current=$(grep -oP 'postgresql-client-\K\d+' Dockerfile)
+          latest=$(curl -s 'https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&ordering=last_updated' \
+            | python3 -c "
+          import json, sys
+          tags = json.load(sys.stdin)['results']
+          majors = set()
+          for t in tags:
+              name = t['name']
+              if name.isdigit():
+                  majors.add(int(name))
+          print(max(majors))
+          ")
+
+          echo "Current: $current, Latest: $latest"
+
+          if [ "$latest" -le "$current" ]; then
+            echo "Up to date."
+            exit 0
+          fi
+
+          existing=$(gh issue list --state open --search "PostgreSQL client $latest" --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo "Issue already exists."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "Update PostgreSQL client to $latest" \
+            --label dependencies \
+            --body "$(cat <<EOF
+          PostgreSQL $latest is available. The Dockerfile currently uses \`postgresql-client-$current\`.
+
+          ### To upgrade
+
+          Change one line in \`Dockerfile\`:
+
+          \`\`\`dockerfile
+          -    postgresql-client-$current \\
+          +    postgresql-client-$latest \\
+          \`\`\`
+
+          Verify that your PostgreSQL servers are compatible with client version $latest before merging.
+          EOF
+          )"

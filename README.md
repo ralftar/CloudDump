@@ -106,25 +106,24 @@ CloudDump instances with separate configurations.
 |------|--------|-----------------|
 | [AWS CLI](https://aws.amazon.com/cli/) | Debian apt (v1) | Debian base image |
 | [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | Microsoft apt repo | Debian base image |
-| [PostgreSQL client](https://www.postgresql.org/docs/current/app-pgdump.html) | PostgreSQL apt repo | Renovate (custom regex in Dockerfile) |
+| [PostgreSQL client](https://www.postgresql.org/docs/current/app-pgdump.html) | PostgreSQL apt repo | Scheduled GitHub Action opens issue |
 | [MySQL client](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Debian apt (default-mysql-client) | Debian base image |
-| [github-backup](https://github.com/josegonzalez/python-github-backup) | pip (requirements.txt) | Renovate (pip) |
+| [github-backup](https://github.com/josegonzalez/python-github-backup) | pip (requirements.txt) | Dependabot (pip) |
 
 ### Dependency update strategy
 
-[Renovate](https://docs.renovatebot.com/) runs as a self-hosted GitHub
-Action (weekdays before 09:00 CET) and manages four ecosystems:
+[Dependabot](https://docs.github.com/en/code-security/dependabot) runs
+weekly (Monday 07:00 CET) and manages three ecosystems:
 
 | What | How |
 |------|-----|
-| GitHub Actions | Grouped into a single PR |
+| GitHub Actions | One PR per action bump |
 | Debian base image (`docker`) | Tag bump (e.g. `12.13-slim` → `12.14-slim`) |
 | Python packages (`pip`) | `requirements.txt` |
-| PostgreSQL client major version | Custom regex manager in Dockerfile |
 
-When Renovate bumps the Debian tag, the image rebuilds from scratch and
-`apt-get upgrade -y` pulls the latest versions of all apt-managed tools
-(AWS CLI, AzCopy, MySQL client, git, etc.).
+When Dependabot bumps the Debian tag, the image rebuilds from scratch
+and `apt-get upgrade -y` pulls the latest versions of all apt-managed
+tools (AWS CLI, AzCopy, MySQL client, git, etc.).
 
 Between Debian releases, apt-managed tool versions stay fixed. This is
 intentional — it keeps the image deterministic and avoids surprise
@@ -133,8 +132,8 @@ breakage from mid-cycle package updates.
 The PostgreSQL client is pinned to a major version in the Dockerfile
 (`postgresql-client-18`). Unlike the other apt packages, it comes from
 the PostgreSQL apt repo and does not auto-update with Debian base image
-bumps. Renovate tracks this version via a custom regex manager
-(`renovate.json`) and opens a PR when a new major version is available.
+bumps. A scheduled GitHub Action checks Docker Hub weekly for new major
+versions and opens an issue when one is available.
 
 ## Installation
 

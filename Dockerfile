@@ -20,7 +20,6 @@ RUN apt-get update && \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-    # renovate: datasource=docker depName=postgres versioning=docker
     postgresql-client-18 \
     default-mysql-client \
     rsync \
