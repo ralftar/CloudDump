@@ -20,7 +20,7 @@ RUN apt-get update && \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     # renovate: datasource=docker depName=postgres versioning=docker
-    postgresql-client-17 \
+    postgresql-client-18 \
     default-mysql-client \
     rsync \
     awscli \
