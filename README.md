@@ -1,7 +1,7 @@
 # CloudDump 
 
-[![CI](https://github.com/ralftar/CloudDump/actions/workflows/ci.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions/workflows/ci.yml)
-[![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
+[![CI](https://github.com/ralftar/CloudDump/actions/workflows/ci.yaml/badge.svg)](https://github.com/ralftar/CloudDump/actions/workflows/ci.yaml)
+[![Publish](https://github.com/ralftar/CloudDump/actions/workflows/publish.yaml/badge.svg)](https://github.com/ralftar/CloudDump/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **An independent copy of your cloud data. Under your control.**
