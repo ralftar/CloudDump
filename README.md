@@ -106,7 +106,7 @@ CloudDump instances with separate configurations.
 |------|--------|-----------------|
 | [AWS CLI](https://aws.amazon.com/cli/) | Debian apt (v1) | Debian base image |
 | [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | Microsoft apt repo | Debian base image |
-| [PostgreSQL client](https://www.postgresql.org/docs/current/app-pgdump.html) | PostgreSQL apt repo | Scheduled GitHub Action opens issue |
+| [PostgreSQL client](https://www.postgresql.org/docs/current/app-pgdump.html) | PostgreSQL apt repo | Scheduled GitHub Action opens PR |
 | [MySQL client](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Debian apt (default-mysql-client) | Debian base image |
 | [github-backup](https://github.com/josegonzalez/python-github-backup) | pip (requirements.txt) | Dependabot (pip) |
 
@@ -133,7 +133,7 @@ The PostgreSQL client is pinned to a major version in the Dockerfile
 (`postgresql-client-18`). Unlike the other apt packages, it comes from
 the PostgreSQL apt repo and does not auto-update with Debian base image
 bumps. A scheduled GitHub Action checks Docker Hub weekly for new major
-versions and opens an issue when one is available.
+versions and opens a PR when one is available.
 
 ## Installation
 

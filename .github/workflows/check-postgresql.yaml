@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  issues: write
+  contents: write
+  pull-requests: write
 
 jobs:
   check:
@@ -38,27 +39,21 @@ jobs:
             exit 0
           fi
 
-          existing=$(gh issue list --state open --search "PostgreSQL client $latest" --json number --jq 'length')
-          if [ "$existing" -gt 0 ]; then
-            echo "Issue already exists."
+          branch="deps/postgresql-client-$latest"
+          if gh pr list --state open --head "$branch" --json number --jq 'length' | grep -q '^[1-9]'; then
+            echo "PR already exists."
             exit 0
           fi
 
-          gh issue create \
+          git checkout -b "$branch"
+          sed -i "s/postgresql-client-$current/postgresql-client-$latest/" Dockerfile
+          git add Dockerfile
+          git commit -m "Update PostgreSQL client to $latest"
+          git push -u origin "$branch"
+
+          gh pr create \
             --title "Update PostgreSQL client to $latest" \
             --label dependencies \
-            --body "$(cat <<EOF
-          PostgreSQL $latest is available. The Dockerfile currently uses \`postgresql-client-$current\`.
+            --body "PostgreSQL $latest is available (currently on $current).
 
-          ### To upgrade
-
-          Change one line in \`Dockerfile\`:
-
-          \`\`\`dockerfile
-          -    postgresql-client-$current \\
-          +    postgresql-client-$latest \\
-          \`\`\`
-
-          Verify that your PostgreSQL servers are compatible with client version $latest before merging.
-          EOF
-          )"
+          Verify that your PostgreSQL servers are compatible with client version $latest before merging."
