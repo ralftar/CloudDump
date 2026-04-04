@@ -5,6 +5,8 @@ import os
 import shutil
 import socket
 import sys
+import urllib.error
+import urllib.request
 from urllib.parse import urlparse
 
 from clouddump import cfg, log, validate_backup_path
@@ -253,6 +255,116 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
+def _verify_github_token(job, job_id, results):
+    """Verify GitHub tokens and accounts are accessible (warn only)."""
+    for account in cfg(job, "organizations", []):
+        acct_name = cfg(account, "name")
+        token = cfg(account, "token")
+        acct_type = cfg(account, "account_type", "org")
+        if not acct_name or not token or acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
+            continue
+
+        if acct_type == "user":
+            url = f"https://api.github.com/users/{urllib.request.quote(acct_name, safe='')}"
+        else:
+            url = f"https://api.github.com/orgs/{urllib.request.quote(acct_name, safe='')}"
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "CloudDump",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                msg = f"OK: GitHub {acct_type} '{acct_name}' (job {job_id})"
+                log.info("GitHub token verified for %s '%s' (job %s).", acct_type, acct_name, job_id)
+                results.append(msg)
+        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+            reason = str(getattr(exc, "reason", exc))
+            msg = f"WARN: GitHub {acct_type} '{acct_name}' — {reason} (job {job_id})"
+            log.warning("GitHub check failed for %s '%s' (job %s): %s", acct_type, acct_name, job_id, reason)
+            results.append(msg)
+
+
+def _verify_pgsql_databases(job, job_id, results):
+    """Check that configured database names exist on the server (warn only)."""
+    import os
+    import subprocess
+
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        port = str(cfg(server, "port", "5432"))
+        user = cfg(server, "user", "postgres")
+        password = cfg(server, "pass")
+        if not host or not password:
+            continue
+
+        configured_dbs = []
+        for entry in cfg(server, "databases", []):
+            if isinstance(entry, dict):
+                configured_dbs.extend(entry.keys())
+        if not configured_dbs:
+            continue
+
+        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+        proc = subprocess.run(
+            ["psql", "-h", host, "-p", port, "-U", user,
+             "-d", "postgres", "-t", "-A",
+             "-c", "SELECT datname FROM pg_database WHERE datistemplate = false"],
+            env=env, capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode != 0:
+            continue  # TCP check already warned about connectivity
+
+        actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+        for db in configured_dbs:
+            if db not in actual:
+                msg = f"WARN: Database '{db}' not found on {host} (job {job_id})"
+                log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
+                results.append(msg)
+            else:
+                msg = f"OK: Database '{db}' exists on {host} (job {job_id})"
+                log.info("Database '%s' exists on %s (job %s).", db, host, job_id)
+                results.append(msg)
+
+
+def _verify_mysql_databases(job, job_id, results):
+    """Check that configured database names exist on the server (warn only)."""
+    import os
+    import subprocess
+
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        port = str(cfg(server, "port", "3306"))
+        user = cfg(server, "user")
+        password = cfg(server, "pass")
+        if not host or not user or not password:
+            continue
+
+        configured_dbs = list(cfg(server, "databases", []))
+        if not configured_dbs:
+            continue
+
+        env = {**os.environ, "MYSQL_PWD": password}
+        proc = subprocess.run(
+            ["mysql", "-h", host, "-P", port, "-u", user,
+             "--batch", "--skip-column-names", "-e", "SHOW DATABASES"],
+            env=env, capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode != 0:
+            continue  # TCP check already warned about connectivity
+
+        actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+        for db in configured_dbs:
+            if db not in actual:
+                msg = f"WARN: Database '{db}' not found on {host} (job {job_id})"
+                log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
+                results.append(msg)
+            else:
+                msg = f"OK: Database '{db}' exists on {host} (job {job_id})"
+                log.info("Database '%s' exists on %s (job %s).", db, host, job_id)
+                results.append(msg)
+
+
 def _verify_pgsql_tables(job, job_id, results):
     """Check that configured table filter names exist in the database (warn only)."""
     import os
@@ -356,9 +468,11 @@ def verify_connectivity(jobs):
                 if host:
                     _check_tcp(host, port, job_id, job_type, results)
 
-            # Verify configured table references against the live database
             if job_type == "pgsql":
+                _verify_pgsql_databases(job, job_id, results)
                 _verify_pgsql_tables(job, job_id, results)
+            if job_type == "mysql":
+                _verify_mysql_databases(job, job_id, results)
 
         if job_type == "rsync":
             for target in cfg(job, "targets", []):
@@ -371,5 +485,6 @@ def verify_connectivity(jobs):
 
         if job_type == "github":
             _check_tcp("api.github.com", 443, job_id, "GitHub API", results)
+            _verify_github_token(job, job_id, results)
 
     return results
