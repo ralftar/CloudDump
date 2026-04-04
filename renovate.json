@@ -8,6 +8,11 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "github-actions"
+    },
+    {
+      "matchDepNames": ["postgres"],
+      "matchManagers": ["custom.regex"],
+      "commitMessageTopic": "PostgreSQL client"
     }
   ],
   "customManagers": [
