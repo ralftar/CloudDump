@@ -5,14 +5,13 @@ import logging
 import sys
 from datetime import datetime, timezone
 from unittest.mock import patch
-import urllib.error
 import urllib.request
 
 import pytest
 
 from clouddump import redact, fmt_bytes, validate_backup_path, _TextFormatter, _JsonFormatter, _LOG_FORMAT, _LOG_DATEFMT
 from clouddump.email import format_job_config
-from clouddump.config import _check_github, validate_settings, validate_jobs, verify_connectivity
+from clouddump.config import validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 from clouddump.health import _state, update_last_run, update_job_metric, _Handler
 
@@ -483,57 +482,6 @@ def test_redact_ignores_clean_text():
     assert redact(text) == text
 
 
-# ── _check_github ───────────────────────────────────────────────────────────
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_org_success(mock_urlopen):
-    mock_urlopen.return_value.__enter__ = lambda s: s
-    mock_urlopen.return_value.__exit__ = lambda s, *a: None
-    assert _check_github("my-org", "ghp_validtoken", "org") is None
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_user_success(mock_urlopen):
-    mock_urlopen.return_value.__enter__ = lambda s: s
-    mock_urlopen.return_value.__exit__ = lambda s, *a: None
-    assert _check_github("my-user", "ghp_validtoken", "user") is None
-    # Verify it used /users/ not /orgs/
-    url = mock_urlopen.call_args[0][0].full_url
-    assert "/users/my-user" in url
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_bad_token(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 401, "Unauthorized", {}, None)
-    result = _check_github("my-org", "ghp_badtoken")
-    assert "authentication failed" in result
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_forbidden(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 403, "Forbidden", {}, None)
-    result = _check_github("my-org", "ghp_limited")
-    assert "forbidden" in result
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_not_found(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 404, "Not Found", {}, None)
-    result = _check_github("no-such-org", "ghp_token")
-    assert "not found" in result
-
-
-@patch("clouddump.config.urllib.request.urlopen")
-def test_check_github_network_error(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.URLError("Name or service not known")
-    result = _check_github("my-org", "ghp_token")
-    assert "cannot reach" in result
-
-
 def test_validate_jobs_github_invalid_account_type():
     job = _job(type="github", organizations=[
         {"name": "x", "token": "ghp_x", "account_type": "team"}])
@@ -544,36 +492,27 @@ def test_validate_jobs_github_invalid_account_type():
 # ── verify_connectivity ─────────────────────────────────────────────────────
 
 
-@patch("clouddump.config._check_github", return_value=None)
-def test_verify_connectivity_github_org(mock_gh):
+@patch("clouddump.config._check_connectivity", return_value=True)
+def test_verify_connectivity_github_tcp(mock_conn):
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
-    verify_connectivity([job])
-    mock_gh.assert_called_once_with("my-org", "ghp_xxx", "org")
+    results = verify_connectivity([job])
+    mock_conn.assert_called_once_with("api.github.com", 443)
+    assert any("OK" in r and "GitHub API" in r for r in results)
 
 
-@patch("clouddump.config._check_github", return_value=None)
-def test_verify_connectivity_github_user(mock_gh):
-    job = _job(type="github", organizations=[
-        {"name": "my-user", "token": "ghp_xxx", "account_type": "user"}])
-    verify_connectivity([job])
-    mock_gh.assert_called_once_with("my-user", "ghp_xxx", "user")
+@patch("clouddump.config._check_connectivity", return_value=False)
+def test_verify_connectivity_warns_on_failure(mock_conn):
+    """TCP check failure is a warning, not a crash."""
+    job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r for r in results)
 
 
-@patch("clouddump.config._check_github", return_value="auth failed")
-def test_verify_connectivity_github_warns_on_failure(mock_gh):
-    """GitHub check failure is a warning, not a crash."""
-    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
-    verify_connectivity([job])  # should not raise
-    mock_gh.assert_called_once()
-
-
-@patch("clouddump.config._check_github")
-def test_verify_connectivity_skips_invalid_account_type(mock_gh):
-    """Invalid account_type is caught by validate_jobs, not verify_connectivity."""
-    job = _job(type="github", organizations=[
-        {"name": "x", "token": "ghp_x", "account_type": "team"}])
-    verify_connectivity([job])
-    mock_gh.assert_not_called()
+@patch("clouddump.config._check_connectivity", return_value=True)
+def test_verify_connectivity_returns_results(mock_conn):
+    job = _job(type="mysql", servers=[{"host": "mysql.example.com", "port": 3306}])
+    results = verify_connectivity([job])
+    assert len(results) >= 1
 
 
 # ── fmt_bytes ───────────────────────────────────────────────────────────────

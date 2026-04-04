@@ -5,8 +5,6 @@ import os
 import shutil
 import socket
 import sys
-import urllib.request
-import urllib.error
 from urllib.parse import urlparse
 
 from clouddump import cfg, log, validate_backup_path
@@ -24,35 +22,6 @@ def _check_connectivity(host, port, timeout=5):
 
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
 
-
-def _check_github(name, token, account_type="org", timeout=10):
-    """Verify a GitHub token and account are accessible.
-
-    *account_type* is ``"org"`` (default) or ``"user"``.
-    Returns None on success, or an error message string on failure.
-    """
-    if account_type == "user":
-        url = f"https://api.github.com/users/{urllib.request.quote(name, safe='')}"
-    else:
-        url = f"https://api.github.com/orgs/{urllib.request.quote(name, safe='')}"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "CloudDump",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=timeout):
-            return None
-    except urllib.error.HTTPError as exc:
-        if exc.code == 401:
-            return "authentication failed (invalid or expired token)"
-        if exc.code == 403:
-            return "forbidden (token lacks required scopes — needs repo and read:org)"
-        if exc.code == 404:
-            return f"account '{name}' not found (or token lacks access)"
-        return f"HTTP {exc.code}: {exc.reason}"
-    except urllib.error.URLError as exc:
-        return f"cannot reach GitHub API: {exc.reason}"
 
 VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
 VALID_LOG_FORMATS = {"text", "json"}
@@ -238,6 +207,37 @@ def validate_jobs(jobs):
                         log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
                         errors += 1
 
+        # Validate PostgreSQL table filter syntax
+        _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
+        if job_type == "pgsql":
+            for server in cfg(job, "servers", []):
+                for entry in cfg(server, "databases", []):
+                    if not isinstance(entry, dict):
+                        log.error("Database entry must be a dict in job ID %s, got %s.",
+                                  job_id, type(entry).__name__)
+                        errors += 1
+                        continue
+                    for dbname, tbl_cfg in entry.items():
+                        if tbl_cfg is None:
+                            continue
+                        if not isinstance(tbl_cfg, dict):
+                            log.error("Table filter for '%s' must be a dict in job ID %s, got %s.",
+                                      dbname, job_id, type(tbl_cfg).__name__)
+                            errors += 1
+                            continue
+                        unknown = set(tbl_cfg.keys()) - _VALID_TABLE_FILTER_KEYS
+                        if unknown:
+                            log.warning("Unknown table filter key(s) %s for '%s' in job ID %s. "
+                                        "Valid keys: %s.",
+                                        ", ".join(sorted(unknown)), dbname, job_id,
+                                        ", ".join(sorted(_VALID_TABLE_FILTER_KEYS)))
+                        for key in _VALID_TABLE_FILTER_KEYS:
+                            val = tbl_cfg.get(key)
+                            if val is not None and not isinstance(val, list):
+                                log.error("'%s' for '%s' must be a list in job ID %s, got %s.",
+                                          key, dbname, job_id, type(val).__name__)
+                                errors += 1
+
         # Validate account_type for GitHub jobs (config error, not connectivity)
         if job_type == "github":
             for account in cfg(job, "organizations", []):
@@ -253,20 +253,24 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
-def _check_tcp(host, port, job_id, label):
+def _check_tcp(host, port, job_id, label, results=None):
     """TCP connectivity check with consistent logging."""
     if _check_connectivity(host, port):
         log.info("Connectivity OK: %s %s:%s (job %s).", label, host, port, job_id)
+        if results is not None:
+            results.append(f"OK: {label} {host}:{port} (job {job_id})")
     else:
         log.warning("Cannot reach %s %s:%s for job %s.", label, host, port, job_id)
+        if results is not None:
+            results.append(f"WARN: Cannot reach {label} {host}:{port} (job {job_id})")
 
 
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
 
-    Called after config and job listing have been logged, so the output
-    appears in a natural order: config → jobs → verification.
+    Returns a list of result strings for inclusion in the startup email.
     """
+    results = []
     for job in jobs:
         job_id = cfg(job, "id")
         job_type = cfg(job, "type")
@@ -282,7 +286,7 @@ def verify_connectivity(jobs):
                     host = parsed.hostname
                     port = parsed.port or (443 if parsed.scheme == "https" else 80)
                     if host:
-                        _check_tcp(host, port, job_id, "S3 endpoint")
+                        _check_tcp(host, port, job_id, "S3 endpoint", results)
 
         if job_type == "azstorage":
             for target in cfg(job, "blobstorages", []):
@@ -291,14 +295,14 @@ def verify_connectivity(jobs):
                     parsed = urlparse(source.split("?")[0])
                     host = parsed.hostname
                     if host:
-                        _check_tcp(host, 443, job_id, "Azure Blob")
+                        _check_tcp(host, 443, job_id, "Azure Blob", results)
 
         if job_type in ("pgsql", "mysql"):
             for target in cfg(job, "servers", []):
                 host = cfg(target, "host")
                 port = cfg(target, "port", 5432 if job_type == "pgsql" else 3306)
                 if host:
-                    _check_tcp(host, port, job_id, job_type)
+                    _check_tcp(host, port, job_id, job_type, results)
 
         if job_type == "rsync":
             for target in cfg(job, "targets", []):
@@ -307,18 +311,9 @@ def verify_connectivity(jobs):
                 if source and ":" in source:
                     host = source.split(":")[0].split("@")[-1]
                     if host:
-                        _check_tcp(host, port, job_id, "SSH")
+                        _check_tcp(host, port, job_id, "SSH", results)
 
         if job_type == "github":
-            for account in cfg(job, "organizations", []):
-                acct_name = cfg(account, "name")
-                token = cfg(account, "token")
-                acct_type = cfg(account, "account_type", "org")
-                if acct_name and token and acct_type in VALID_GITHUB_ACCOUNT_TYPES:
-                    gh_err = _check_github(acct_name, token, acct_type)
-                    if gh_err:
-                        log.warning("GitHub check failed for %s '%s' in job %s: %s",
-                                    acct_type, acct_name, job_id, gh_err)
-                    else:
-                        log.info("GitHub token verified for %s '%s' in job %s.",
-                                 acct_type, acct_name, job_id)
+            _check_tcp("api.github.com", 443, job_id, "GitHub API", results)
+
+    return results

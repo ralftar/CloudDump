@@ -13,6 +13,20 @@ from clouddump import cfg, fmt_bytes, log, run_cmd, _safe_remove
 _SYSTEM_DATABASES = {"template0", "template1", "postgres"}
 
 
+def _list_tables(host, port, user, password, database):
+    """Query public table names in a database. Returns set or None on failure."""
+    env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "30"}
+    proc = subprocess.run(
+        ["psql", "-h", host, "-p", str(port), "-U", user,
+         "-d", database, "-t", "-A",
+         "-c", "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"],
+        env=env, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+
+
 def _list_databases(host, port, user, password):
     """Query the server for a list of databases via a direct SQL query.
 
@@ -107,6 +121,17 @@ def run_pg_dump(server, logfile_path):
         tbl_cfg = db_table_configs.get(database, {})
         tables_included = tbl_cfg.get("tables_included", [])
         tables_excluded = tbl_cfg.get("tables_excluded", [])
+
+        # Warn if filtered tables don't exist in the database
+        if tables_included or tables_excluded:
+            actual_tables = _list_tables(host, port, user, password, database)
+            if actual_tables is not None:
+                for t in tables_included:
+                    if t.strip() and t.strip() not in actual_tables:
+                        log.warning("tables_included entry '%s' not found in database '%s'.", t.strip(), database)
+                for t in tables_excluded:
+                    if t.strip() and t.strip() not in actual_tables:
+                        log.warning("tables_excluded entry '%s' not found in database '%s'.", t.strip(), database)
 
         cmd = ["pg_dump", "-h", host, "-p", port, "-U", user, "-d", database, "-F", "custom"]
         if clouddump.debug:
