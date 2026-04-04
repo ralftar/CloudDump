@@ -511,19 +511,26 @@ def test_verify_connectivity_github_warns_on_failure(mock_urlopen):
     assert any("WARN" in r for r in results)
 
 
-@patch("clouddump.config._verify_tcp_connectivity", return_value=False)
-def test_verify_connectivity_tcp_fallback(mock_conn):
-    """TCP fallback for DB jobs without configured databases."""
-    job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432}])
+@patch("subprocess.run")
+def test_verify_connectivity_db_connection(mock_run):
+    """DB without configured databases verifies credentials."""
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "1\n"
+    mock_run.return_value.stderr = ""
+    job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432, "pass": "secret"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "pgsql" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_connectivity_db_connection_failure(mock_run):
+    """DB connection failure is a warning."""
+    mock_run.return_value.returncode = 2
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "connection refused\n"
+    job = _job(type="mysql", servers=[{"host": "mysql.example.com", "port": 3306, "user": "backup", "pass": "secret"}])
     results = verify_connectivity([job])
     assert any("WARN" in r for r in results)
-
-
-@patch("clouddump.config._verify_tcp_connectivity", return_value=True)
-def test_verify_connectivity_returns_results(mock_conn):
-    job = _job(type="mysql", servers=[{"host": "mysql.example.com", "port": 3306}])
-    results = verify_connectivity([job])
-    assert len(results) >= 1
 
 
 # ── fmt_bytes ───────────────────────────────────────────────────────────────

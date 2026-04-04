@@ -3,7 +3,6 @@
 import json
 import os
 import shutil
-import socket
 import sys
 import urllib.error
 import urllib.request
@@ -11,15 +10,6 @@ from urllib.parse import urlparse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
-
-
-def _verify_tcp_connectivity(host, port, timeout=5):
-    """Test TCP connectivity. Returns True if reachable."""
-    try:
-        with socket.create_connection((host, int(port)), timeout=timeout):
-            return True
-    except (OSError, ValueError):
-        return False
 
 
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
@@ -255,6 +245,169 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
+def _verify_s3_bucket(job, job_id, results):
+    """Verify S3 bucket accessibility and credentials (warn only)."""
+    import subprocess
+
+    for bucket in cfg(job, "buckets", []):
+        source = cfg(bucket, "source")
+        if not source:
+            continue
+
+        env = {**os.environ}
+        key_id = cfg(bucket, "aws_access_key_id")
+        secret = cfg(bucket, "aws_secret_access_key")
+        region = cfg(bucket, "aws_region", "us-east-1")
+        endpoint = cfg(bucket, "endpoint_url")
+        if key_id:
+            env["AWS_ACCESS_KEY_ID"] = key_id
+        if secret:
+            env["AWS_SECRET_ACCESS_KEY"] = secret
+        if region:
+            env["AWS_DEFAULT_REGION"] = region
+
+        cmd = ["aws", "s3", "ls", source, "--page-size", "1"]
+        if endpoint:
+            cmd += ["--endpoint-url", endpoint]
+
+        try:
+            proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            msg = f"WARN: S3 bucket '{source}' timed out (job {job_id})"
+            log.warning("S3 bucket '%s' timed out (job %s).", source, job_id)
+            results.append(msg)
+            continue
+
+        if proc.returncode == 0:
+            msg = f"OK: S3 bucket '{source}' (job {job_id})"
+            log.info("S3 bucket verified: %s (job %s).", source, job_id)
+            results.append(msg)
+        else:
+            err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "unknown error"
+            msg = f"WARN: S3 bucket '{source}' — {err} (job {job_id})"
+            log.warning("S3 bucket check failed for '%s' (job %s): %s", source, job_id, err)
+            results.append(msg)
+
+
+def _verify_az_container(job, job_id, results):
+    """Verify Azure Blob Storage container accessibility (warn only)."""
+    import subprocess
+
+    for blob in cfg(job, "blobstorages", []):
+        source = cfg(blob, "source")
+        if not source:
+            continue
+
+        source_display = source.split("?")[0]
+        cmd = ["azcopy", "list", source, "--running-tally"]
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            msg = f"WARN: Azure container '{source_display}' timed out (job {job_id})"
+            log.warning("Azure container '%s' timed out (job %s).", source_display, job_id)
+            results.append(msg)
+            continue
+
+        if proc.returncode == 0:
+            msg = f"OK: Azure container '{source_display}' (job {job_id})"
+            log.info("Azure container verified: %s (job %s).", source_display, job_id)
+            results.append(msg)
+        else:
+            err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "unknown error"
+            msg = f"WARN: Azure container '{source_display}' — {err} (job {job_id})"
+            log.warning("Azure container check failed for '%s' (job %s): %s", source_display, job_id, err)
+            results.append(msg)
+
+
+def _verify_rsync_ssh(job, job_id, results):
+    """Verify SSH connectivity and remote path exists (warn only)."""
+    import subprocess
+
+    for target in cfg(job, "targets", []):
+        source = cfg(target, "source")
+        ssh_key = cfg(target, "ssh_key")
+        ssh_port = str(cfg(target, "ssh_port", "22"))
+        if not source or not ssh_key or ":" not in source:
+            continue
+
+        host_part, remote_path = source.split(":", 1)
+        cmd = [
+            "ssh", "-i", ssh_key, "-p", ssh_port,
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            host_part, f"test -d {remote_path}",
+        ]
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            msg = f"WARN: SSH to '{host_part}' timed out (job {job_id})"
+            log.warning("SSH to '%s' timed out (job %s).", host_part, job_id)
+            results.append(msg)
+            continue
+
+        if proc.returncode == 0:
+            msg = f"OK: SSH '{source}' (job {job_id})"
+            log.info("SSH path verified: %s (job %s).", source, job_id)
+            results.append(msg)
+        else:
+            err = proc.stderr.strip() or "path not found or SSH failed"
+            msg = f"WARN: SSH '{source}' — {err} (job {job_id})"
+            log.warning("SSH check failed for '%s' (job %s): %s", source, job_id, err)
+            results.append(msg)
+
+
+def _verify_db_connection(job, job_id, job_type, results):
+    """Verify database credentials by listing databases (warn only).
+
+    Used when no explicit database names are configured — the deepest
+    check possible without configured references.
+    """
+    import subprocess
+
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        password = cfg(server, "pass")
+        if not host or not password:
+            continue
+
+        if job_type == "pgsql":
+            port = str(cfg(server, "port", "5432"))
+            user = cfg(server, "user", "postgres")
+            env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+            cmd = ["psql", "-h", host, "-p", port, "-U", user,
+                   "-d", "postgres", "-t", "-A",
+                   "-c", "SELECT 1"]
+        else:
+            port = str(cfg(server, "port", "3306"))
+            user = cfg(server, "user")
+            if not user:
+                continue
+            env = {**os.environ, "MYSQL_PWD": password}
+            cmd = ["mysql", "-h", host, "-P", port, "-u", user,
+                   "--batch", "--skip-column-names", "-e", "SELECT 1"]
+
+        try:
+            proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            msg = f"WARN: {job_type} connection to {host}:{port} timed out (job {job_id})"
+            log.warning("%s connection to %s:%s timed out (job %s).", job_type, host, port, job_id)
+            results.append(msg)
+            continue
+
+        if proc.returncode == 0:
+            msg = f"OK: {job_type} {user}@{host}:{port} (job {job_id})"
+            log.info("%s connection verified: %s@%s:%s (job %s).", job_type, user, host, port, job_id)
+            results.append(msg)
+        else:
+            err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "connection failed"
+            msg = f"WARN: {job_type} {user}@{host}:{port} — {err} (job {job_id})"
+            log.warning("%s connection failed for %s@%s:%s (job %s): %s", job_type, user, host, port, job_id, err)
+            results.append(msg)
+
+
 def _verify_github_token(job, job_id, results):
     """Verify GitHub tokens and accounts are accessible (warn only)."""
     for account in cfg(job, "organizations", []):
@@ -417,18 +570,6 @@ def _verify_pgsql_tables(job, job_id, results):
                         results.append(msg)
 
 
-def _verify_tcp(host, port, job_id, label, results=None):
-    """TCP connectivity check with consistent logging."""
-    if _verify_tcp_connectivity(host, port):
-        log.info("Connectivity OK: %s %s:%s (job %s).", label, host, port, job_id)
-        if results is not None:
-            results.append(f"OK: {label} {host}:{port} (job {job_id})")
-    else:
-        log.warning("Cannot reach %s %s:%s for job %s.", label, host, port, job_id)
-        if results is not None:
-            results.append(f"WARN: Cannot reach {label} {host}:{port} (job {job_id})")
-
-
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
 
@@ -442,24 +583,10 @@ def verify_connectivity(jobs):
             continue
 
         if job_type == "s3bucket":
-            for target in cfg(job, "buckets", []):
-                endpoint = cfg(target, "endpoint_url")
-                if endpoint:
-                    # Parse host:port from endpoint URL
-                    parsed = urlparse(endpoint)
-                    host = parsed.hostname
-                    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-                    if host:
-                        _verify_tcp(host, port, job_id, "S3 endpoint", results)
+            _verify_s3_bucket(job, job_id, results)
 
         if job_type == "azstorage":
-            for target in cfg(job, "blobstorages", []):
-                source = cfg(target, "source")
-                if source:
-                    parsed = urlparse(source.split("?")[0])
-                    host = parsed.hostname
-                    if host:
-                        _verify_tcp(host, 443, job_id, "Azure Blob", results)
+            _verify_az_container(job, job_id, results)
 
         if job_type == "pgsql":
             has_configured_dbs = any(
@@ -468,11 +595,7 @@ def verify_connectivity(jobs):
                 _verify_pgsql_databases(job, job_id, results)
                 _verify_pgsql_tables(job, job_id, results)
             else:
-                for target in cfg(job, "servers", []):
-                    host = cfg(target, "host")
-                    port = cfg(target, "port", 5432)
-                    if host:
-                        _verify_tcp(host, port, job_id, "pgsql", results)
+                _verify_db_connection(job, job_id, "pgsql", results)
 
         if job_type == "mysql":
             has_configured_dbs = any(
@@ -480,20 +603,10 @@ def verify_connectivity(jobs):
             if has_configured_dbs:
                 _verify_mysql_databases(job, job_id, results)
             else:
-                for target in cfg(job, "servers", []):
-                    host = cfg(target, "host")
-                    port = cfg(target, "port", 3306)
-                    if host:
-                        _verify_tcp(host, port, job_id, "mysql", results)
+                _verify_db_connection(job, job_id, "mysql", results)
 
         if job_type == "rsync":
-            for target in cfg(job, "targets", []):
-                source = cfg(target, "source")
-                port = cfg(target, "ssh_port", 22)
-                if source and ":" in source:
-                    host = source.split(":")[0].split("@")[-1]
-                    if host:
-                        _verify_tcp(host, port, job_id, "SSH", results)
+            _verify_rsync_ssh(job, job_id, results)
 
         if job_type == "github":
             _verify_github_token(job, job_id, results)
