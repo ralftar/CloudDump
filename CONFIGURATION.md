@@ -27,7 +27,7 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `smtp_user` | No | SMTP username |
 | `smtp_pass` | No | SMTP password |
 | `smtp_security` | No | Encryption mode: `"ssl"` (default, port 465), `"starttls"` (port 587), `"none"` (plain) |
-| `mail_from` | No | Sender address |
+| `mail_from` | No | Sender address (e.g. `"backup@example.com"` or `"CloudDump <backup@example.com>"`) |
 | `mail_to` | No | Recipient address(es) — comma-separated or JSON array |
 | `email_log_attached` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
 | `crontab` | **Yes** | Standard 5-field cron expression — schedule for running all jobs |
@@ -37,6 +37,13 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 
 
 Email is optional. If SMTP is not configured, CloudDump runs silently.
+
+`mail_from` is used directly as the `From` header. Use a bare address
+(`"backup@example.com"`) or include a display name (`"CloudDump <backup@example.com>"`).
+Avoid putting the email address as the display name (e.g.
+`"backup@example.com <backup@example.com>"`) — mail clients like Outlook flag this
+pattern as a phishing indicator.
+
 `mail_to` accepts multiple recipients as a comma-separated string
 (`"ops@example.com, oncall@example.com"`) or a JSON array
 (`["ops@example.com", "oncall@example.com"]`).

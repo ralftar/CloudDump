@@ -60,7 +60,7 @@ def send_email(config, subject, body, attachments=None):
         recipients = [r.strip() for r in mail_to.split(",") if r.strip()]
 
     msg = MIMEMultipart()
-    msg["From"] = f"{mail_from} <{mail_from}>"
+    msg["From"] = mail_from
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
