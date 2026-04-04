@@ -19,6 +19,7 @@ VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
 VALID_LOG_FORMATS = {"text", "json"}
 CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"}
+_VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
 TOOL_REQUIREMENTS = {
     "s3bucket": ["aws"],
     "azstorage": ["azcopy"],
@@ -200,7 +201,6 @@ def validate_jobs(jobs):
                         errors += 1
 
         # Validate PostgreSQL table filter syntax
-        _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
         if job_type == "pgsql":
             for server in cfg(job, "servers", []):
                 for entry in cfg(server, "databases", []):
@@ -378,8 +378,12 @@ def _verify_github_token(job, job_id, results):
             log.warning("%s failed (job %s): %s", label, job_id, reason)
 
 
-def _verify_pgsql_databases(job, job_id, results):
-    """Check that configured database names exist on the server (warn only)."""
+def _verify_pgsql(job, job_id, results):
+    """Verify configured PostgreSQL databases and table filters (warn only).
+
+    One connection to list databases, then one per database that has table
+    filters. Skips table checks if the server is unreachable.
+    """
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         port = str(cfg(server, "port", "5432"))
@@ -387,28 +391,54 @@ def _verify_pgsql_databases(job, job_id, results):
         password = cfg(server, "pass")
         if not host or not password:
             continue
-        configured_dbs = []
+        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+
+        # Collect configured database names and their table filters
+        db_configs = {}  # {dbname: tbl_cfg or {}}
         for entry in cfg(server, "databases", []):
             if isinstance(entry, dict):
-                configured_dbs.extend(entry.keys())
-        if not configured_dbs:
+                for dbname, tbl_cfg in entry.items():
+                    db_configs[dbname] = tbl_cfg if isinstance(tbl_cfg, dict) else {}
+        if not db_configs:
             continue
-        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+
+        # Verify databases exist
         proc = _run_verify(
             ["psql", "-h", host, "-p", port, "-U", user, "-d", "postgres", "-t", "-A",
              "-c", "SELECT datname FROM pg_database WHERE datistemplate = false"],
             f"pgsql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
         if not proc:
             continue
-        actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
-        for db in configured_dbs:
-            if db not in actual:
+        actual_dbs = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+        for db in db_configs:
+            if db not in actual_dbs:
                 results.append(f"WARN: Database '{db}' not found on {host} (job {job_id})")
                 log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
 
+        # Verify table filters for databases that exist
+        for dbname, tbl_cfg in db_configs.items():
+            if dbname not in actual_dbs or not tbl_cfg:
+                continue
+            filters = tbl_cfg.get("tables_included", []) + tbl_cfg.get("tables_excluded", [])
+            if not any(t.strip() for t in filters):
+                continue
+            proc = _run_verify(
+                ["psql", "-h", host, "-p", port, "-U", user, "-d", dbname, "-t", "-A",
+                 "-c", "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
+                f"pgsql tables in '{dbname}'@{host}", job_id, results, env=env, timeout=10)
+            if not proc:
+                continue
+            actual_tables = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+            for key in ("tables_included", "tables_excluded"):
+                for t in tbl_cfg.get(key, []):
+                    t = t.strip()
+                    if t and t not in actual_tables:
+                        results.append(f"WARN: {key} '{t}' not found in {dbname}@{host} (job {job_id})")
+                        log.warning("%s '%s' not found in %s@%s (job %s).", key, t, dbname, host, job_id)
 
-def _verify_mysql_databases(job, job_id, results):
-    """Check that configured database names exist on the server (warn only)."""
+
+def _verify_mysql(job, job_id, results):
+    """Verify configured MySQL databases exist on the server (warn only)."""
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         port = str(cfg(server, "port", "3306"))
@@ -433,43 +463,6 @@ def _verify_mysql_databases(job, job_id, results):
                 log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
 
 
-def _verify_pgsql_tables(job, job_id, results):
-    """Check that configured table filter names exist in the database (warn only)."""
-    for server in cfg(job, "servers", []):
-        host = cfg(server, "host")
-        port = str(cfg(server, "port", "5432"))
-        user = cfg(server, "user", "postgres")
-        password = cfg(server, "pass")
-        if not host or not password:
-            continue
-        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
-        for entry in cfg(server, "databases", []):
-            if not isinstance(entry, dict):
-                continue
-            for dbname, tbl_cfg in entry.items():
-                if not tbl_cfg or not isinstance(tbl_cfg, dict):
-                    continue
-                filters = tbl_cfg.get("tables_included", []) + tbl_cfg.get("tables_excluded", [])
-                if not any(t.strip() for t in filters):
-                    continue
-                import subprocess
-                proc = subprocess.run(
-                    ["psql", "-h", host, "-p", port, "-U", user, "-d", dbname, "-t", "-A",
-                     "-c", "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
-                    env=env, capture_output=True, text=True, timeout=10)
-                if proc.returncode != 0:
-                    results.append(f"WARN: Cannot query tables in {dbname}@{host} (job {job_id})")
-                    log.warning("Cannot query tables in %s@%s (job %s).", dbname, host, job_id)
-                    continue
-                actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
-                for key in ("tables_included", "tables_excluded"):
-                    for t in tbl_cfg.get(key, []):
-                        t = t.strip()
-                        if t and t not in actual:
-                            results.append(f"WARN: {key} '{t}' not found in {dbname}@{host} (job {job_id})")
-                            log.warning("%s '%s' not found in %s@%s (job %s).", key, t, dbname, host, job_id)
-
-
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
 
@@ -489,19 +482,14 @@ def verify_connectivity(jobs):
             _verify_az_container(job, job_id, results)
 
         if job_type == "pgsql":
-            has_configured_dbs = any(
-                cfg(s, "databases", []) for s in cfg(job, "servers", []))
-            if has_configured_dbs:
-                _verify_pgsql_databases(job, job_id, results)
-                _verify_pgsql_tables(job, job_id, results)
+            if any(cfg(s, "databases", []) for s in cfg(job, "servers", [])):
+                _verify_pgsql(job, job_id, results)
             else:
                 _verify_db_connection(job, job_id, "pgsql", results)
 
         if job_type == "mysql":
-            has_configured_dbs = any(
-                cfg(s, "databases", []) for s in cfg(job, "servers", []))
-            if has_configured_dbs:
-                _verify_mysql_databases(job, job_id, results)
+            if any(cfg(s, "databases", []) for s in cfg(job, "servers", [])):
+                _verify_mysql(job, job_id, results)
             else:
                 _verify_db_connection(job, job_id, "mysql", results)
 
