@@ -13,7 +13,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["^Dockerfile$"],
+      "managerFilePatterns": ["/^Dockerfile$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>[^\\s]+)\\s+depName=(?<depName>[^\\s]+)\\s+versioning=(?<versioning>[^\\s]+)\\s*\\n\\s*postgresql-client-(?<currentValue>\\d+)\\s"
       ]
