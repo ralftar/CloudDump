@@ -461,18 +461,30 @@ def verify_connectivity(jobs):
                     if host:
                         _verify_tcp(host, 443, job_id, "Azure Blob", results)
 
-        if job_type in ("pgsql", "mysql"):
-            for target in cfg(job, "servers", []):
-                host = cfg(target, "host")
-                port = cfg(target, "port", 5432 if job_type == "pgsql" else 3306)
-                if host:
-                    _verify_tcp(host, port, job_id, job_type, results)
-
-            if job_type == "pgsql":
+        if job_type == "pgsql":
+            has_configured_dbs = any(
+                cfg(s, "databases", []) for s in cfg(job, "servers", []))
+            if has_configured_dbs:
                 _verify_pgsql_databases(job, job_id, results)
                 _verify_pgsql_tables(job, job_id, results)
-            if job_type == "mysql":
+            else:
+                for target in cfg(job, "servers", []):
+                    host = cfg(target, "host")
+                    port = cfg(target, "port", 5432)
+                    if host:
+                        _verify_tcp(host, port, job_id, "pgsql", results)
+
+        if job_type == "mysql":
+            has_configured_dbs = any(
+                cfg(s, "databases", []) for s in cfg(job, "servers", []))
+            if has_configured_dbs:
                 _verify_mysql_databases(job, job_id, results)
+            else:
+                for target in cfg(job, "servers", []):
+                    host = cfg(target, "host")
+                    port = cfg(target, "port", 3306)
+                    if host:
+                        _verify_tcp(host, port, job_id, "mysql", results)
 
         if job_type == "rsync":
             for target in cfg(job, "targets", []):
@@ -484,7 +496,6 @@ def verify_connectivity(jobs):
                         _verify_tcp(host, port, job_id, "SSH", results)
 
         if job_type == "github":
-            _verify_tcp("api.github.com", 443, job_id, "GitHub API", results)
             _verify_github_token(job, job_id, results)
 
     return results

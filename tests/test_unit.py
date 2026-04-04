@@ -5,6 +5,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from unittest.mock import patch
+import urllib.error
 import urllib.request
 
 import pytest
@@ -492,17 +493,27 @@ def test_validate_jobs_github_invalid_account_type():
 # ── verify_connectivity ─────────────────────────────────────────────────────
 
 
-@patch("clouddump.config._verify_tcp_connectivity", return_value=True)
-def test_verify_connectivity_github_tcp(mock_conn):
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_connectivity_github_token(mock_urlopen):
+    mock_urlopen.return_value.__enter__ = lambda s: s
+    mock_urlopen.return_value.__exit__ = lambda s, *a: None
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
     results = verify_connectivity([job])
-    mock_conn.assert_called_once_with("api.github.com", 443)
-    assert any("OK" in r and "GitHub API" in r for r in results)
+    assert any("OK" in r and "GitHub" in r for r in results)
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_connectivity_github_warns_on_failure(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://api.github.com/orgs/x", 401, "Unauthorized", {}, None)
+    job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r for r in results)
 
 
 @patch("clouddump.config._verify_tcp_connectivity", return_value=False)
-def test_verify_connectivity_warns_on_failure(mock_conn):
-    """TCP check failure is a warning, not a crash."""
+def test_verify_connectivity_tcp_fallback(mock_conn):
+    """TCP fallback for DB jobs without configured databases."""
     job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432}])
     results = verify_connectivity([job])
     assert any("WARN" in r for r in results)
