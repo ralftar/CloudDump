@@ -279,7 +279,9 @@ def _verify_s3_bucket(job, job_id, results):
             val = cfg(bucket, key)
             if val:
                 env[envvar] = val
-        cmd = ["aws", "s3", "ls", source, "--page-size", "1"]
+        # Extract bucket name from s3://bucket/prefix
+        bucket_name = source.replace("s3://", "").split("/")[0]
+        cmd = ["aws", "s3api", "head-bucket", "--bucket", bucket_name]
         endpoint = cfg(bucket, "endpoint_url")
         if endpoint:
             cmd += ["--endpoint-url", endpoint]
@@ -287,14 +289,28 @@ def _verify_s3_bucket(job, job_id, results):
 
 
 def _verify_az_container(job, job_id, results):
-    """Verify Azure Blob Storage container accessibility (warn only)."""
+    """Verify Azure Blob Storage container accessibility (warn only).
+
+    Uses a HEAD request with the SAS-token URL. Azure returns 200 if the
+    container exists and the token is valid — no blobs are listed.
+    """
     for blob in cfg(job, "blobstorages", []):
         source = cfg(blob, "source")
         if not source:
             continue
-        _run_verify(
-            ["azcopy", "list", source, "--running-tally"],
-            f"Azure '{source.split('?')[0]}'", job_id, results)
+        label = f"Azure '{source.split('?')[0]}'"
+        # restype=container on the SAS URL returns container metadata only
+        sep = "&" if "?" in source else "?"
+        url = f"{source}{sep}restype=container&comp=metadata"
+        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "CloudDump"})
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                results.append(f"OK: {label} (job {job_id})")
+                log.info("%s verified (job %s).", label, job_id)
+        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+            reason = str(getattr(exc, "reason", exc))
+            results.append(f"WARN: {label} — {reason} (job {job_id})")
+            log.warning("%s failed (job %s): %s", label, job_id, reason)
 
 
 def _verify_rsync_ssh(job, job_id, results):
