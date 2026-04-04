@@ -253,6 +253,58 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
+def _verify_pgsql_tables(job, job_id, results):
+    """Check that configured table filter names exist in the database (warn only)."""
+    import os
+    import subprocess
+
+    for server in cfg(job, "servers", []):
+        host = cfg(server, "host")
+        port = str(cfg(server, "port", "5432"))
+        user = cfg(server, "user", "postgres")
+        password = cfg(server, "pass")
+        if not host or not password:
+            continue
+
+        for entry in cfg(server, "databases", []):
+            if not isinstance(entry, dict):
+                continue
+            for dbname, tbl_cfg in entry.items():
+                if not tbl_cfg or not isinstance(tbl_cfg, dict):
+                    continue
+                tables_included = tbl_cfg.get("tables_included", [])
+                tables_excluded = tbl_cfg.get("tables_excluded", [])
+                if not tables_included and not tables_excluded:
+                    continue
+
+                env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+                proc = subprocess.run(
+                    ["psql", "-h", host, "-p", port, "-U", user,
+                     "-d", dbname, "-t", "-A",
+                     "-c", "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
+                    env=env, capture_output=True, text=True, timeout=10,
+                )
+                if proc.returncode != 0:
+                    msg = f"WARN: Cannot query tables in {dbname}@{host} (job {job_id})"
+                    log.warning("Cannot query tables in %s@%s for job %s.", dbname, host, job_id)
+                    results.append(msg)
+                    continue
+
+                actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+                for t in tables_included:
+                    t = t.strip()
+                    if t and t not in actual:
+                        msg = f"WARN: tables_included '{t}' not found in {dbname}@{host} (job {job_id})"
+                        log.warning("tables_included '%s' not found in %s@%s (job %s).", t, dbname, host, job_id)
+                        results.append(msg)
+                for t in tables_excluded:
+                    t = t.strip()
+                    if t and t not in actual:
+                        msg = f"WARN: tables_excluded '{t}' not found in {dbname}@{host} (job {job_id})"
+                        log.warning("tables_excluded '%s' not found in %s@%s (job %s).", t, dbname, host, job_id)
+                        results.append(msg)
+
+
 def _check_tcp(host, port, job_id, label, results=None):
     """TCP connectivity check with consistent logging."""
     if _check_connectivity(host, port):
@@ -303,6 +355,10 @@ def verify_connectivity(jobs):
                 port = cfg(target, "port", 5432 if job_type == "pgsql" else 3306)
                 if host:
                     _check_tcp(host, port, job_id, job_type, results)
+
+            # Verify configured table references against the live database
+            if job_type == "pgsql":
+                _verify_pgsql_tables(job, job_id, results)
 
         if job_type == "rsync":
             for target in cfg(job, "targets", []):
