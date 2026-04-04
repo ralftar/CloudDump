@@ -98,8 +98,9 @@ config.json ──> [Orchestrator] ──> aws s3 sync
 All jobs share a single top-level `crontab`. When the schedule triggers,
 every job runs in sequence — in config order. No jobs are skipped.
 This is by design: sequential execution is easier to debug, produces
-predictable resource usage, and avoids contention when multiple jobs
-write to the same storage. If you need different schedules or parallel
+clean Docker log output, keeps resource usage predictable, and avoids
+contention when multiple jobs write to the same storage. It also
+mirrors how backups naturally work — one thing at a time. If you need different schedules or parallel
 execution, run multiple CloudDump instances with separate configurations.
 
 ### Bundled tools
