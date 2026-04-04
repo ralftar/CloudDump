@@ -14,19 +14,10 @@ from clouddump import cfg, fmt_bytes, log, redact
 def _resolve_smtp_security(config):
     """Determine SMTP security mode from config.
 
-    Supports the new ``smtp_security`` field (``"ssl"``, ``"starttls"``,
-    ``"none"``) and falls back to the legacy ``smtp_ssl`` boolean for
-    backwards compatibility.  Default is ``"ssl"``.
+    Supports ``smtp_security`` field (``"ssl"``, ``"starttls"``,
+    ``"none"``).  Default is ``"ssl"``.
     """
-    explicit = cfg(config, "smtp_security")
-    if explicit:
-        return explicit
-
-    # Legacy: smtp_ssl boolean
-    smtp_ssl = cfg(config, "smtp_ssl")
-    if smtp_ssl is False:
-        return "starttls"
-    return "ssl"
+    return cfg(config, "smtp_security") or "ssl"
 
 
 def send_email(config, subject, body, attachments=None):
@@ -37,8 +28,6 @@ def send_email(config, subject, body, attachments=None):
     - ``"ssl"`` (default) — SMTP_SSL, typically port 465.
     - ``"starttls"`` — STARTTLS upgrade, typically port 587.
     - ``"none"`` — plain SMTP, no encryption (local relays only).
-
-    Legacy ``smtp_ssl: true/false`` is supported for backwards compatibility.
 
     Silently skips if smtp_server, smtp_port, or mail_to are not configured.
     Logs but does not raise on send failure.

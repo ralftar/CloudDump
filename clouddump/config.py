@@ -84,7 +84,7 @@ def load_config():
 def validate_settings(config):
     """Validate top-level config settings. Returns error count."""
     errors = 0
-    for field in ("debug", "smtp_ssl", "email_log_attached", "health_log"):
+    for field in ("debug", "email_log_attached", "health_log"):
         val = config.get(field)
         if val is not None and not isinstance(val, bool):
             log.error("Setting '%s' must be true/false (boolean), got %s.", field, type(val).__name__)
