@@ -533,6 +533,115 @@ def test_verify_connectivity_db_connection_failure(mock_run):
     assert any("WARN" in r for r in results)
 
 
+@patch("subprocess.run")
+def test_verify_s3_bucket_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+    job = _job(type="s3bucket", buckets=[{
+        "source": "s3://my-bucket/prefix",
+        "aws_access_key_id": "AKIA...", "aws_secret_access_key": "secret", "aws_region": "eu-west-1"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "S3" in r for r in results)
+    cmd = mock_run.call_args[0][0]
+    assert "head-bucket" in cmd
+    assert "my-bucket" in cmd
+
+
+@patch("subprocess.run")
+def test_verify_s3_bucket_failure(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "404 Not Found\n"
+    job = _job(type="s3bucket", buckets=[{"source": "s3://bad-bucket"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "S3" in r for r in results)
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_az_container_ok(mock_urlopen):
+    mock_urlopen.return_value.__enter__ = lambda s: s
+    mock_urlopen.return_value.__exit__ = lambda s, *a: None
+    job = _job(type="azstorage", blobstorages=[{
+        "source": "https://account.blob.core.windows.net/container?sv=2021&sig=xxx"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "Azure" in r for r in results)
+
+
+@patch("clouddump.config.urllib.request.urlopen")
+def test_verify_az_container_failure(mock_urlopen):
+    mock_urlopen.side_effect = urllib.error.HTTPError(
+        "https://account.blob.core.windows.net/", 403, "Forbidden", {}, None)
+    job = _job(type="azstorage", blobstorages=[{
+        "source": "https://account.blob.core.windows.net/container?sv=2021&sig=bad"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "Azure" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_rsync_ssh_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+    job = _job(type="rsync", targets=[{
+        "source": "user@host.example.com:/data", "ssh_key": "/config/id_ed25519"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "SSH" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_rsync_ssh_failure(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "Permission denied\n"
+    job = _job(type="rsync", targets=[{
+        "source": "user@host.example.com:/data", "ssh_key": "/config/id_ed25519"}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "SSH" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_pgsql_databases_and_tables(mock_run):
+    """Configured databases + table filters verified in one flow."""
+    # First call: list databases. Second call: list tables.
+    db_list = type("Proc", (), {"returncode": 0, "stdout": "mydb\nother\n", "stderr": ""})()
+    tbl_list = type("Proc", (), {"returncode": 0, "stdout": "users\norders\n", "stderr": ""})()
+    mock_run.side_effect = [db_list, tbl_list]
+    job = _job(type="pgsql", servers=[{
+        "host": "pg.example.com", "pass": "secret",
+        "databases": [{"mydb": {"tables_excluded": ["missing_table"]}}]}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "pgsql" in r for r in results)
+    assert any("WARN" in r and "missing_table" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_pgsql_skips_tables_when_db_missing(mock_run):
+    """Table filter check skipped for databases that don't exist."""
+    db_list = type("Proc", (), {"returncode": 0, "stdout": "other\n", "stderr": ""})()
+    mock_run.return_value = db_list
+    job = _job(type="pgsql", servers=[{
+        "host": "pg.example.com", "pass": "secret",
+        "databases": [{"noexist": {"tables_included": ["t1"]}}]}])
+    results = verify_connectivity([job])
+    assert any("WARN" in r and "noexist" in r for r in results)
+    assert not any("t1" in r for r in results)  # table check skipped
+    assert mock_run.call_count == 1  # only the DB list query
+
+
+@patch("subprocess.run")
+def test_verify_mysql_databases(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "app_db\nanalytics\n"
+    mock_run.return_value.stderr = ""
+    job = _job(type="mysql", servers=[{
+        "host": "mysql.example.com", "user": "backup", "pass": "secret",
+        "databases": ["app_db", "gone_db"]}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "mysql" in r for r in results)
+    assert any("WARN" in r and "gone_db" in r for r in results)
+
+
 # ── fmt_bytes ───────────────────────────────────────────────────────────────
 
 
