@@ -245,167 +245,95 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
+def _run_verify(cmd, label, job_id, results, env=None, timeout=15):
+    """Run a command and log OK/WARN. Returns the CompletedProcess or None."""
+    import subprocess
+    try:
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        results.append(f"WARN: {label} timed out (job {job_id})")
+        log.warning("%s timed out (job %s).", label, job_id)
+        return None
+
+    if proc.returncode == 0:
+        results.append(f"OK: {label} (job {job_id})")
+        log.info("%s verified (job %s).", label, job_id)
+        return proc
+
+    err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "failed"
+    results.append(f"WARN: {label} — {err} (job {job_id})")
+    log.warning("%s failed (job %s): %s", label, job_id, err)
+    return None
+
+
 def _verify_s3_bucket(job, job_id, results):
     """Verify S3 bucket accessibility and credentials (warn only)."""
-    import subprocess
-
     for bucket in cfg(job, "buckets", []):
         source = cfg(bucket, "source")
         if not source:
             continue
-
         env = {**os.environ}
-        key_id = cfg(bucket, "aws_access_key_id")
-        secret = cfg(bucket, "aws_secret_access_key")
-        region = cfg(bucket, "aws_region", "us-east-1")
-        endpoint = cfg(bucket, "endpoint_url")
-        if key_id:
-            env["AWS_ACCESS_KEY_ID"] = key_id
-        if secret:
-            env["AWS_SECRET_ACCESS_KEY"] = secret
-        if region:
-            env["AWS_DEFAULT_REGION"] = region
-
+        for key, envvar in [("aws_access_key_id", "AWS_ACCESS_KEY_ID"),
+                            ("aws_secret_access_key", "AWS_SECRET_ACCESS_KEY"),
+                            ("aws_region", "AWS_DEFAULT_REGION")]:
+            val = cfg(bucket, key)
+            if val:
+                env[envvar] = val
         cmd = ["aws", "s3", "ls", source, "--page-size", "1"]
+        endpoint = cfg(bucket, "endpoint_url")
         if endpoint:
             cmd += ["--endpoint-url", endpoint]
-
-        try:
-            proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
-        except subprocess.TimeoutExpired:
-            msg = f"WARN: S3 bucket '{source}' timed out (job {job_id})"
-            log.warning("S3 bucket '%s' timed out (job %s).", source, job_id)
-            results.append(msg)
-            continue
-
-        if proc.returncode == 0:
-            msg = f"OK: S3 bucket '{source}' (job {job_id})"
-            log.info("S3 bucket verified: %s (job %s).", source, job_id)
-            results.append(msg)
-        else:
-            err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "unknown error"
-            msg = f"WARN: S3 bucket '{source}' — {err} (job {job_id})"
-            log.warning("S3 bucket check failed for '%s' (job %s): %s", source, job_id, err)
-            results.append(msg)
+        _run_verify(cmd, f"S3 '{source}'", job_id, results, env=env)
 
 
 def _verify_az_container(job, job_id, results):
     """Verify Azure Blob Storage container accessibility (warn only)."""
-    import subprocess
-
     for blob in cfg(job, "blobstorages", []):
         source = cfg(blob, "source")
         if not source:
             continue
-
-        source_display = source.split("?")[0]
-        cmd = ["azcopy", "list", source, "--running-tally"]
-
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        except subprocess.TimeoutExpired:
-            msg = f"WARN: Azure container '{source_display}' timed out (job {job_id})"
-            log.warning("Azure container '%s' timed out (job %s).", source_display, job_id)
-            results.append(msg)
-            continue
-
-        if proc.returncode == 0:
-            msg = f"OK: Azure container '{source_display}' (job {job_id})"
-            log.info("Azure container verified: %s (job %s).", source_display, job_id)
-            results.append(msg)
-        else:
-            err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "unknown error"
-            msg = f"WARN: Azure container '{source_display}' — {err} (job {job_id})"
-            log.warning("Azure container check failed for '%s' (job %s): %s", source_display, job_id, err)
-            results.append(msg)
+        _run_verify(
+            ["azcopy", "list", source, "--running-tally"],
+            f"Azure '{source.split('?')[0]}'", job_id, results)
 
 
 def _verify_rsync_ssh(job, job_id, results):
     """Verify SSH connectivity and remote path exists (warn only)."""
-    import subprocess
-
     for target in cfg(job, "targets", []):
         source = cfg(target, "source")
         ssh_key = cfg(target, "ssh_key")
         ssh_port = str(cfg(target, "ssh_port", "22"))
         if not source or not ssh_key or ":" not in source:
             continue
-
         host_part, remote_path = source.split(":", 1)
-        cmd = [
+        _run_verify([
             "ssh", "-i", ssh_key, "-p", ssh_port,
             "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             host_part, f"test -d {remote_path}",
-        ]
-
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        except subprocess.TimeoutExpired:
-            msg = f"WARN: SSH to '{host_part}' timed out (job {job_id})"
-            log.warning("SSH to '%s' timed out (job %s).", host_part, job_id)
-            results.append(msg)
-            continue
-
-        if proc.returncode == 0:
-            msg = f"OK: SSH '{source}' (job {job_id})"
-            log.info("SSH path verified: %s (job %s).", source, job_id)
-            results.append(msg)
-        else:
-            err = proc.stderr.strip() or "path not found or SSH failed"
-            msg = f"WARN: SSH '{source}' — {err} (job {job_id})"
-            log.warning("SSH check failed for '%s' (job %s): %s", source, job_id, err)
-            results.append(msg)
+        ], f"SSH '{source}'", job_id, results, timeout=10)
 
 
 def _verify_db_connection(job, job_id, job_type, results):
-    """Verify database credentials by listing databases (warn only).
-
-    Used when no explicit database names are configured — the deepest
-    check possible without configured references.
-    """
-    import subprocess
-
+    """Verify database credentials with SELECT 1 (warn only)."""
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         password = cfg(server, "pass")
         if not host or not password:
             continue
-
         if job_type == "pgsql":
-            port = str(cfg(server, "port", "5432"))
-            user = cfg(server, "user", "postgres")
+            port, user = str(cfg(server, "port", "5432")), cfg(server, "user", "postgres")
             env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
             cmd = ["psql", "-h", host, "-p", port, "-U", user,
-                   "-d", "postgres", "-t", "-A",
-                   "-c", "SELECT 1"]
+                   "-d", "postgres", "-t", "-A", "-c", "SELECT 1"]
         else:
-            port = str(cfg(server, "port", "3306"))
-            user = cfg(server, "user")
+            port, user = str(cfg(server, "port", "3306")), cfg(server, "user")
             if not user:
                 continue
             env = {**os.environ, "MYSQL_PWD": password}
             cmd = ["mysql", "-h", host, "-P", port, "-u", user,
                    "--batch", "--skip-column-names", "-e", "SELECT 1"]
-
-        try:
-            proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=10)
-        except subprocess.TimeoutExpired:
-            msg = f"WARN: {job_type} connection to {host}:{port} timed out (job {job_id})"
-            log.warning("%s connection to %s:%s timed out (job %s).", job_type, host, port, job_id)
-            results.append(msg)
-            continue
-
-        if proc.returncode == 0:
-            msg = f"OK: {job_type} {user}@{host}:{port} (job {job_id})"
-            log.info("%s connection verified: %s@%s:%s (job %s).", job_type, user, host, port, job_id)
-            results.append(msg)
-        else:
-            err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "connection failed"
-            msg = f"WARN: {job_type} {user}@{host}:{port} — {err} (job {job_id})"
-            log.warning("%s connection failed for %s@%s:%s (job %s): %s", job_type, user, host, port, job_id, err)
-            results.append(msg)
+        _run_verify(cmd, f"{job_type} {user}@{host}:{port}", job_id, results, env=env, timeout=10)
 
 
 def _verify_github_token(job, job_id, results):
@@ -416,33 +344,26 @@ def _verify_github_token(job, job_id, results):
         acct_type = cfg(account, "account_type", "org")
         if not acct_name or not token or acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
             continue
-
-        if acct_type == "user":
-            url = f"https://api.github.com/users/{urllib.request.quote(acct_name, safe='')}"
-        else:
-            url = f"https://api.github.com/orgs/{urllib.request.quote(acct_name, safe='')}"
+        endpoint = "users" if acct_type == "user" else "orgs"
+        url = f"https://api.github.com/{endpoint}/{urllib.request.quote(acct_name, safe='')}"
         req = urllib.request.Request(url, headers={
             "Authorization": f"token {token}",
             "Accept": "application/vnd.github+json",
             "User-Agent": "CloudDump",
         })
+        label = f"GitHub {acct_type} '{acct_name}'"
         try:
             with urllib.request.urlopen(req, timeout=10):
-                msg = f"OK: GitHub {acct_type} '{acct_name}' (job {job_id})"
-                log.info("GitHub token verified for %s '%s' (job %s).", acct_type, acct_name, job_id)
-                results.append(msg)
+                results.append(f"OK: {label} (job {job_id})")
+                log.info("%s verified (job %s).", label, job_id)
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             reason = str(getattr(exc, "reason", exc))
-            msg = f"WARN: GitHub {acct_type} '{acct_name}' — {reason} (job {job_id})"
-            log.warning("GitHub check failed for %s '%s' (job %s): %s", acct_type, acct_name, job_id, reason)
-            results.append(msg)
+            results.append(f"WARN: {label} — {reason} (job {job_id})")
+            log.warning("%s failed (job %s): %s", label, job_id, reason)
 
 
 def _verify_pgsql_databases(job, job_id, results):
     """Check that configured database names exist on the server (warn only)."""
-    import os
-    import subprocess
-
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         port = str(cfg(server, "port", "5432"))
@@ -450,41 +371,28 @@ def _verify_pgsql_databases(job, job_id, results):
         password = cfg(server, "pass")
         if not host or not password:
             continue
-
         configured_dbs = []
         for entry in cfg(server, "databases", []):
             if isinstance(entry, dict):
                 configured_dbs.extend(entry.keys())
         if not configured_dbs:
             continue
-
         env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
-        proc = subprocess.run(
-            ["psql", "-h", host, "-p", port, "-U", user,
-             "-d", "postgres", "-t", "-A",
+        proc = _run_verify(
+            ["psql", "-h", host, "-p", port, "-U", user, "-d", "postgres", "-t", "-A",
              "-c", "SELECT datname FROM pg_database WHERE datistemplate = false"],
-            env=env, capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode != 0:
-            continue  # TCP check already warned about connectivity
-
+            f"pgsql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+        if not proc:
+            continue
         actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
         for db in configured_dbs:
             if db not in actual:
-                msg = f"WARN: Database '{db}' not found on {host} (job {job_id})"
+                results.append(f"WARN: Database '{db}' not found on {host} (job {job_id})")
                 log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
-                results.append(msg)
-            else:
-                msg = f"OK: Database '{db}' exists on {host} (job {job_id})"
-                log.info("Database '%s' exists on %s (job %s).", db, host, job_id)
-                results.append(msg)
 
 
 def _verify_mysql_databases(job, job_id, results):
     """Check that configured database names exist on the server (warn only)."""
-    import os
-    import subprocess
-
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         port = str(cfg(server, "port", "3306"))
@@ -492,37 +400,25 @@ def _verify_mysql_databases(job, job_id, results):
         password = cfg(server, "pass")
         if not host or not user or not password:
             continue
-
         configured_dbs = list(cfg(server, "databases", []))
         if not configured_dbs:
             continue
-
         env = {**os.environ, "MYSQL_PWD": password}
-        proc = subprocess.run(
+        proc = _run_verify(
             ["mysql", "-h", host, "-P", port, "-u", user,
              "--batch", "--skip-column-names", "-e", "SHOW DATABASES"],
-            env=env, capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode != 0:
-            continue  # TCP check already warned about connectivity
-
+            f"mysql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+        if not proc:
+            continue
         actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
         for db in configured_dbs:
             if db not in actual:
-                msg = f"WARN: Database '{db}' not found on {host} (job {job_id})"
+                results.append(f"WARN: Database '{db}' not found on {host} (job {job_id})")
                 log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
-                results.append(msg)
-            else:
-                msg = f"OK: Database '{db}' exists on {host} (job {job_id})"
-                log.info("Database '%s' exists on %s (job %s).", db, host, job_id)
-                results.append(msg)
 
 
 def _verify_pgsql_tables(job, job_id, results):
     """Check that configured table filter names exist in the database (warn only)."""
-    import os
-    import subprocess
-
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         port = str(cfg(server, "port", "5432"))
@@ -530,44 +426,32 @@ def _verify_pgsql_tables(job, job_id, results):
         password = cfg(server, "pass")
         if not host or not password:
             continue
-
+        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
         for entry in cfg(server, "databases", []):
             if not isinstance(entry, dict):
                 continue
             for dbname, tbl_cfg in entry.items():
                 if not tbl_cfg or not isinstance(tbl_cfg, dict):
                     continue
-                tables_included = tbl_cfg.get("tables_included", [])
-                tables_excluded = tbl_cfg.get("tables_excluded", [])
-                if not tables_included and not tables_excluded:
+                filters = tbl_cfg.get("tables_included", []) + tbl_cfg.get("tables_excluded", [])
+                if not any(t.strip() for t in filters):
                     continue
-
-                env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+                import subprocess
                 proc = subprocess.run(
-                    ["psql", "-h", host, "-p", port, "-U", user,
-                     "-d", dbname, "-t", "-A",
+                    ["psql", "-h", host, "-p", port, "-U", user, "-d", dbname, "-t", "-A",
                      "-c", "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
-                    env=env, capture_output=True, text=True, timeout=10,
-                )
+                    env=env, capture_output=True, text=True, timeout=10)
                 if proc.returncode != 0:
-                    msg = f"WARN: Cannot query tables in {dbname}@{host} (job {job_id})"
-                    log.warning("Cannot query tables in %s@%s for job %s.", dbname, host, job_id)
-                    results.append(msg)
+                    results.append(f"WARN: Cannot query tables in {dbname}@{host} (job {job_id})")
+                    log.warning("Cannot query tables in %s@%s (job %s).", dbname, host, job_id)
                     continue
-
                 actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
-                for t in tables_included:
-                    t = t.strip()
-                    if t and t not in actual:
-                        msg = f"WARN: tables_included '{t}' not found in {dbname}@{host} (job {job_id})"
-                        log.warning("tables_included '%s' not found in %s@%s (job %s).", t, dbname, host, job_id)
-                        results.append(msg)
-                for t in tables_excluded:
-                    t = t.strip()
-                    if t and t not in actual:
-                        msg = f"WARN: tables_excluded '{t}' not found in {dbname}@{host} (job {job_id})"
-                        log.warning("tables_excluded '%s' not found in %s@%s (job %s).", t, dbname, host, job_id)
-                        results.append(msg)
+                for key in ("tables_included", "tables_excluded"):
+                    for t in tbl_cfg.get(key, []):
+                        t = t.strip()
+                        if t and t not in actual:
+                            results.append(f"WARN: {key} '{t}' not found in {dbname}@{host} (job {job_id})")
+                            log.warning("%s '%s' not found in %s@%s (job %s).", key, t, dbname, host, job_id)
 
 
 def verify_connectivity(jobs):
