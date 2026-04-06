@@ -6,7 +6,6 @@ import shutil
 import sys
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
