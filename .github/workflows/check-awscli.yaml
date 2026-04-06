@@ -18,7 +18,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          codename=$(grep -oP 'debian:\d[\d.]*-slim' Dockerfile | head -1 | grep -oP '\d+')
+          codename=$(grep -oP '(?<=debian:)\d+' Dockerfile | head -1)
           echo "Debian major version: $codename"
 
           docker run --rm "debian:${codename}-slim" bash -c '
