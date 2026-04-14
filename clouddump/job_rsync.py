@@ -2,7 +2,6 @@
 
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 import time
@@ -13,9 +12,14 @@ from clouddump import cfg, log, run_cmd
 # user@host:/path — no shell metacharacters anywhere
 _SOURCE_RE = re.compile(r"^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:/[a-zA-Z0-9_./ -]+$")
 
+# rsync --list-only line: "<perms> <size> YYYY/MM/DD HH:MM:SS <path>"
+_LIST_LINE_RE = re.compile(
+    r"^(?P<perms>\S+)\s+\S+\s+(?P<date>\d{4}/\d{2}/\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+(?P<name>.+)$"
+)
+
 
 def _build_ssh_args(ssh_key, ssh_port):
-    """Return the common SSH option list used by both find and rsync."""
+    """Return the common SSH option list used by rsync."""
     return [
         "ssh", "-i", ssh_key, "-p", ssh_port,
         "-o", "StrictHostKeyChecking=accept-new",
@@ -24,27 +28,37 @@ def _build_ssh_args(ssh_key, ssh_port):
 
 
 def _find_old_files(host_part, remote_path, min_age_days, ssh_args):
-    """SSH to remote and find files older than *min_age_days*.
+    """List remote files older than *min_age_days* via ``rsync --list-only``.
 
-    Returns a list of paths relative to *remote_path*, or ``None`` on failure.
+    Uses the rsync protocol itself to enumerate files — no remote shell
+    invocation, so it works with restricted accounts (forced commands,
+    rrsync, etc.). Returns paths relative to *remote_path*, or ``None``
+    on failure.
     """
-    # Ensure remote_path ends with / so the relative-path stripping works
     if not remote_path.endswith("/"):
         remote_path += "/"
-    safe_path = shlex.quote(remote_path)
-    # Try GNU find -printf first; fall back to POSIX find + sed for BSD/macOS
-    find_expr = (
-        f"find {safe_path} -type f -mtime +{min_age_days} -printf '%P\\n'"
-        f" 2>/dev/null || find {safe_path} -type f -mtime +{min_age_days}"
-        f" | sed 's|^{remote_path}||'"
-    )
-    cmd = ssh_args + [host_part, find_expr]
+    ssh_cmd = " ".join(ssh_args)
+    cmd = ["rsync", "-rn", "--list-only", "-e", ssh_cmd, f"{host_part}:{remote_path}"]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        log.error("Remote find failed (rc %d): %s", proc.returncode, proc.stderr.strip())
+        log.error("Remote listing failed (rc %d): %s", proc.returncode, proc.stderr.strip())
         return None
-    lines = proc.stdout.strip().split("\n") if proc.stdout.strip() else []
-    return lines
+
+    cutoff = time.time() - (min_age_days * 86400)
+    files = []
+    for line in proc.stdout.splitlines():
+        m = _LIST_LINE_RE.match(line)
+        if not m or not m.group("perms").startswith("-"):
+            continue
+        try:
+            mtime = time.mktime(time.strptime(
+                f"{m.group('date')} {m.group('time')}", "%Y/%m/%d %H:%M:%S"
+            ))
+        except ValueError:
+            continue
+        if mtime < cutoff:
+            files.append(m.group("name"))
+    return files
 
 
 def run_rsync_sync(target, logfile_path):

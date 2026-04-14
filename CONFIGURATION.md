@@ -256,7 +256,7 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
 - `ssh_port`: SSH port (default: `22`).
 - `delete_destination`: remove files at destination that no longer exist at source (default: `true`). When combined with `min_age_days`, the destination becomes an exact mirror of the filtered file set: any destination file that is **not** in the age-filtered list is removed. This means files newer than `min_age_days` will **not** be present at the destination. Set `delete_destination` to `false` if you want to accumulate old files while keeping previously synced files intact.
 - `exclude`: list of rsync exclude patterns (default: none).
-- `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). When set, CloudDump SSHs to the remote to discover qualifying files via `find -mtime`, then passes the list to rsync with `--files-from`. Requires GNU `find` on the remote; falls back to POSIX `find` + `sed` on BSD/macOS.
+- `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). When set, CloudDump enumerates remote files via `rsync --list-only`, filters by mtime client-side, and passes the qualifying paths to the main rsync with `--files-from`. Uses the rsync protocol only — no remote shell commands — so it works with restricted SSH accounts (forced commands, `rrsync`, etc.).
 
 The SSH key file should be mounted read-only into the container:
 

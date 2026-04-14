@@ -946,6 +946,66 @@ class TestRsyncRunner:
         assert "--delete" in cmd
 
 
+class TestFindOldFiles:
+    """Tests for _find_old_files — the rsync --list-only parser."""
+
+    @staticmethod
+    def _fake_proc(stdout="", returncode=0, stderr=""):
+        import types
+        return types.SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+
+    def _stub_run(self, monkeypatch, stdout, rc=0):
+        from clouddump import job_rsync
+        captured = {}
+
+        def fake_run(cmd, capture_output, text):
+            captured["cmd"] = cmd
+            return self._fake_proc(stdout=stdout, returncode=rc)
+
+        monkeypatch.setattr(job_rsync.subprocess, "run", fake_run)
+        return captured
+
+    def test_parses_list_and_filters_by_age(self, monkeypatch):
+        import time
+        from clouddump.job_rsync import _find_old_files
+
+        old_date = time.strftime("%Y/%m/%d", time.localtime(time.time() - 60 * 86400))
+        new_date = time.strftime("%Y/%m/%d", time.localtime(time.time() - 1 * 86400))
+        stdout = (
+            f"drwxr-xr-x          4,096 {new_date} 10:00:00 .\n"
+            f"-rw-r--r--           1234 {old_date} 10:00:00 old/file1.txt\n"
+            f"-rw-r--r--           5678 {new_date} 10:00:00 new/file2.txt\n"
+            f"-rw-r--r--            222 {old_date} 10:00:00 old/with space.log\n"
+        )
+        self._stub_run(monkeypatch, stdout)
+
+        files = _find_old_files("user@h", "/srv/x", 30, ["ssh"])
+        assert files == ["old/file1.txt", "old/with space.log"]
+
+    def test_returns_none_on_rsync_failure(self, monkeypatch):
+        from clouddump.job_rsync import _find_old_files
+
+        self._stub_run(monkeypatch, stdout="", rc=23)
+        assert _find_old_files("user@h", "/srv/x", 30, ["ssh"]) is None
+
+    def test_empty_list_returns_empty(self, monkeypatch):
+        from clouddump.job_rsync import _find_old_files
+
+        self._stub_run(monkeypatch, stdout="")
+        assert _find_old_files("user@h", "/srv/x", 30, ["ssh"]) == []
+
+    def test_uses_list_only_not_shell_find(self, monkeypatch):
+        from clouddump.job_rsync import _find_old_files
+
+        captured = self._stub_run(monkeypatch, stdout="")
+        _find_old_files("user@h", "/srv/x", 30, ["ssh", "-i", "key"])
+
+        assert captured["cmd"][0] == "rsync"
+        assert "--list-only" in captured["cmd"]
+        # No shell redirects or find commands
+        assert not any("find" in a or "2>" in a for a in captured["cmd"])
+
+
 # ── Job dispatch ────────────────────────────────────────────────────────────
 
 
