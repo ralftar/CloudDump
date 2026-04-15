@@ -254,12 +254,19 @@ def _run_verify(cmd, label, job_id, results, env=None, timeout=15):
         log.warning("%s timed out (job %s).", label, job_id)
         return None
 
+    # Separate benign SSH host-key acceptance notices from real errors.
+    stderr_lines, host_key_notices = [], []
+    for line in proc.stderr.strip().splitlines():
+        (host_key_notices if "Permanently added" in line else stderr_lines).append(line)
+    for notice in host_key_notices:
+        log.info("%s (job %s): %s", label, job_id, notice)
+
     if proc.returncode == 0:
         results.append(f"OK: {label} (job {job_id})")
         log.info("%s verified (job %s).", label, job_id)
         return proc
 
-    err = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "failed"
+    err = stderr_lines[-1] if stderr_lines else "failed"
     results.append(f"WARN: {label} — {err} (job {job_id})")
     log.warning("%s failed (job %s): %s", label, job_id, err)
     return None
