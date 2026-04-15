@@ -601,6 +601,38 @@ def test_verify_rsync_ssh_failure(mock_run):
 
 
 @patch("subprocess.run")
+def test_verify_rsync_ssh_ok_ignores_host_key_notice(mock_run):
+    """First-boot SSH host-key acceptance notice must not produce a WARN."""
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = (
+        "Warning: Permanently added '10.0.0.1' (ED25519) to the list of known hosts.\n"
+    )
+    job = _job(type="rsync", targets=[{
+        "source": "user@10.0.0.1:/data", "ssh_key": "/config/id_ed25519"}])
+    results = verify_connectivity([job])
+    assert any("OK" in r and "SSH" in r for r in results)
+    assert not any("WARN" in r for r in results)
+
+
+@patch("subprocess.run")
+def test_verify_rsync_ssh_failure_skips_host_key_notice(mock_run):
+    """Real errors must surface even when host-key notice is also in stderr."""
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = (
+        "Warning: Permanently added '10.0.0.1' (ED25519) to the list of known hosts.\n"
+        "Permission denied (publickey).\n"
+    )
+    job = _job(type="rsync", targets=[{
+        "source": "user@10.0.0.1:/data", "ssh_key": "/config/id_ed25519"}])
+    results = verify_connectivity([job])
+    warn = next(r for r in results if "WARN" in r)
+    assert "Permission denied" in warn
+    assert "Permanently added" not in warn
+
+
+@patch("subprocess.run")
 def test_verify_pgsql_databases_and_tables(mock_run):
     """Configured databases + table filters verified in one flow."""
     # First call: list databases. Second call: list tables.
