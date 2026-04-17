@@ -580,20 +580,26 @@ def test_verify_s3_bucket_failure(mock_run):
     assert any("WARN" in r and "S3" in r for r in results)
 
 
-@patch("clouddump.config.urllib.request.urlopen")
-def test_verify_az_container_ok(mock_urlopen):
-    mock_urlopen.return_value.__enter__ = lambda s: s
-    mock_urlopen.return_value.__exit__ = lambda s, *a: None
-    job = _job(type="azstorage", blobstorages=[{
-        "source": "https://account.blob.core.windows.net/container?sv=2021&sig=xxx"}])
+@patch("subprocess.run")
+def test_verify_az_container_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+    source = "https://account.blob.core.windows.net/container?sv=2021&sig=xxx"
+    job = _job(type="azstorage", blobstorages=[{"source": source}])
     results = verify_connectivity([job])
     assert any("OK" in r and "Azure" in r for r in results)
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0] == "azcopy"
+    assert cmd[1] == "list"
+    assert source in cmd
 
 
-@patch("clouddump.config.urllib.request.urlopen")
-def test_verify_az_container_failure(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://account.blob.core.windows.net/", 403, "Forbidden", {}, None)
+@patch("subprocess.run")
+def test_verify_az_container_failure(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "RESPONSE 401: NoAuthenticationInformation\n"
     job = _job(type="azstorage", blobstorages=[{
         "source": "https://account.blob.core.windows.net/container?sv=2021&sig=bad"}])
     results = verify_connectivity([job])

@@ -297,25 +297,20 @@ def _verify_s3_bucket(job, job_id, results):
 def _verify_az_container(job, job_id, results):
     """Verify Azure Blob Storage container accessibility (warn only).
 
-    Lists one blob to confirm the SAS token and container are valid.
-    Only requires Read + List permissions (no metadata access needed).
+    Runs ``azcopy list`` so the probe uses the same auth/URL-parsing
+    code path as the sync job. A urllib probe can accept a SAS URL
+    that ``azcopy`` later rejects (e.g. when the URL's query delimiter
+    is mangled), hiding failures until the scheduled job runs.
     """
     for blob in cfg(job, "blobstorages", []):
         source = cfg(blob, "source")
         if not source:
             continue
         label = f"Azure '{source.split('?')[0]}'"
-        sep = "&" if "?" in source else "?"
-        url = f"{source}{sep}restype=container&comp=list&maxresults=1"
-        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "CloudDump"})
-        try:
-            with urllib.request.urlopen(req, timeout=10):
-                results.append(f"OK: {label} (job {job_id})")
-                log.info("%s verified (job %s).", label, job_id)
-        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
-            reason = str(getattr(exc, "reason", exc))
-            results.append(f"WARN: {label} — {reason} (job {job_id})")
-            log.warning("%s failed (job %s): %s", label, job_id, reason)
+        _run_verify(
+            ["azcopy", "list", source, "--output-level=quiet"],
+            label, job_id, results,
+        )
 
 
 def _verify_rsync_ssh(job, job_id, results):
