@@ -143,7 +143,9 @@ def main():
         f"CloudDump v{version}\n"
         f"https://github.com/ralftar/CloudDump"
     )
-    result = send_email(config, f"[Started] CloudDump {host}", startup_body)
+    has_warnings = any(line.startswith("WARN:") for line in connectivity)
+    subject_tag = "Degraded" if has_warnings else "Started"
+    result = send_email(config, f"[{subject_tag}] CloudDump {host}", startup_body)
     if result is True:
         log.info("Startup email sent.")
     elif result is None:

@@ -285,6 +285,19 @@ CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
 time() - clouddump_last_run_finished > 48 * 3600
 ```
 
+### Email subjects
+
+CloudDump sends one startup email and one email per job run. Subject lines
+follow a fixed format so they're easy to filter on:
+
+| Subject | When |
+|---------|------|
+| `[Started] CloudDump {host}` | Process started, all connectivity checks passed |
+| `[Degraded] CloudDump {host}` | Process started, one or more connectivity checks returned a warning |
+| `[Success] CloudDump {host}: {job_id}` | Job succeeded on the first attempt |
+| `[Warning] CloudDump {host}: {job_id}` | Job succeeded, but only after one or more retries |
+| `[Failure] CloudDump {host}: {job_id}` | Job failed after all retry attempts |
+
 ## Contributing
 
 Contributions are welcome. Please open an issue first to discuss what you'd
