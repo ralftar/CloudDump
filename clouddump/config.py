@@ -297,16 +297,17 @@ def _verify_s3_bucket(job, job_id, results):
 def _verify_az_container(job, job_id, results):
     """Verify Azure Blob Storage container accessibility (warn only).
 
-    Lists one blob to confirm the SAS token and container are valid.
-    Only requires Read + List permissions (no metadata access needed).
+    Uses a HEAD request with the SAS-token URL. Azure returns 200 if the
+    container exists and the token is valid — no blobs are listed.
     """
     for blob in cfg(job, "blobstorages", []):
         source = cfg(blob, "source")
         if not source:
             continue
         label = f"Azure '{source.split('?')[0]}'"
+        # restype=container on the SAS URL returns container metadata only
         sep = "&" if "?" in source else "?"
-        url = f"{source}{sep}restype=container&comp=list&maxresults=1"
+        url = f"{source}{sep}restype=container&comp=metadata"
         req = urllib.request.Request(url, method="GET", headers={"User-Agent": "CloudDump"})
         try:
             with urllib.request.urlopen(req, timeout=10):
