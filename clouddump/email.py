@@ -8,7 +8,7 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from clouddump import cfg, fmt_bytes, log, redact
+from clouddump import cfg, log, redact
 
 
 def _resolve_smtp_security(config):
@@ -101,8 +101,7 @@ def format_job_config(job):
 
 
 def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfile_paths,
-                    status=None, attempts_used=None, max_attempts=None,
-                    backup_bytes=None):
+                    status=None, attempts_used=None, max_attempts=None):
     """Send job completion email, optionally with log attachments.
 
     *logfile_paths* is a list of log files (one per attempt).  All are
@@ -126,10 +125,6 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     if attempts_used is not None and max_attempts is not None:
         attempt_info = f"Attempts: {attempts_used}/{max_attempts}\n"
 
-    backup_size_info = ""
-    if backup_bytes is not None:
-        backup_size_info = f"Backup size: {fmt_bytes(backup_bytes)}\n"
-
     summary = f"{status} | {job_id} ({job_type}) | {minutes}m {seconds}s"
     if attempts_used is not None and max_attempts is not None:
         summary += f" | attempt {attempts_used}/{max_attempts}"
@@ -144,7 +139,6 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         f"Started: {start_str}\n"
         f"Completed: {end_str}\n"
         f"Time elapsed: {minutes} minutes {seconds} seconds\n"
-        f"{backup_size_info}"
         f"\n"
         f"CONFIGURATION\n\n"
         f"{job_config_text}\n\n"

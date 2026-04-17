@@ -25,7 +25,7 @@ def run_az_sync(blobstorage, logfile_path):
 
     log.info("Syncing Azure Blob Storage", extra={"source": source_stripped, "destination": destination})
 
-    cmd = ["azcopy", "sync", "--recursive", f"--delete-destination={'true' if delete else 'false'}", source, destination]
+    cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}", source, destination]
 
     t0 = time.time()
     rc = run_cmd(cmd, logfile_path=logfile_path)
