@@ -515,19 +515,26 @@ def test_validate_jobs_github_invalid_account_type():
 # ── verify_connectivity ─────────────────────────────────────────────────────
 
 
-@patch("clouddump.config.urllib.request.urlopen")
-def test_verify_connectivity_github_token(mock_urlopen):
-    mock_urlopen.return_value.__enter__ = lambda s: s
-    mock_urlopen.return_value.__exit__ = lambda s, *a: None
+@patch("subprocess.run")
+def test_verify_connectivity_github_token(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_xxx"}])
     results = verify_connectivity([job])
     assert any("OK" in r and "GitHub" in r for r in results)
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0] == "curl"
+    assert "https://api.github.com/orgs/my-org" in cmd
+    # Token must be passed as an Authorization header, not in the URL.
+    assert not any("ghp_xxx" in a for a in cmd if a.startswith("http"))
 
 
-@patch("clouddump.config.urllib.request.urlopen")
-def test_verify_connectivity_github_warns_on_failure(mock_urlopen):
-    mock_urlopen.side_effect = urllib.error.HTTPError(
-        "https://api.github.com/orgs/x", 401, "Unauthorized", {}, None)
+@patch("subprocess.run")
+def test_verify_connectivity_github_warns_on_failure(mock_run):
+    mock_run.return_value.returncode = 22  # curl exit code for HTTP >= 400 with -f
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "curl: (22) The requested URL returned error: 401\n"
     job = _job(type="github", organizations=[{"name": "my-org", "token": "ghp_bad"}])
     results = verify_connectivity([job])
     assert any("WARN" in r for r in results)
@@ -614,7 +621,7 @@ def test_verify_rsync_ssh_ok(mock_run):
     job = _job(type="rsync", targets=[{
         "source": "user@host.example.com:/data", "ssh_key": "/config/id_ed25519"}])
     results = verify_connectivity([job])
-    assert any("OK" in r and "SSH" in r for r in results)
+    assert any("OK" in r and "rsync" in r for r in results)
 
 
 @patch("subprocess.run")
@@ -625,7 +632,7 @@ def test_verify_rsync_ssh_failure(mock_run):
     job = _job(type="rsync", targets=[{
         "source": "user@host.example.com:/data", "ssh_key": "/config/id_ed25519"}])
     results = verify_connectivity([job])
-    assert any("WARN" in r and "SSH" in r for r in results)
+    assert any("WARN" in r and "rsync" in r for r in results)
 
 
 @patch("subprocess.run")
@@ -639,7 +646,7 @@ def test_verify_rsync_ssh_ok_ignores_host_key_notice(mock_run):
     job = _job(type="rsync", targets=[{
         "source": "user@10.0.0.1:/data", "ssh_key": "/config/id_ed25519"}])
     results = verify_connectivity([job])
-    assert any("OK" in r and "SSH" in r for r in results)
+    assert any("OK" in r and "rsync" in r for r in results)
     assert not any("WARN" in r for r in results)
 
 

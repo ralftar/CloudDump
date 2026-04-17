@@ -4,8 +4,7 @@ import json
 import os
 import shutil
 import sys
-import urllib.error
-import urllib.request
+import urllib.parse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
@@ -24,7 +23,7 @@ TOOL_REQUIREMENTS = {
     "azstorage": ["azcopy"],
     "pgsql": ["pg_dump", "psql"],
     "mysql": ["mysqldump", "mysql"],
-    "github": ["github-backup", "git"],
+    "github": ["github-backup", "git", "curl"],
     "rsync": ["rsync", "ssh"],
 }
 
@@ -314,20 +313,28 @@ def _verify_az_container(job, job_id, results):
 
 
 def _verify_rsync_ssh(job, job_id, results):
-    """Verify SSH connectivity and remote path exists (warn only)."""
+    """Verify rsync-over-SSH connectivity (warn only).
+
+    Uses ``rsync --list-only`` so the probe traverses the same rsync
+    protocol + SSH transport the sync job uses. This also works with
+    restricted remote accounts (forced commands, ``rrsync``) where a
+    plain ``ssh test -d`` would fail.
+    """
     for target in cfg(job, "targets", []):
         source = cfg(target, "source")
         ssh_key = cfg(target, "ssh_key")
         ssh_port = str(cfg(target, "ssh_port", "22"))
         if not source or not ssh_key or ":" not in source:
             continue
-        host_part, remote_path = source.split(":", 1)
-        _run_verify([
-            "ssh", "-i", ssh_key, "-p", ssh_port,
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            host_part, f"test -d {remote_path}",
-        ], f"SSH '{source}'", job_id, results, timeout=10)
+        ssh_cmd = (
+            f"ssh -i {ssh_key} -p {ssh_port} "
+            "-o StrictHostKeyChecking=accept-new "
+            "-o BatchMode=yes -o ConnectTimeout=5"
+        )
+        _run_verify(
+            ["rsync", "-n", "--list-only", "-e", ssh_cmd, f"{source}/"],
+            f"rsync '{source}'", job_id, results, timeout=10,
+        )
 
 
 def _verify_db_connection(job, job_id, job_type, results):
@@ -353,7 +360,11 @@ def _verify_db_connection(job, job_id, job_type, results):
 
 
 def _verify_github_token(job, job_id, results):
-    """Verify GitHub tokens and accounts are accessible (warn only)."""
+    """Verify GitHub tokens and accounts are accessible (warn only).
+
+    Uses ``curl`` for parity with the other subprocess-based probes and
+    to keep all verify paths out of the Python HTTP stack.
+    """
     for account in cfg(job, "organizations", []):
         acct_name = cfg(account, "name")
         token = cfg(account, "token")
@@ -361,21 +372,17 @@ def _verify_github_token(job, job_id, results):
         if not acct_name or not token or acct_type not in VALID_GITHUB_ACCOUNT_TYPES:
             continue
         endpoint = "users" if acct_type == "user" else "orgs"
-        url = f"https://api.github.com/{endpoint}/{urllib.request.quote(acct_name, safe='')}"
-        req = urllib.request.Request(url, headers={
-            "Authorization": f"token {token}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "CloudDump",
-        })
-        label = f"GitHub {acct_type} '{acct_name}'"
-        try:
-            with urllib.request.urlopen(req, timeout=10):
-                results.append(f"OK: {label} (job {job_id})")
-                log.info("%s verified (job %s).", label, job_id)
-        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
-            reason = str(getattr(exc, "reason", exc))
-            results.append(f"WARN: {label} — {reason} (job {job_id})")
-            log.warning("%s failed (job %s): %s", label, job_id, reason)
+        url = f"https://api.github.com/{endpoint}/{urllib.parse.quote(acct_name, safe='')}"
+        _run_verify(
+            [
+                "curl", "-sSf", "--max-time", "10",
+                "-H", f"Authorization: Bearer {token}",
+                "-H", "Accept: application/vnd.github+json",
+                "-H", "User-Agent: CloudDump",
+                "-o", os.devnull, url,
+            ],
+            f"GitHub {acct_type} '{acct_name}'", job_id, results, timeout=15,
+        )
 
 
 def _verify_pgsql(job, job_id, results):
