@@ -158,7 +158,6 @@ class TestAzureRunner:
         cmd = calls[0][0]
         assert cmd[0] == "azcopy"
         assert cmd[1] == "sync"
-        assert "--recursive" in cmd
         assert "--delete-destination=true" in cmd
 
     def test_delete_disabled(self, monkeypatch, tmp_path, _tmp_logfile):

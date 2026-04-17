@@ -448,6 +448,8 @@ def test_validate_jobs_duplicate_id():
     # Azure
     ("AccountKey=abc123;EndpointSuffix=core.windows.net", "abc123"),
     ("https://store.blob.core.windows.net/c?sv=2021-08&sig=abc&se=2025-01-01", "sig=abc"),
+    ("https://store.blob.core.windows.net/c?SV=2021&SIG=abc&SE=2025", "SIG=abc"),
+    ("https://store.blob.core.windows.net/c?sv=2021&Sig=abc&se=2025", "Sig=abc"),
     # Database URLs
     ("postgres://admin:s3cret@db.example.com:5432/mydb", "s3cret"),
     ("postgresql://user:hunter2@localhost/app", "hunter2"),
@@ -481,6 +483,26 @@ def test_redact_strips_pem_private_key():
 def test_redact_ignores_clean_text():
     text = "Nothing sensitive here, just a normal log line."
     assert redact(text) == text
+
+
+def test_redact_sas_preserves_json_structure_across_multiple_urls():
+    import json
+    job = {
+        "id": "azdump1",
+        "blobstorages": [
+            {"destination": "/mnt/a", "source": "https://acct.blob.core.windows.net/a?sv=2024&sp=r&se=2030&st=2024&sr=c&sig=AAA"},
+            {"destination": "/mnt/b", "source": "https://acct.blob.core.windows.net/b?sv=2024&sig=BBB"},
+            {"destination": "/mnt/c", "source": "https://acct.blob.core.windows.net/c?sv=2024&sig=CCC"},
+        ],
+    }
+    result = redact(json.dumps(job, indent=2))
+    assert "AAA" not in result and "BBB" not in result and "CCC" not in result
+    assert result.count("sig=REDACTED") == 3
+    # Non-secret SAS metadata stays visible for debugging
+    assert "sv=2024" in result and "se=2030" in result and "sp=r" in result
+    assert '"destination": "/mnt/b"' in result
+    assert '"destination": "/mnt/c"' in result
+    assert result.rstrip().endswith("}")
 
 
 def test_validate_jobs_github_invalid_account_type():
