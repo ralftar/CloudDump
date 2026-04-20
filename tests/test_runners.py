@@ -181,8 +181,8 @@ class TestAzureRunner:
         run_az_sync(self._cfg(destination=dest), _tmp_logfile)
 
         cmd = calls[0][0]
-        # WARNING is the middle ground — DEBUG was a firehose on 100k+ blobs.
-        assert "--log-level=WARNING" in cmd
+        # INFO keeps per-request lines without the full HTTP trace DEBUG adds.
+        assert "--log-level=INFO" in cmd
         # --output-level only accepts essential/quiet/default — no verbose.
         assert not any(a.startswith("--output-level") for a in cmd)
 

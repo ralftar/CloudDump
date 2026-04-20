@@ -70,11 +70,10 @@ def run_az_sync(blobstorage, logfile_path):
     cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}"]
     if clouddump.debug:
         # Azcopy log levels: DEBUG (detailed trace, firehose) | INFO (every
-        # request/response — a line per blob on 100k+ containers) |
-        # WARNING (slow responses + errors) | ERROR | NONE.
-        # WARNING hits the useful middle: the sidecar is small on happy runs
-        # but still surfaces what went wrong when something breaks.
-        cmd += ["--log-level=WARNING"]
+        # request/response — a line per blob) | WARNING | ERROR | NONE.
+        # INFO keeps per-request visibility for the email sidecar without the
+        # full HTTP body trace DEBUG produces.
+        cmd += ["--log-level=INFO"]
     cmd += [source, destination]
 
     t0 = time.time()
