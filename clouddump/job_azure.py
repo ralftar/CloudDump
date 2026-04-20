@@ -69,10 +69,12 @@ def run_az_sync(blobstorage, logfile_path):
 
     cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}"]
     if clouddump.debug:
-        # azcopy's --output-level only supports essential/quiet/default — there
-        # is no verbose stdout mode. HTTP-level detail goes to the per-job
-        # log file under ~/.azcopy/<uuid>.log when --log-level=DEBUG is set.
-        cmd += ["--log-level=DEBUG"]
+        # Azcopy log levels: DEBUG (detailed trace, firehose) | INFO (every
+        # request/response — a line per blob on 100k+ containers) |
+        # WARNING (slow responses + errors) | ERROR | NONE.
+        # WARNING hits the useful middle: the sidecar is small on happy runs
+        # but still surfaces what went wrong when something breaks.
+        cmd += ["--log-level=WARNING"]
     cmd += [source, destination]
 
     t0 = time.time()
