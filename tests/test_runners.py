@@ -185,7 +185,9 @@ class TestAzureRunner:
         # --output-level only accepts essential/quiet/default — no verbose.
         assert not any(a.startswith("--output-level") for a in cmd)
 
-    def test_debug_appends_azcopy_job_log(self, monkeypatch, tmp_path, _tmp_logfile):
+    def test_debug_writes_azcopy_sidecar_log(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Debug mode copies azcopy's per-job log to a sidecar for email."""
+        import glob
         import clouddump
         from clouddump import job_azure
         from clouddump.job_azure import run_az_sync
@@ -202,9 +204,15 @@ class TestAzureRunner:
 
         run_az_sync(self._cfg(destination=dest), _tmp_logfile)
 
-        tail = open(_tmp_logfile, encoding="utf-8").read()
-        assert "azcopy job log" in tail
-        assert "RESPONSE 200" in tail
+        sidecars = glob.glob(f"{_tmp_logfile}.*.azcopy.log")
+        assert len(sidecars) == 1
+        body = open(sidecars[0], encoding="utf-8").read()
+        assert "RESPONSE 200" in body
+        # Sidecar lives next to the attempt log, tagged with the container name.
+        assert "container.azcopy.log" in sidecars[0]
+        # Main logfile must not be polluted with the verbose trace.
+        main = open(_tmp_logfile, encoding="utf-8").read()
+        assert "RESPONSE 200" not in main
 
     def test_no_debug_flags_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
         import clouddump

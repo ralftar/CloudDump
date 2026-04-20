@@ -278,7 +278,10 @@ def main():
                                 status=job_status, attempts_used=final_attempt,
                                 max_attempts=max_attempts)
 
+                import glob
                 for lf in logfile_paths:
+                    for sidecar in glob.glob(f"{lf}.*.log"):
+                        _safe_remove(sidecar)
                     _safe_remove(lf)
 
                 if result == 0:
