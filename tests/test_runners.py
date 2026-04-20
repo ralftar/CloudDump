@@ -170,6 +170,34 @@ class TestAzureRunner:
 
         assert "--delete-destination=false" in calls[0][0]
 
+    def test_debug_adds_verbose_flags(self, monkeypatch, tmp_path, _tmp_logfile):
+        import clouddump
+        from clouddump.job_azure import run_az_sync
+
+        dest = str(tmp_path / "azout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_azure.run_cmd")
+
+        monkeypatch.setattr(clouddump, "debug", True)
+        run_az_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        cmd = calls[0][0]
+        assert "--output-level=verbose" in cmd
+        assert "--log-level=DEBUG" in cmd
+
+    def test_no_debug_flags_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
+        import clouddump
+        from clouddump.job_azure import run_az_sync
+
+        dest = str(tmp_path / "azout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_azure.run_cmd")
+
+        monkeypatch.setattr(clouddump, "debug", False)
+        run_az_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        cmd = calls[0][0]
+        assert not any(a.startswith("--output-level") for a in cmd)
+        assert not any(a.startswith("--log-level") for a in cmd)
+
     def test_missing_source(self, monkeypatch, _tmp_logfile):
         from clouddump.job_azure import run_az_sync
 

@@ -425,6 +425,21 @@ def test_validate_jobs_duplicate_id():
     assert errors >= 1
 
 
+def test_validate_jobs_disabled_tag_in_summary():
+    errors, summary = validate_jobs([_job(enabled=False)])
+    assert errors == 0
+    assert "DISABLED" in summary
+
+
+def test_verify_connectivity_skips_disabled_job():
+    # Without a network mock, a live verify would be attempted; enabled=false
+    # must short-circuit before any verify helper runs.
+    job = _job(type="azstorage", enabled=False, blobstorages=[{
+        "source": "https://account.blob.core.windows.net/container?sv=2021&sig=xxx"}])
+    results = verify_connectivity([job])
+    assert results == []
+
+
 # ── redact ───────────────────────────────────────────────────────────────────
 
 

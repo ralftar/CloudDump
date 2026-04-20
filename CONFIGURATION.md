@@ -69,6 +69,7 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 |-----|----------|---------|-------------|
 | `id` | Yes | — | Unique job identifier |
 | `type` | Yes | — | `s3bucket`, `azstorage`, `pgsql`, `mysql`, `github`, or `rsync` |
+| `enabled` | No | `true` | Skip the job when `false`. Still validated at startup. |
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
 
