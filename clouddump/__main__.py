@@ -157,6 +157,9 @@ def main():
         log_requests=bool(cfg(config, "health_log", False)),
     )
 
+    from clouddump.job_azure import prune_stale_azcopy_logs
+    prune_stale_azcopy_logs()
+
     # Main loop
     log.info("Starting main loop...")
     last_run_ts = 0

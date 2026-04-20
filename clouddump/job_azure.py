@@ -5,29 +5,33 @@ import re
 import time
 
 import clouddump
-from clouddump import cfg, log, redact, run_cmd
+from clouddump import cfg, log, redact, run_cmd, _safe_remove
 
 _AZCOPY_JOB_LOG_DIR = os.path.expanduser("~/.azcopy")
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]")
+_AZCOPY_STALE_SECONDS = 7 * 24 * 60 * 60
+
+
+def _list_azcopy_logs():
+    try:
+        return [
+            os.path.join(_AZCOPY_JOB_LOG_DIR, f)
+            for f in os.listdir(_AZCOPY_JOB_LOG_DIR)
+            if f.endswith(".log")
+        ]
+    except FileNotFoundError:
+        return []
 
 
 def _copy_azcopy_job_log(sidecar_path):
     """Copy the most recent azcopy per-job log to *sidecar_path*, redacted.
 
-    Azcopy writes a separate `<uuid>.log` in ``~/.azcopy/`` per invocation
-    with the HTTP-level detail requested by ``--log-level=DEBUG``. Its
-    stdout only shows the progress summary. When debug is on we copy that
-    per-job log to a sidecar file next to the attempt's logfile so
-    ``send_job_report`` picks it up as its own email attachment.
+    After copying, remove the azcopy-side log(s) for that invocation so
+    ``~/.azcopy/`` doesn't accumulate across runs inside a long-lived
+    container. If the copy fails, leave the source in place so the user
+    can inspect it directly.
     """
-    try:
-        logs = [
-            os.path.join(_AZCOPY_JOB_LOG_DIR, f)
-            for f in os.listdir(_AZCOPY_JOB_LOG_DIR)
-            if f.endswith(".log") and not f.endswith("-scanning.log")
-        ]
-    except FileNotFoundError:
-        return
+    logs = [p for p in _list_azcopy_logs() if not p.endswith("-scanning.log")]
     if not logs:
         return
     newest = max(logs, key=os.path.getmtime)
@@ -38,6 +42,34 @@ def _copy_azcopy_job_log(sidecar_path):
                 dst.write(redact(line))
     except OSError as exc:
         log.warning("Could not copy azcopy job log %s: %s", newest, exc)
+        return
+
+    # Source copied safely — drop the invocation's logs. Each azcopy run
+    # writes <uuid>.log plus an optional <uuid>-scanning.log; clean up both.
+    _safe_remove(newest)
+    scanning = newest[:-len(".log")] + "-scanning.log"
+    _safe_remove(scanning)
+
+
+def prune_stale_azcopy_logs(max_age_seconds=_AZCOPY_STALE_SECONDS):
+    """Remove ``~/.azcopy/*.log`` files older than *max_age_seconds*.
+
+    Intended to run at startup to clean up logs left behind by previous
+    container incarnations or runs that crashed before the per-invocation
+    cleanup in :func:`_copy_azcopy_job_log` could fire.
+    """
+    now = time.time()
+    removed = 0
+    for path in _list_azcopy_logs():
+        try:
+            if now - os.path.getmtime(path) > max_age_seconds:
+                _safe_remove(path)
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        log.info("Pruned %d stale azcopy log file(s) from %s",
+                 removed, _AZCOPY_JOB_LOG_DIR)
 
 
 def _container_from_source(source):

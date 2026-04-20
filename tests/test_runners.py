@@ -215,6 +215,57 @@ class TestAzureRunner:
         main = open(_tmp_logfile, encoding="utf-8").read()
         assert "RESPONSE 200" not in main
 
+    def test_debug_prunes_azcopy_source_after_copy(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Source log + scanning sibling are removed once copied to sidecar."""
+        import clouddump
+        from clouddump import job_azure
+        from clouddump.job_azure import run_az_sync
+
+        dest = str(tmp_path / "azout")
+        open(_tmp_logfile, "w").close()
+        azcopy_log_dir = tmp_path / "azcopy"
+        azcopy_log_dir.mkdir()
+        uuid = "11111111-2222-3333-4444-555555555555"
+        job_log = azcopy_log_dir / f"{uuid}.log"
+        job_log.write_text("RESPONSE 200\n")
+        scanning_log = azcopy_log_dir / f"{uuid}-scanning.log"
+        scanning_log.write_text("scanning...\n")
+        monkeypatch.setattr(job_azure, "_AZCOPY_JOB_LOG_DIR", str(azcopy_log_dir))
+        _capture_cmd(monkeypatch, "clouddump.job_azure.run_cmd")
+        monkeypatch.setattr(clouddump, "debug", True)
+
+        run_az_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert not job_log.exists()
+        assert not scanning_log.exists()
+
+    def test_prune_stale_azcopy_logs(self, tmp_path, monkeypatch):
+        """Startup prune removes logs older than max_age; keeps recent ones."""
+        import os
+        import time
+        from clouddump import job_azure
+
+        azcopy_log_dir = tmp_path / "azcopy"
+        azcopy_log_dir.mkdir()
+        old_log = azcopy_log_dir / "old.log"
+        old_log.write_text("stale\n")
+        recent_log = azcopy_log_dir / "recent.log"
+        recent_log.write_text("fresh\n")
+        unrelated = azcopy_log_dir / "notes.txt"
+        unrelated.write_text("ignore\n")
+
+        old_mtime = time.time() - 10 * 24 * 60 * 60
+        os.utime(old_log, (old_mtime, old_mtime))
+        os.utime(unrelated, (old_mtime, old_mtime))
+        monkeypatch.setattr(job_azure, "_AZCOPY_JOB_LOG_DIR", str(azcopy_log_dir))
+
+        job_azure.prune_stale_azcopy_logs(max_age_seconds=7 * 24 * 60 * 60)
+
+        assert not old_log.exists()
+        assert recent_log.exists()
+        # Non-*.log files are left alone.
+        assert unrelated.exists()
+
     def test_no_debug_flags_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
         import clouddump
         from clouddump.job_azure import run_az_sync
