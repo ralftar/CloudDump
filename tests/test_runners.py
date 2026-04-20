@@ -170,7 +170,7 @@ class TestAzureRunner:
 
         assert "--delete-destination=false" in calls[0][0]
 
-    def test_debug_adds_verbose_flags(self, monkeypatch, tmp_path, _tmp_logfile):
+    def test_debug_adds_log_level_flag(self, monkeypatch, tmp_path, _tmp_logfile):
         import clouddump
         from clouddump.job_azure import run_az_sync
 
@@ -181,8 +181,9 @@ class TestAzureRunner:
         run_az_sync(self._cfg(destination=dest), _tmp_logfile)
 
         cmd = calls[0][0]
-        assert "--output-level=verbose" in cmd
         assert "--log-level=DEBUG" in cmd
+        # --output-level only accepts essential/quiet/default — no verbose.
+        assert not any(a.startswith("--output-level") for a in cmd)
 
     def test_no_debug_flags_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
         import clouddump

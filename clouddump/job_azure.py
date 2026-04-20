@@ -28,7 +28,10 @@ def run_az_sync(blobstorage, logfile_path):
 
     cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}"]
     if clouddump.debug:
-        cmd += ["--output-level=verbose", "--log-level=DEBUG"]
+        # azcopy's --output-level only supports essential/quiet/default — there
+        # is no verbose stdout mode. HTTP-level detail goes to the per-job
+        # log file under ~/.azcopy/<uuid>.log when --log-level=DEBUG is set.
+        cmd += ["--log-level=DEBUG"]
     cmd += [source, destination]
 
     t0 = time.time()

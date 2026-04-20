@@ -307,9 +307,12 @@ def _verify_az_container(job, job_id, results):
         if not source:
             continue
         label = f"Azure '{source.split('?')[0]}'"
+        # azcopy list walks the full blob inventory; containers with ~100k+
+        # blobs routinely need well over the 15s default. 150s is a practical
+        # ceiling that still bounds startup.
         _run_verify(
             ["azcopy", "list", source, "--output-level=quiet"],
-            label, job_id, results,
+            label, job_id, results, timeout=150,
         )
 
 
