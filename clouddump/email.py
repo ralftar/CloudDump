@@ -150,6 +150,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
 
     attachments = []
     if email_log_attached:
+        import glob
         # Support both a single path (string) and a list of paths
         paths = logfile_paths if isinstance(logfile_paths, list) else [logfile_paths]
         timestamp = datetime.fromtimestamp(t_start, tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -158,6 +159,13 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
                 suffix = f"-attempt{i}" if len(paths) > 1 else ""
                 name = f"clouddump-{job_id}-{timestamp}{suffix}.log"
                 attachments.append((path, name))
+            # Sidecars written by runners (e.g. job_azure's azcopy job log).
+            for sidecar in sorted(glob.glob(f"{path}.*.log")):
+                if os.path.isfile(sidecar):
+                    tag = sidecar[len(path) + 1:-len(".log")]
+                    suffix = f"-attempt{i}" if len(paths) > 1 else ""
+                    name = f"clouddump-{job_id}-{timestamp}{suffix}-{tag}.log"
+                    attachments.append((sidecar, name))
 
     subject = f"[{status}] CloudDump {host}: {job_id}"
     send_email(config, subject, body, attachments)

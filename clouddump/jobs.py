@@ -17,6 +17,28 @@ _RUNNERS = {
     "rsync": ("targets", run_rsync_sync),
 }
 
+# For the per-target summary at the end of each attempt. The field we read is
+# typically enough to identify the target ("asset", "db.example.com", etc.).
+_TARGET_LABEL_FIELDS = {
+    "s3bucket": "source",
+    "azstorage": "source",
+    "pgsql": "host",
+    "mysql": "host",
+    "github": "name",
+    "rsync": "source",
+}
+
+
+def _target_label(target, job_type):
+    field = _TARGET_LABEL_FIELDS.get(job_type)
+    if not field:
+        return "?"
+    val = cfg(target, field) or "?"
+    if job_type in ("s3bucket", "azstorage", "rsync"):
+        # Strip query strings and protocol noise so the label fits one line.
+        val = val.split("?", 1)[0]
+    return val
+
 
 def execute_job(job, logfile_path):
     """Dispatch a job to the appropriate runner by type. Returns exit code.
@@ -38,8 +60,15 @@ def execute_job(job, logfile_path):
         return 1
 
     rc = 0
+    results = []
     for target in targets:
         r = runner(target, logfile_path)
+        results.append((_target_label(target, job_type), r))
         if r != 0:
             rc = max(rc, r)
+
+    if len(results) > 1:
+        lines = [f"  {'OK  ' if r == 0 else 'FAIL'}  {label}" for label, r in results]
+        ok = sum(1 for _, r in results if r == 0)
+        log.info("Job summary (%d/%d OK):\n%s", ok, len(results), "\n".join(lines))
     return rc
