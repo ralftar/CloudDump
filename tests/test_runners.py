@@ -185,6 +185,27 @@ class TestAzureRunner:
         # --output-level only accepts essential/quiet/default — no verbose.
         assert not any(a.startswith("--output-level") for a in cmd)
 
+    def test_debug_appends_azcopy_job_log(self, monkeypatch, tmp_path, _tmp_logfile):
+        import clouddump
+        from clouddump import job_azure
+        from clouddump.job_azure import run_az_sync
+
+        dest = str(tmp_path / "azout")
+        open(_tmp_logfile, "w").close()
+        azcopy_log_dir = tmp_path / "azcopy"
+        azcopy_log_dir.mkdir()
+        job_log = azcopy_log_dir / "11111111-2222-3333-4444-555555555555.log"
+        job_log.write_text("2026-04-20 GET https://account.blob.core.windows.net/container\nRESPONSE 200\n")
+        monkeypatch.setattr(job_azure, "_AZCOPY_JOB_LOG_DIR", str(azcopy_log_dir))
+        _capture_cmd(monkeypatch, "clouddump.job_azure.run_cmd")
+        monkeypatch.setattr(clouddump, "debug", True)
+
+        run_az_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        tail = open(_tmp_logfile, encoding="utf-8").read()
+        assert "azcopy job log" in tail
+        assert "RESPONSE 200" in tail
+
     def test_no_debug_flags_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
         import clouddump
         from clouddump.job_azure import run_az_sync
