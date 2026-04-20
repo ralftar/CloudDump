@@ -185,6 +185,10 @@ def main():
                     continue
 
                 job_type = cfg(job, "type")
+                if not cfg(job, "enabled", True):
+                    log.info("Skipping disabled job", extra={"job_id": job_id, "job_type": job_type})
+                    continue
+
                 clouddump.current_job = job_id
                 log.info("Starting job", extra={"job_type": job_type})
 

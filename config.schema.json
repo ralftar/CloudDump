@@ -83,6 +83,7 @@
           "enum": ["s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"],
           "description": "Job type."
         },
+        "enabled": { "type": "boolean", "default": true, "description": "Skip the job when false. Still validated at startup." },
         "timeout": { "type": "integer", "minimum": 1, "default": 604800, "description": "Timeout in seconds." },
         "retries": { "type": "integer", "minimum": 1, "default": 3, "description": "Number of retry attempts." },
         "buckets": { "type": "array", "items": { "$ref": "#/$defs/s3_bucket" } },

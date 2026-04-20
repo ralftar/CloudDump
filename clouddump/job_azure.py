@@ -3,6 +3,7 @@
 import os
 import time
 
+import clouddump
 from clouddump import cfg, log, run_cmd
 
 
@@ -25,7 +26,10 @@ def run_az_sync(blobstorage, logfile_path):
 
     log.info("Syncing Azure Blob Storage", extra={"source": source_stripped, "destination": destination})
 
-    cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}", source, destination]
+    cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}"]
+    if clouddump.debug:
+        cmd += ["--output-level=verbose", "--log-level=DEBUG"]
+    cmd += [source, destination]
 
     t0 = time.time()
     rc = run_cmd(cmd, logfile_path=logfile_path)

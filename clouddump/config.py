@@ -238,7 +238,8 @@ def validate_jobs(jobs):
                               acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
                     errors += 1
 
-        summaries.append(f"ID: {job_id}\nType: {job_type}")
+        disabled_tag = "" if cfg(job, "enabled", True) else " (DISABLED)"
+        summaries.append(f"ID: {job_id}{disabled_tag}\nType: {job_type}")
 
     return errors, "\n\n".join(summaries)
 
@@ -480,6 +481,8 @@ def verify_connectivity(jobs):
         job_id = cfg(job, "id")
         job_type = cfg(job, "type")
         if not job_id or not job_type:
+            continue
+        if not cfg(job, "enabled", True):
             continue
 
         if job_type == "s3bucket":
