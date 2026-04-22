@@ -1,13 +1,16 @@
 """PostgreSQL dump job runner."""
 
 import os
-import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
 
 import clouddump
 from clouddump import cfg, fmt_bytes, log, run_cmd, _safe_remove
+
+# In-progress dumps are staged with a `.tmp` suffix; atomic rename is the final
+# step. Anything with `.tmp` on disk is by definition a partial dump.
+_TMP_SUFFIXES = (".dump.tmp", ".dump.tmp.bz2")
 
 # Databases that should never be dumped.
 _SYSTEM_DATABASES = {"template0", "template1", "postgres"}
@@ -26,6 +29,18 @@ def _conninfo(host, port, user, dbname):
     parts = [f"host={host}", f"port={port}", f"user={user}", f"dbname={dbname}"]
     parts.extend(f"{k}={v}" for k, v in _KEEPALIVE_OPTS.items())
     return " ".join(parts)
+
+
+def _cleanup_tmp_files(backuppath):
+    try:
+        entries = os.listdir(backuppath)
+    except OSError:
+        return
+    for name in entries:
+        if name.endswith(_TMP_SUFFIXES):
+            path = os.path.join(backuppath, name)
+            log.warning("Removing stale staging file: %s", name)
+            _safe_remove(path)
 
 
 def _list_databases(host, port, user, password):
@@ -79,6 +94,7 @@ def run_pg_dump(server, logfile_path):
         return 1
 
     os.makedirs(backuppath, exist_ok=True)
+    _cleanup_tmp_files(backuppath)
 
     log.info("Dumping PostgreSQL server", extra={"host": host, "port": int(port), "destination": backuppath})
     log.debug("Username: %s, filenamedate: %s, compress: %s", user, filenamedate, compress)
@@ -135,22 +151,22 @@ def run_pg_dump(server, logfile_path):
             if t:
                 cmd += ["--exclude-table", t]
 
+        # Stable staging path — `.tmp` suffix marks in-progress until atomic rename.
+        staging = os.path.join(backuppath, f"{database}.dump.tmp")
+
         dump_ok = False
         for db_attempt in range(1, max_db_retries + 1):
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            temp_file = os.path.join(backuppath, f"{database}-{timestamp}.dump")
-
             log.debug("Running pg_dump of %s (attempt %d/%d)...", database, db_attempt, max_db_retries)
 
-            with open(temp_file, "wb") as dump_out:
+            with open(staging, "wb") as dump_out:
                 rc = run_cmd(cmd, env=env, stdout=dump_out, logfile_path=logfile_path)
 
             if rc != 0:
                 log.error("pg_dump for %s on %s failed.", database, host)
-                _safe_remove(temp_file)
-            elif os.path.getsize(temp_file) == 0:
-                log.error("Backupfile %s is empty.", temp_file)
-                _safe_remove(temp_file)
+                _safe_remove(staging)
+            elif os.path.getsize(staging) == 0:
+                log.error("Backupfile %s is empty.", staging)
+                _safe_remove(staging)
             else:
                 dump_ok = True
                 break
@@ -164,39 +180,43 @@ def run_pg_dump(server, logfile_path):
             overall_result = 1
             continue
 
-        size = os.path.getsize(temp_file)
+        size = os.path.getsize(staging)
         total_bytes += size
         log.info("pg_dump completed", extra={"database": database, "bytes": size})
 
-        if filenamedate:
-            final_file = temp_file
-        else:
-            final_file = os.path.join(backuppath, f"{database}.dump")
-
         if compress:
-            log.debug("Compressing backupfile %s...", temp_file)
-            rc = run_cmd(["bzip2", "-f", temp_file])
+            log.debug("Compressing %s...", staging)
+            rc = run_cmd(["bzip2", "-f", staging])
             if rc != 0:
-                log.error("Compression of %s failed.", temp_file)
+                log.error("Compression of %s failed.", staging)
+                _safe_remove(staging)
+                _safe_remove(staging + ".bz2")
                 overall_result = 1
                 continue
-            temp_file += ".bz2"
-            if filenamedate:
-                final_file += ".bz2"
-            else:
-                final_file = os.path.join(backuppath, f"{database}.dump.bz2")
-            log.debug("Compression completed. Compressed file: %s", temp_file)
+            staging += ".bz2"
 
-        if temp_file != final_file:
-            log.debug("Moving %s to %s...", temp_file, final_file)
-            try:
-                shutil.move(temp_file, final_file)
-            except OSError as exc:
-                log.error("Could not move %s to %s: %s", temp_file, final_file, exc)
-                overall_result = 1
-                continue
+        # Atomic rename is the final step. Anything that doesn't reach this line
+        # leaves a .tmp file that the next cleanup pass will remove.
+        if filenamedate:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            basename = f"{database}-{timestamp}.dump"
+        else:
+            basename = f"{database}.dump"
+        if compress:
+            basename += ".bz2"
+        final_file = os.path.join(backuppath, basename)
+
+        try:
+            os.replace(staging, final_file)
+        except OSError as exc:
+            log.error("Could not rename %s to %s: %s", staging, final_file, exc)
+            _safe_remove(staging)
+            overall_result = 1
+            continue
 
         log.debug("Backup completed successfully: %s", final_file)
+
+    _cleanup_tmp_files(backuppath)
 
     if total_bytes > 0:
         log.info("Total dump size: %s", fmt_bytes(total_bytes), extra={"bytes": total_bytes})
