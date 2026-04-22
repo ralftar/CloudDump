@@ -12,6 +12,21 @@ from clouddump import cfg, fmt_bytes, log, run_cmd, _safe_remove
 # Databases that should never be dumped.
 _SYSTEM_DATABASES = {"template0", "template1", "postgres"}
 
+# Azure PG silently drops idle connections; these detect dead sockets in ~80s
+# instead of Linux's 2h tcp_keepalive_time default.
+_KEEPALIVE_OPTS = {
+    "keepalives": "1",
+    "keepalives_idle": "30",
+    "keepalives_interval": "10",
+    "keepalives_count": "5",
+}
+
+
+def _conninfo(host, port, user, dbname):
+    parts = [f"host={host}", f"port={port}", f"user={user}", f"dbname={dbname}"]
+    parts.extend(f"{k}={v}" for k, v in _KEEPALIVE_OPTS.items())
+    return " ".join(parts)
+
 
 def _list_databases(host, port, user, password):
     """Query the server for a list of databases via a direct SQL query.
@@ -23,8 +38,8 @@ def _list_databases(host, port, user, password):
     env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "30"}
 
     proc = subprocess.run(
-        ["psql", "-h", host, "-p", str(port), "-U", user,
-         "-d", "postgres", "-t", "-A",
+        ["psql", "-d", _conninfo(host, str(port), user, "postgres"),
+         "-t", "-A",
          "-c", "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"],
         env=env, capture_output=True, text=True,
     )
@@ -108,7 +123,7 @@ def run_pg_dump(server, logfile_path):
         tables_included = tbl_cfg.get("tables_included", [])
         tables_excluded = tbl_cfg.get("tables_excluded", [])
 
-        cmd = ["pg_dump", "-h", host, "-p", port, "-U", user, "-d", database, "-F", "custom"]
+        cmd = ["pg_dump", "-d", _conninfo(host, port, user, database), "-F", "custom"]
         if clouddump.debug:
             cmd.append("-v")
         for t in tables_included:
