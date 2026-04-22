@@ -1,6 +1,7 @@
 """PostgreSQL dump job runner."""
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -11,6 +12,12 @@ from clouddump import cfg, fmt_bytes, log, run_cmd, _safe_remove
 
 # Databases that should never be dumped.
 _SYSTEM_DATABASES = {"template0", "template1", "postgres"}
+
+# Temp dump files during a run match `{database}-{14-digit-UTC-timestamp}.dump`.
+# Successful dumps get renamed to `{database}.dump[.bz2]`, so anything matching
+# this pattern on disk is a leftover from a process that died (OOM, container
+# restart, host reboot) before the retry-loop's own cleanup could run.
+_TEMP_FILE_RE = re.compile(r"^.+-\d{14}\.dump$")
 
 # Azure PG silently drops idle connections; these detect dead sockets in ~80s
 # instead of Linux's 2h tcp_keepalive_time default.
@@ -26,6 +33,18 @@ def _conninfo(host, port, user, dbname):
     parts = [f"host={host}", f"port={port}", f"user={user}", f"dbname={dbname}"]
     parts.extend(f"{k}={v}" for k, v in _KEEPALIVE_OPTS.items())
     return " ".join(parts)
+
+
+def _cleanup_stale_temps(backuppath):
+    try:
+        entries = os.listdir(backuppath)
+    except OSError:
+        return
+    for name in entries:
+        if _TEMP_FILE_RE.match(name):
+            path = os.path.join(backuppath, name)
+            log.warning("Removing stale temp dump from prior crashed run: %s", name)
+            _safe_remove(path)
 
 
 def _list_databases(host, port, user, password):
@@ -79,6 +98,7 @@ def run_pg_dump(server, logfile_path):
         return 1
 
     os.makedirs(backuppath, exist_ok=True)
+    _cleanup_stale_temps(backuppath)
 
     log.info("Dumping PostgreSQL server", extra={"host": host, "port": int(port), "destination": backuppath})
     log.debug("Username: %s, filenamedate: %s, compress: %s", user, filenamedate, compress)
