@@ -376,6 +376,38 @@ class TestPgSQLRunner:
         assert rc == 0
         assert any(r.levelno == logging.WARNING and "No databases to backup" in r.message for r in caplog.records)
 
+    def test_cleanup_tmp_files_removes_staging_preserves_finals(self, tmp_path):
+        from clouddump.job_pgsql import _cleanup_tmp_files
+
+        # Staging files from prior crashed/aborted runs
+        (tmp_path / "db1.dump.tmp").write_bytes(b"partial")
+        (tmp_path / "db2.dump.tmp.bz2").write_bytes(b"partial-compressed")
+
+        # Final dumps (must be preserved)
+        (tmp_path / "db1.dump").write_bytes(b"final")
+        (tmp_path / "db1.dump.bz2").write_bytes(b"final-compressed")
+        (tmp_path / "db2-20240101000000.dump.bz2").write_bytes(b"final-dated")
+
+        # Unrelated files (must be preserved)
+        (tmp_path / "readme.txt").write_bytes(b"x")
+        (tmp_path / "report.log").write_bytes(b"x")
+
+        _cleanup_tmp_files(str(tmp_path))
+
+        remaining = sorted(p.name for p in tmp_path.iterdir())
+        assert remaining == [
+            "db1.dump",
+            "db1.dump.bz2",
+            "db2-20240101000000.dump.bz2",
+            "readme.txt",
+            "report.log",
+        ]
+
+    def test_cleanup_tmp_files_missing_dir_is_noop(self, tmp_path):
+        from clouddump.job_pgsql import _cleanup_tmp_files
+
+        _cleanup_tmp_files(str(tmp_path / "does-not-exist"))  # must not raise
+
 
 # ── MySQL runner ────────────────────────────────────────────────────────────
 
