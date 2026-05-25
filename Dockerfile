@@ -25,13 +25,11 @@ RUN apt-get update && \
     rsync \
     awscli \
     procps \
-    && . /etc/os-release \
-    && curl -sSL -o /tmp/packages-microsoft-prod.deb "https://packages.microsoft.com/config/debian/${VERSION_ID}/packages-microsoft-prod.deb" \
-    && dpkg -i /tmp/packages-microsoft-prod.deb \
-    && rm /tmp/packages-microsoft-prod.deb \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends azcopy \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -sSL -o /tmp/azcopy.tar.gz https://aka.ms/downloadazcopy-v10-linux \
+    && tar -xzf /tmp/azcopy.tar.gz -C /tmp \
+    && install -m 0755 /tmp/azcopy_linux_amd64_*/azcopy /usr/local/bin/azcopy \
+    && rm -rf /tmp/azcopy.tar.gz /tmp/azcopy_linux_amd64_*
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
