@@ -1,5 +1,8 @@
 FROM debian:12.13-slim
 
+# Bumped by the check-azcopy workflow (PR on each new azcopy release).
+ARG AZCOPY_VERSION=10.32.4
+
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -26,10 +29,10 @@ RUN apt-get update && \
     awscli \
     procps \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -sSL -o /tmp/azcopy.tar.gz https://aka.ms/downloadazcopy-v10-linux \
+    && curl -fsSL -o /tmp/azcopy.tar.gz "https://github.com/Azure/azure-storage-azcopy/releases/download/v${AZCOPY_VERSION}/azcopy_linux_amd64_${AZCOPY_VERSION}.tar.gz" \
     && tar -xzf /tmp/azcopy.tar.gz -C /tmp \
-    && install -m 0755 /tmp/azcopy_linux_amd64_*/azcopy /usr/local/bin/azcopy \
-    && rm -rf /tmp/azcopy.tar.gz /tmp/azcopy_linux_amd64_*
+    && install -m 0755 "/tmp/azcopy_linux_amd64_${AZCOPY_VERSION}/azcopy" /usr/local/bin/azcopy \
+    && rm -rf /tmp/azcopy.tar.gz "/tmp/azcopy_linux_amd64_${AZCOPY_VERSION}"
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
