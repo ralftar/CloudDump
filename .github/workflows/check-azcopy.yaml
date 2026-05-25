@@ -1,0 +1,70 @@
+name: Check azcopy
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # weekly, Monday 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Bump pinned azcopy version if a newer release exists
+        id: bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current=$(grep -oP 'ARG AZCOPY_VERSION=\K[0-9.]+' Dockerfile)
+          latest=$(gh api repos/Azure/azure-storage-azcopy/releases/latest --jq '.tag_name' | sed 's/^v//')
+          echo "current=$current latest=$latest"
+
+          if [ -z "$latest" ]; then
+            echo "Could not resolve latest azcopy release; skipping."
+            exit 0
+          fi
+          if [ "$current" = "$latest" ]; then
+            echo "Already on the latest azcopy ($current)."
+            exit 0
+          fi
+
+          # Only bump if the linux/amd64 asset actually exists for $latest.
+          url="https://github.com/Azure/azure-storage-azcopy/releases/download/v${latest}/azcopy_linux_amd64_${latest}.tar.gz"
+          if ! curl -fsIL "$url" >/dev/null 2>&1; then
+            echo "linux/amd64 asset not published for $latest yet; skipping."
+            exit 0
+          fi
+
+          sed -i "s/^ARG AZCOPY_VERSION=.*/ARG AZCOPY_VERSION=${latest}/" Dockerfile
+          {
+            echo "current=$current"
+            echo "latest=$latest"
+            echo "changed=true"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open PR
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automated/azcopy-update
+          delete-branch: true
+          commit-message: "chore: bump azcopy to ${{ steps.bump.outputs.latest }}"
+          title: "chore: bump azcopy ${{ steps.bump.outputs.current }} → ${{ steps.bump.outputs.latest }}"
+          labels: dependencies
+          body: |
+            Bumps the pinned `AZCOPY_VERSION` in the Dockerfile.
+
+            - **${{ steps.bump.outputs.current }} → ${{ steps.bump.outputs.latest }}**
+            - Release: https://github.com/Azure/azure-storage-azcopy/releases/tag/v${{ steps.bump.outputs.latest }}
+
+            The Docker build + integration tests on this PR validate that the new
+            binary installs and azcopy still works. Review the release notes for
+            breaking changes (azstorage jobs) before merging.
+
+            Opened automatically by the `check-azcopy` workflow.
