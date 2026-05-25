@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -11,7 +12,7 @@ import urllib.request
 import pytest
 
 from clouddump import redact, fmt_bytes, validate_backup_path, _TextFormatter, _JsonFormatter, _LOG_FORMAT, _LOG_DATEFMT
-from clouddump.email import format_job_config
+from clouddump.email import format_job_config, send_email, _enforce_size_limit
 from clouddump.config import validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import matches_cron, should_run, validate_cron
 from clouddump.health import _state, update_last_run, update_job_metric, _Handler
@@ -865,3 +866,98 @@ def test_healthz_404_on_other_paths():
             assert exc.code == 404
     finally:
         server.shutdown()
+
+
+# ── email: attachment size limit ─────────────────────────────────────────────
+
+
+def _attachment_names(msg):
+    """Filenames of all attachment parts in a built message."""
+    return [p.get_filename() for p in msg.get_payload() if p.get_filename()]
+
+
+def test_enforce_size_limit_passthrough():
+    parts = [("report.log", b"a small log line\n")]
+    msg = _enforce_size_limit({}, "from@x", ["to@x"], "subj", "body", parts)
+    assert _attachment_names(msg) == ["report.log"]
+
+
+def test_enforce_size_limit_compresses_when_over():
+    # 2 MB of highly compressible text, 1 MB limit → gzip brings it under.
+    parts = [("big.log", b"X" * (2 * 1024 * 1024))]
+    msg = _enforce_size_limit({"email_size_limit_mb": 1}, "from@x", ["to@x"],
+                              "subj", "body", parts)
+    assert _attachment_names(msg) == ["big.log.gz"]
+
+
+def test_enforce_size_limit_drops_when_incompressible(caplog):
+    # 3 MB of incompressible bytes, 1 MB limit → gzip can't help → dropped.
+    parts = [("big.log", os.urandom(3 * 1024 * 1024))]
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        msg = _enforce_size_limit({"email_size_limit_mb": 1}, "from@x", ["to@x"],
+                                  "subj", "report body", parts)
+    assert _attachment_names(msg) == []
+    assert any("without attachments" in r.getMessage() for r in caplog.records)
+    # The omission must be visible in the email body, not just the logs.
+    body_text = msg.get_payload()[0].get_payload(decode=True).decode("utf-8")
+    assert "WARNING" in body_text and "omitted" in body_text
+    assert "report body" in body_text  # original body is preserved
+
+
+# ── email: send result ───────────────────────────────────────────────────────
+
+
+class _FakeSMTP:
+    """Minimal smtplib.SMTP_SSL stand-in capturing sendmail calls."""
+
+    last = None
+
+    def __init__(self, *a, **k):
+        self.sent = []
+        _FakeSMTP.last = self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def login(self, *a, **k):
+        pass
+
+    def sendmail(self, mail_from, recipients, msg):
+        self.sent.append((mail_from, recipients, msg))
+
+
+def _smtp_config(**over):
+    config = {
+        "smtp_server": "smtp.example.com",
+        "smtp_port": 465,
+        "smtp_security": "ssl",
+        "mail_from": "from@example.com",
+        "mail_to": "to@example.com",
+    }
+    config.update(over)
+    return config
+
+
+def test_send_email_success_returns_true():
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        result = send_email(_smtp_config(), "subj", "body")
+    assert result is True
+    assert _FakeSMTP.last.sent  # sendmail was called
+
+
+def test_send_email_failure_returns_false(caplog):
+    def _boom(*a, **k):
+        raise OSError("connection refused")
+
+    with patch("clouddump.email.smtplib.SMTP_SSL", _boom):
+        with caplog.at_level(logging.ERROR, logger="clouddump"):
+            result = send_email(_smtp_config(), "subj", "body")
+    assert result is False
+    assert any("Failed to send email" in r.getMessage() for r in caplog.records)
+
+
+def test_send_email_not_configured_returns_none():
+    assert send_email({}, "subj", "body") is None

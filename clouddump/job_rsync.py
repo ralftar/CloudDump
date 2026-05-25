@@ -68,6 +68,7 @@ def run_rsync_sync(target, logfile_path):
     ssh_key = cfg(target, "ssh_key")
     ssh_port = str(cfg(target, "ssh_port", "22"))
     delete = cfg(target, "delete_destination", True)
+    delete_excluded = cfg(target, "delete_excluded", False)
     exclude = cfg(target, "exclude", [])
     min_age_days = cfg(target, "min_age_days")
 
@@ -116,8 +117,12 @@ def run_rsync_sync(target, logfile_path):
         cmd += ["-e", ssh_cmd]
         if filelist_path:
             cmd += ["--files-from", filelist_path]
-        if delete:
+        if delete or delete_excluded:
             cmd.append("--delete")
+        if delete_excluded:
+            # Also purge already-mirrored copies of newly-excluded paths
+            # (e.g. regenerable Nextcloud previews) from the destination.
+            cmd.append("--delete-excluded")
         for pattern in exclude:
             cmd += ["--exclude", pattern]
         cmd += [source, destination]

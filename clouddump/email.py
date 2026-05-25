@@ -1,5 +1,6 @@
 """Email reporting and notification."""
 
+import gzip
 import json
 import os
 import smtplib
@@ -8,7 +9,10 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from clouddump import cfg, log, redact
+from clouddump import cfg, fmt_bytes, log, redact
+
+
+DEFAULT_EMAIL_SIZE_LIMIT_MB = 15
 
 
 def _resolve_smtp_security(config):
@@ -18,6 +22,69 @@ def _resolve_smtp_security(config):
     ``"none"``).  Default is ``"ssl"``.
     """
     return cfg(config, "smtp_security") or "ssl"
+
+
+def _build_message(mail_from, recipients, subject, body, parts):
+    """Assemble a MIMEMultipart message from prepared attachment parts.
+
+    *parts* is a list of ``(filename, payload_bytes)`` tuples; each is
+    attached as a base64-encoded MIMEApplication.
+    """
+    msg = MIMEMultipart()
+    msg["From"] = mail_from
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    for filename, payload in parts:
+        part = MIMEApplication(payload, Name=filename)
+        part["Content-Disposition"] = f'attachment; filename="{filename}"'
+        msg.attach(part)
+    return msg
+
+
+def _enforce_size_limit(config, mail_from, recipients, subject, body, raw_parts):
+    """Build the message, keeping it under ``email_size_limit_mb``.
+
+    The size is measured on the assembled, base64-encoded message — i.e. what
+    the SMTP server actually receives. Staged fallback when it exceeds the
+    limit:
+
+    1. gzip each attachment individually;
+    2. if still over, drop all attachments and log an error.
+
+    The report body is always sent — only attachments are compressed or
+    dropped, so the job is never silently un-reported.
+    """
+    try:
+        limit_mb = int(cfg(config, "email_size_limit_mb", DEFAULT_EMAIL_SIZE_LIMIT_MB))
+    except (ValueError, TypeError):
+        limit_mb = DEFAULT_EMAIL_SIZE_LIMIT_MB
+    limit = limit_mb * 1024 * 1024
+
+    msg = _build_message(mail_from, recipients, subject, body, raw_parts)
+    if not raw_parts or len(msg.as_bytes()) <= limit:
+        return msg
+
+    # Stage 1: compress each attachment individually.
+    gz_parts = [(f"{name}.gz", gzip.compress(payload)) for name, payload in raw_parts]
+    msg = _build_message(mail_from, recipients, subject, body, gz_parts)
+    if len(msg.as_bytes()) <= limit:
+        log.info("Email attachments exceeded %d MB; compressed to fit.", limit_mb)
+        return msg
+
+    # Stage 2: still too large — drop attachments, but make the omission
+    # explicit in the body so the report never hides that a log is missing.
+    log.error(
+        "Email attachments exceed the %d MB limit even after compression; "
+        "sending report without attachments.", limit_mb,
+    )
+    notice = (
+        f"WARNING: log attachment(s) omitted — exceeded the {limit_mb} MB email "
+        f"size limit even after compression. Retrieve the full log from the "
+        f"container/host logs.\n\n"
+        f"{'-' * 60}\n\n"
+    )
+    return _build_message(mail_from, recipients, subject, notice + body, [])
 
 
 def send_email(config, subject, body, attachments=None):
@@ -59,12 +126,9 @@ def send_email(config, subject, body, attachments=None):
     else:
         recipients = [r.strip() for r in mail_to.split(",") if r.strip()]
 
-    msg = MIMEMultipart()
-    msg["From"] = mail_from
-    msg["To"] = ", ".join(recipients)
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-
+    # Read + redact attachment contents into memory so the final message size
+    # can be measured and, if needed, compressed or dropped before sending.
+    raw_parts = []  # (filename, payload_bytes)
     for entry in attachments or []:
         if isinstance(entry, tuple):
             path, name = entry
@@ -73,9 +137,9 @@ def send_email(config, subject, body, attachments=None):
         if os.path.isfile(path):
             with open(path, "r") as f:
                 content = redact(f.read())
-            part = MIMEApplication(content.encode("utf-8"), Name=name)
-            part["Content-Disposition"] = f'attachment; filename="{name}"'
-            msg.attach(part)
+            raw_parts.append((name, content.encode("utf-8")))
+
+    msg = _enforce_size_limit(config, mail_from, recipients, subject, body, raw_parts)
 
     log.info("Sending email to %s from %s.", ", ".join(recipients), mail_from)
     try:
@@ -92,6 +156,7 @@ def send_email(config, subject, body, attachments=None):
     except Exception as exc:
         log.error("Failed to send email: %s", exc, exc_info=True)
         return False
+    log.debug("Email sent to %s (%s).", ", ".join(recipients), fmt_bytes(len(msg.as_bytes())))
     return True
 
 
@@ -168,4 +233,5 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
                     attachments.append((sidecar, name))
 
     subject = f"[{status}] CloudDump {host}: {job_id}"
-    send_email(config, subject, body, attachments)
+    if send_email(config, subject, body, attachments) is False:
+        log.error("Job report email for %s could not be sent.", job_id)

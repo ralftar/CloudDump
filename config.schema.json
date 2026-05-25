@@ -64,6 +64,12 @@
       "default": false,
       "description": "Attach log file to job report emails."
     },
+    "email_size_limit_mb": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 15,
+      "description": "Max email size in MB. Over this, attachments are gzipped individually; if still over, they are dropped and an error is logged. The report body always sends."
+    },
     "jobs": {
       "type": "array",
       "minItems": 1,
@@ -176,6 +182,7 @@
         "ssh_key": { "type": "string", "description": "Path to SSH private key." },
         "ssh_port": { "type": "integer", "default": 22 },
         "delete_destination": { "type": "boolean", "default": true },
+        "delete_excluded": { "type": "boolean", "default": false, "description": "Also delete excluded paths from the destination (implies --delete). Purges already-mirrored copies of newly-excluded paths." },
         "exclude": { "type": "array", "items": { "type": "string" }, "description": "Rsync exclude patterns." },
         "min_age_days": { "type": "integer", "minimum": 1, "description": "Only sync files older than N days." }
       },

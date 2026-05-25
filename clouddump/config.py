@@ -82,6 +82,15 @@ def validate_settings(config):
             log.error("Invalid health_port '%s': %s.", health_port, exc)
             errors += 1
 
+    size_limit = config.get("email_size_limit_mb")
+    if size_limit is not None:
+        try:
+            if int(size_limit) <= 0:
+                raise ValueError("must be positive")
+        except (ValueError, TypeError) as exc:
+            log.error("Invalid email_size_limit_mb '%s': %s.", size_limit, exc)
+            errors += 1
+
     return errors
 
 
@@ -153,7 +162,7 @@ def validate_jobs(jobs):
                 "include_labels", "include_milestones", "include_releases",
                 "include_wikis", "include_forks", "include_archived", "include_lfs",
             ]),
-            "rsync": ("targets", ["delete_destination"]),
+            "rsync": ("targets", ["delete_destination", "delete_excluded"]),
         }
         _TARGET_INTS = {
             "pgsql": ("servers", ["port", "db_retries"]),
