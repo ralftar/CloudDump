@@ -30,6 +30,7 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `mail_from` | No | Sender address (e.g. `"backup@example.com"` or `"CloudDump <backup@example.com>"`) |
 | `mail_to` | No | Recipient address(es) — comma-separated or JSON array |
 | `email_log_attached` | No | Attach full log file to job report emails (`true`/`false`, default `false`) |
+| `email_size_limit_mb` | No | Max email size (MB, default `15`). Over this, attachments are gzipped individually; if still over, they are dropped and an error is logged. The report body always sends. |
 | `crontab` | **Yes** | Standard 5-field cron expression — schedule for running all jobs |
 | `health_port` | No | Port for the HTTP health endpoint (`1`–`65535`, default `8080`) |
 | `health_log` | No | Log health-check HTTP requests at DEBUG level (`true`/`false`, default `false`) |
@@ -244,6 +245,7 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
       "ssh_key": "/config/id_ed25519",
       "ssh_port": 22,
       "delete_destination": true,
+      "delete_excluded": false,
       "exclude": ["*.tmp", "cache/"],
       "min_age_days": 30
     }
@@ -257,6 +259,7 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
 - `ssh_port`: SSH port (default: `22`).
 - `delete_destination`: remove files at destination that no longer exist at source (default: `true`). When combined with `min_age_days`, the destination becomes an exact mirror of the filtered file set: any destination file that is **not** in the age-filtered list is removed. This means files newer than `min_age_days` will **not** be present at the destination. Set `delete_destination` to `false` if you want to accumulate old files while keeping previously synced files intact.
 - `exclude`: list of rsync exclude patterns (default: none).
+- `delete_excluded`: also delete `exclude`d paths from the destination (default: `false`). Implies deletion (`--delete`), so already-mirrored copies of newly-excluded paths (e.g. regenerable caches) are purged on the next run. Without this, excluded paths already present at the destination are left untouched.
 - `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). When set, CloudDump enumerates remote files via `rsync --list-only`, filters by mtime client-side, and passes the qualifying paths to the main rsync with `--files-from`. Uses the rsync protocol only — no remote shell commands — so it works with restricted SSH accounts (forced commands, `rrsync`, etc.).
 
 The SSH key file should be mounted read-only into the container:

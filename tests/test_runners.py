@@ -940,6 +940,30 @@ class TestRsyncRunner:
         idx2 = cmd.index("--exclude", idx1 + 1)
         assert cmd[idx2 + 1] == "cache/"
 
+    def test_delete_excluded(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, delete_excluded=True,
+                                 exclude=["preview/"]), _tmp_logfile)
+
+        cmd = calls[0][0]
+        # --delete-excluded implies deletion, so --delete must also be present
+        assert "--delete" in cmd
+        assert "--delete-excluded" in cmd
+
+    def test_delete_excluded_off_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, exclude=["preview/"]), _tmp_logfile)
+
+        assert "--delete-excluded" not in calls[0][0]
+
     def test_missing_source(self, monkeypatch, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync
 

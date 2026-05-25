@@ -222,6 +222,14 @@ Set `"smtp_security": "starttls"` for port 587, or `"smtp_security": "none"` for
 plain SMTP relays. Verify the container can reach your SMTP server. Check logs
 for `Failed to send email` messages.
 
+**Report arrives without its log attachment** — the email exceeded
+`email_size_limit_mb` (default 15 MB) even after gzip, so attachments were
+dropped to keep the report deliverable; the log line says so at `error` level.
+Some providers (e.g. Mailgun) accept oversized messages at SMTP but silently
+fail to deliver them, so this guard keeps reports flowing. Raise
+`email_size_limit_mb`, set `email_log_attached: false`, or trim the job's log
+volume (e.g. rsync `exclude`s) if you need the attachment.
+
 **Run jobs now** — Send `SIGUSR1` to run all jobs immediately without waiting
 for the cron schedule:
 
