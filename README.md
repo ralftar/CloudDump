@@ -35,6 +35,7 @@ you get an email.
 | MySQL / MariaDB | `mysql` | [mysqldump / mysql](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Host, port, user, password |
 | GitHub (org or user) | `github` | [github-backup](https://github.com/josegonzalez/python-github-backup) | Personal access token |
 | Remote server (SSH) | `rsync` | [rsync](https://rsync.samba.org/) | SSH private key |
+| IMAP mailbox (Proton Bridge, Gmail, etc.) | `imap` | [mbsync](https://isync.sourceforge.io/) | Host, port, user, password |
 
 ## Not a backup system
 
@@ -88,6 +89,7 @@ config.json ──> [Orchestrator] ──> aws s3 sync
                      │          ──> mysqldump
                      │          ──> github-backup
                      │          ──> rsync
+                     │          ──> mbsync (IMAP → Maildir)
                      │
                      ├── cron scheduler (check every 60s)
                      ├── sequential job execution

@@ -86,7 +86,7 @@
         "id": { "type": "string", "minLength": 1, "description": "Unique job identifier." },
         "type": {
           "type": "string",
-          "enum": ["s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"],
+          "enum": ["s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync", "imap"],
           "description": "Job type."
         },
         "enabled": { "type": "boolean", "default": true, "description": "Skip the job when false. Still validated at startup." },
@@ -99,7 +99,8 @@
           "items": { "$ref": "#/$defs/db_server" }
         },
         "organizations": { "type": "array", "items": { "$ref": "#/$defs/github_org" } },
-        "targets": { "type": "array", "items": { "$ref": "#/$defs/rsync_target" } }
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/rsync_target" } },
+        "accounts": { "type": "array", "items": { "$ref": "#/$defs/imap_account" } }
       },
       "allOf": [
         { "if": { "properties": { "type": { "const": "s3bucket" } } }, "then": { "required": ["buckets"] } },
@@ -107,7 +108,8 @@
         { "if": { "properties": { "type": { "const": "pgsql" } } }, "then": { "required": ["servers"] } },
         { "if": { "properties": { "type": { "const": "mysql" } } }, "then": { "required": ["servers"] } },
         { "if": { "properties": { "type": { "const": "github" } } }, "then": { "required": ["organizations"] } },
-        { "if": { "properties": { "type": { "const": "rsync" } } }, "then": { "required": ["targets"] } }
+        { "if": { "properties": { "type": { "const": "rsync" } } }, "then": { "required": ["targets"] } },
+        { "if": { "properties": { "type": { "const": "imap" } } }, "then": { "required": ["accounts"] } }
       ]
     },
     "s3_bucket": {
@@ -185,6 +187,22 @@
         "delete_excluded": { "type": "boolean", "default": false, "description": "Also delete excluded paths from the destination (implies --delete). Purges already-mirrored copies of newly-excluded paths." },
         "exclude": { "type": "array", "items": { "type": "string" }, "description": "Rsync exclude patterns." },
         "min_age_days": { "type": "integer", "minimum": 1, "description": "Only sync files older than N days." }
+      },
+      "additionalProperties": false
+    },
+    "imap_account": {
+      "type": "object",
+      "required": ["host", "user", "pass", "destination"],
+      "properties": {
+        "host": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$", "description": "IMAP server hostname or IPv4 (e.g. 127.0.0.1 for Proton Bridge)." },
+        "port": { "type": "integer", "default": 993, "description": "IMAP port (993 for SSL, 143/1143 for STARTTLS)." },
+        "user": { "type": "string", "description": "IMAP username (full email address for most providers)." },
+        "pass": { "type": "string", "description": "IMAP password (Bridge-generated password for Proton)." },
+        "destination": { "type": "string", "description": "Local Maildir root directory." },
+        "tls": { "type": "string", "enum": ["ssl", "starttls", "none"], "default": "ssl", "description": "Transport security. Use 'starttls' for Proton Bridge on port 1143." },
+        "cert_file": { "type": "string", "description": "Path to a CA/cert to trust, for self-signed servers like Proton Bridge." },
+        "delete_destination": { "type": "boolean", "default": true, "description": "Mirror mode — propagate remote deletions to the local copy. The remote mailbox is never modified." },
+        "exclude": { "type": "array", "items": { "type": "string" }, "description": "IMAP folder names to skip (e.g. \"All Mail\")." }
       },
       "additionalProperties": false
     }

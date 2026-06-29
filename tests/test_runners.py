@@ -1171,6 +1171,212 @@ class TestFindOldFiles:
         assert not any("find" in a or "2>" in a for a in captured["cmd"])
 
 
+# ── IMAP runner ─────────────────────────────────────────────────────────────
+
+
+class TestImapRunner:
+    """Tests for clouddump.job_imap.run_imap_sync."""
+
+    @staticmethod
+    def _cfg(**overrides):
+        base = {
+            "host": "127.0.0.1",
+            "port": 1143,
+            "user": "you@proton.me",
+            "pass": "bridge-pass",
+            "destination": "/backup/proton",
+            "tls": "starttls",
+        }
+        base.update(overrides)
+        return base
+
+    @staticmethod
+    def _capture(monkeypatch, rc=0):
+        """Patch run_cmd to capture the command and the generated mbsyncrc.
+
+        The runner removes its temp config in a finally block, so we read it
+        back during the call (run_cmd is invoked before cleanup runs).
+        """
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            cfg_path = cmd[cmd.index("-c") + 1]
+            with open(cfg_path) as f:
+                config = f.read()
+            calls.append({"cmd": cmd, "kwargs": kwargs, "config": config})
+            return rc
+
+        monkeypatch.setattr("clouddump.job_imap.run_cmd", fake_run_cmd)
+        return calls
+
+    def test_basic_sync(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        rc = run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert rc == 0
+        assert len(calls) == 1
+        cmd = calls[0]["cmd"]
+        assert cmd[0] == "mbsync"
+        assert cmd[1] == "-c"
+        assert cmd[-1] == "clouddump"
+        config = calls[0]["config"]
+        assert "Host 127.0.0.1" in config
+        assert "Port 1143" in config
+        assert 'User "you@proton.me"' in config
+        assert "TLSType STARTTLS" in config
+        assert f"Path {dest}/" in config
+
+    def test_password_never_in_config(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, **{"pass": "s3cr3t-token"}), _tmp_logfile)
+
+        config = calls[0]["config"]
+        # The secret goes in a separate 0600 file, referenced via PassCmd.
+        assert "s3cr3t-token" not in config
+        assert "PassCmd " in config
+
+    def test_mirror_mode_propagates_deletes(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, delete_destination=True), _tmp_logfile)
+
+        config = calls[0]["config"]
+        assert "Sync Pull" in config
+        assert "Expunge Near" in config
+        assert "Remove Near" in config
+
+    def test_keep_mode_never_deletes(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, delete_destination=False), _tmp_logfile)
+
+        config = calls[0]["config"]
+        assert "PullNew" in config
+        assert "Expunge Near" not in config
+        assert "Remove Near" not in config
+
+    def test_tls_ssl_maps_to_imaps(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, tls="ssl"), _tmp_logfile)
+
+        assert "TLSType IMAPS" in calls[0]["config"]
+
+    def test_cert_file_added(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, cert_file="/config/bridge.pem"), _tmp_logfile)
+
+        assert "CertificateFile /config/bridge.pem" in calls[0]["config"]
+
+    def test_exclude_patterns(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, exclude=["All Mail", "Spam"]), _tmp_logfile)
+
+        config = calls[0]["config"]
+        assert 'Patterns * !"All Mail" !"Spam"' in config
+
+    def test_debug_adds_verbose_flag(self, monkeypatch, tmp_path, _tmp_logfile):
+        import clouddump
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+        monkeypatch.setattr(clouddump, "debug", True)
+
+        run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert "-V" in calls[0]["cmd"]
+
+    def test_invalid_tls(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        rc = run_imap_sync(self._cfg(tls="bogus"), _tmp_logfile)
+        assert rc == 1
+
+    def test_invalid_host(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        rc = run_imap_sync(self._cfg(host="bad host;rm -rf"), _tmp_logfile)
+        assert rc == 1
+
+    def test_missing_user(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        rc = run_imap_sync(self._cfg(user=""), _tmp_logfile)
+        assert rc == 1
+
+    def test_config_injection_rejected(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        rc = run_imap_sync(self._cfg(user='evil"\nHost attacker'), _tmp_logfile)
+        assert rc == 1
+
+    def test_nonzero_exit(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        self._capture(monkeypatch, rc=1)
+
+        rc = run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+        assert rc == 1
+
+    def test_creates_destination_dir(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "deep" / "nested" / "proton")
+        self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+        assert os.path.isdir(dest)
+
+    def test_temp_files_cleaned_up(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        captured = {}
+
+        def fake_run_cmd(cmd, **kwargs):
+            cfg_path = cmd[cmd.index("-c") + 1]
+            # PassCmd line: cat <passfile>
+            with open(cfg_path) as f:
+                for line in f:
+                    if line.startswith("PassCmd"):
+                        captured["passfile"] = line.split("cat ", 1)[1].strip().rstrip('"')
+            captured["config"] = cfg_path
+            return 0
+
+        monkeypatch.setattr("clouddump.job_imap.run_cmd", fake_run_cmd)
+        run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert not os.path.exists(captured["config"])
+        assert not os.path.exists(captured["passfile"])
+
+
 # ── Job dispatch ────────────────────────────────────────────────────────────
 
 
