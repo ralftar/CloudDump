@@ -306,7 +306,8 @@ via Proton Bridge.
 
 - `host`: IMAP server hostname or IPv4 (required). For Proton Bridge running as
   a sidecar, this is `127.0.0.1` or the compose service name.
-- `port`: IMAP port (default `993`). Proton Bridge listens on `1143`.
+- `port`: IMAP port. Defaults to `993` when `tls` is `"ssl"`, otherwise `143`.
+  Proton Bridge listens on `1143`, so set it explicitly.
 - `user`: IMAP username — usually the full email address (required).
 - `pass`: IMAP password (required). For Proton this is the **Bridge-generated**
   password, not your Proton account password.

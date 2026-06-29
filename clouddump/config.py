@@ -26,7 +26,7 @@ TOOL_REQUIREMENTS = {
     "mysql": ["mysqldump", "mysql"],
     "github": ["github-backup", "git", "curl"],
     "rsync": ["rsync", "ssh"],
-    "imap": ["mbsync"],
+    "imap": ["mbsync", "curl"],
 }
 
 
@@ -391,26 +391,48 @@ def _verify_imap(job, job_id, results):
 
     Uses ``curl`` for parity with the other subprocess-based probes — it logs
     in and issues a LIST, exercising the same host/port/TLS path the sync job
-    uses. Credentials are passed via --user (not the URL) and never logged.
+    uses. Credentials are written to a temporary 0600 netrc file (never placed
+    on the command line, where they would be visible in the process list).
     """
+    import tempfile
+
     for account in cfg(job, "accounts", []):
         host = cfg(account, "host")
-        port = str(cfg(account, "port", "993"))
         user = cfg(account, "user")
         password = cfg(account, "pass")
         tls = cfg(account, "tls", "ssl")
         cert_file = cfg(account, "cert_file")
         if not host or not user or not password:
             continue
-        scheme = "imap" if tls == "starttls" else ("imaps" if tls == "ssl" else "imap")
-        cmd = ["curl", "-sS", "--max-time", "10",
-               "--url", f"{scheme}://{host}:{port}/",
-               "--user", f"{user}:{password}"]
-        if tls == "starttls":
-            cmd.append("--ssl-reqd")
-        if cert_file:
-            cmd += ["--cacert", cert_file]
-        _run_verify(cmd, f"imap {user}@{host}:{port}", job_id, results, timeout=15)
+        # Match the sync job's TLS-aware default port (993 IMAPS, else 143).
+        default_port = "993" if tls == "ssl" else "143"
+        port = str(cfg(account, "port", default_port))
+        scheme = "imaps" if tls == "ssl" else "imap"
+
+        fd, netrc_path = tempfile.mkstemp(prefix="clouddump_imap_netrc_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(f"default login {user} password {password}\n")
+            cmd = ["curl", "-sS", "--max-time", "10",
+                   "--netrc-file", netrc_path,
+                   "--url", f"{scheme}://{host}:{port}/"]
+            if tls == "starttls":
+                cmd.append("--ssl-reqd")
+            if cert_file:
+                # A pinned (often self-signed) cert is trusted by mbsync via
+                # exact match without a hostname check; curl --cacert would also
+                # enforce the cert SAN, falsely WARNing when the server is reached
+                # by a service name (e.g. a Proton Bridge cert issued for
+                # 127.0.0.1). This probe only checks reachability + auth — mbsync
+                # does the real cert validation on the data path — so skip curl's
+                # TLS verification when a cert is pinned.
+                cmd.append("--insecure")
+            _run_verify(cmd, f"imap {user}@{host}:{port}", job_id, results, timeout=15)
+        finally:
+            try:
+                os.remove(netrc_path)
+            except OSError:
+                pass
 
 
 def _verify_github_token(job, job_id, results):

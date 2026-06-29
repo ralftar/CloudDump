@@ -1228,7 +1228,7 @@ class TestImapRunner:
         assert "Port 1143" in config
         assert 'User "you@proton.me"' in config
         assert "TLSType STARTTLS" in config
-        assert f"Path {dest}/" in config
+        assert f'Path "{dest}/"' in config
 
     def test_password_never_in_config(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
@@ -1268,6 +1268,9 @@ class TestImapRunner:
         assert "PullNew" in config
         assert "Expunge Near" not in config
         assert "Remove Near" not in config
+        # 'ReNew' was renamed to 'Upgrade' in isync 1.5.0 — the old keyword
+        # would be rejected by the parser, breaking keep-mode entirely.
+        assert "PullReNew" not in config
 
     def test_tls_ssl_maps_to_imaps(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
@@ -1287,7 +1290,7 @@ class TestImapRunner:
 
         run_imap_sync(self._cfg(destination=dest, cert_file="/config/bridge.pem"), _tmp_logfile)
 
-        assert "CertificateFile /config/bridge.pem" in calls[0]["config"]
+        assert 'CertificateFile "/config/bridge.pem"' in calls[0]["config"]
 
     def test_exclude_patterns(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
@@ -1335,6 +1338,60 @@ class TestImapRunner:
 
         rc = run_imap_sync(self._cfg(user='evil"\nHost attacker'), _tmp_logfile)
         assert rc == 1
+
+    def test_backslash_in_user_rejected(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        # Backslash is an mbsync escape char even inside quotes — must be rejected.
+        rc = run_imap_sync(self._cfg(user="DOMAIN\\alice"), _tmp_logfile)
+        assert rc == 1
+
+    def test_destination_injection_rejected(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        rc = run_imap_sync(self._cfg(destination="/backup/x\nRemove Both"), _tmp_logfile)
+        assert rc == 1
+
+    def test_cert_file_injection_rejected(self, monkeypatch, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        rc = run_imap_sync(self._cfg(cert_file="/x\nPatterns *"), _tmp_logfile)
+        assert rc == 1
+
+    def test_destination_with_space_is_quoted(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "Proton Mail")
+        calls = self._capture(monkeypatch)
+
+        rc = run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert rc == 0
+        config = calls[0]["config"]
+        assert f'Path "{dest}/"' in config
+        assert f'Inbox "{dest}/INBOX"' in config
+
+    def test_default_port_ssl(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        # tls=ssl, no explicit port -> implicit-TLS default 993
+        run_imap_sync(self._cfg(destination=dest, tls="ssl", port=None), _tmp_logfile)
+
+        assert "Port 993" in calls[0]["config"]
+
+    def test_default_port_starttls(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        # tls=starttls, no explicit port -> default 143 (not 993)
+        run_imap_sync(self._cfg(destination=dest, tls="starttls", port=None), _tmp_logfile)
+
+        assert "Port 143" in calls[0]["config"]
 
     def test_nonzero_exit(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
