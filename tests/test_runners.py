@@ -1210,7 +1210,7 @@ class TestImapRunner:
         return calls
 
     def test_basic_sync(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_imap import run_imap_sync
+        from clouddump.job_imap import run_imap_sync, _quote
 
         dest = str(tmp_path / "proton")
         calls = self._capture(monkeypatch)
@@ -1228,7 +1228,7 @@ class TestImapRunner:
         assert "Port 1143" in config
         assert 'User "you@proton.me"' in config
         assert "TLSType STARTTLS" in config
-        assert f'Path "{dest}/"' in config
+        assert f"Path {_quote(dest + '/')}" in config
 
     def test_password_never_in_config(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
@@ -1339,12 +1339,30 @@ class TestImapRunner:
         rc = run_imap_sync(self._cfg(user='evil"\nHost attacker'), _tmp_logfile)
         assert rc == 1
 
-    def test_backslash_in_user_rejected(self, monkeypatch, _tmp_logfile):
+    def test_backslash_in_user_escaped(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
 
-        # Backslash is an mbsync escape char even inside quotes — must be rejected.
-        rc = run_imap_sync(self._cfg(user="DOMAIN\\alice"), _tmp_logfile)
-        assert rc == 1
+        # Backslash is an mbsync in-quote escape, so a DOMAIN\user login must be
+        # doubled (not rejected) — the account is still backupable.
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        rc = run_imap_sync(self._cfg(destination=dest, user="DOMAIN\\alice"), _tmp_logfile)
+
+        assert rc == 0
+        assert r'User "DOMAIN\\alice"' in calls[0]["config"]
+
+    def test_quote_in_exclude_escaped(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_imap import run_imap_sync
+
+        # A folder name containing a double-quote must be escaped, not break out.
+        dest = str(tmp_path / "proton")
+        calls = self._capture(monkeypatch)
+
+        rc = run_imap_sync(self._cfg(destination=dest, exclude=['Weird"Folder']), _tmp_logfile)
+
+        assert rc == 0
+        assert r'!"Weird\"Folder"' in calls[0]["config"]
 
     def test_destination_injection_rejected(self, monkeypatch, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
@@ -1359,7 +1377,7 @@ class TestImapRunner:
         assert rc == 1
 
     def test_destination_with_space_is_quoted(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_imap import run_imap_sync
+        from clouddump.job_imap import run_imap_sync, _quote
 
         dest = str(tmp_path / "Proton Mail")
         calls = self._capture(monkeypatch)
@@ -1368,8 +1386,8 @@ class TestImapRunner:
 
         assert rc == 0
         config = calls[0]["config"]
-        assert f'Path "{dest}/"' in config
-        assert f'Inbox "{dest}/INBOX"' in config
+        assert f"Path {_quote(dest + '/')}" in config
+        assert f"Inbox {_quote(dest + '/INBOX')}" in config
 
     def test_default_port_ssl(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync

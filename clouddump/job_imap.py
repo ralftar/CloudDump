@@ -25,31 +25,32 @@ _HOST_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 _TLS_TYPES = {"ssl": "IMAPS", "starttls": "STARTTLS", "none": "None"}
 
 
-def _reject_config_chars(value):
-    """True if an IMAP name (user/folder) would break the quoted mbsyncrc value.
+def _reject_unrepresentable(value):
+    """True if *value* contains a newline/CR.
 
-    Rejects newline/CR/double-quote, plus backslash — mbsync treats backslash as
-    an escape character even inside double quotes, so there is no safe way to
-    pass one through a quoted IMAP name.
+    Everything else (backslash, double-quote, spaces) is escaped by ``_quote``,
+    but a newline ends the directive line and cannot be represented in a
+    single-line mbsyncrc value, so it is rejected upstream.
     """
-    return any(c in value for c in "\n\r\"\\")
+    return "\n" in value or "\r" in value
 
 
-def _reject_path_chars(value):
-    """True if a filesystem path would break the quoted mbsyncrc line.
+def _quote(value):
+    """Quote a value for the mbsyncrc, escaping mbsync's in-quote metacharacters.
 
-    Paths are emitted inside double quotes, so newline/CR (line break / directive
-    injection) and double-quote (break out of the value) are rejected. Backslash
-    is allowed: it is a legal POSIX path char (and the path separator on Windows
-    dev/test hosts), and the surrounding quotes keep it contained.
+    Inside double quotes mbsync treats backslash as an escape, so a literal
+    backslash becomes ``\\\\`` and a literal quote ``\\"``. This lets arbitrary
+    user names (e.g. ``DOMAIN\\alice``), folder names, and paths with spaces pass
+    through safely — only newline/CR are unrepresentable (rejected upstream).
     """
-    return any(c in value for c in "\n\r\"")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def _build_config(host, port, user, passfile, tls_type, cert_file,
                   destination, patterns, delete):
     """Render an mbsyncrc for a one-directional far->near (remote->local) sync."""
-    cert_line = f'CertificateFile "{cert_file}"\n' if cert_file else ""
+    cert_line = f"CertificateFile {_quote(cert_file)}\n" if cert_file else ""
 
     if delete:
         # Full mirror: pull new/changed/deleted, and actually remove locally.
@@ -64,7 +65,7 @@ def _build_config(host, port, user, passfile, tls_type, cert_file,
         "IMAPAccount clouddump\n"
         f"Host {host}\n"
         f"Port {port}\n"
-        f'User "{user}"\n'
+        f"User {_quote(user)}\n"
         f'PassCmd "cat {passfile}"\n'
         f"TLSType {tls_type}\n"
         f"{cert_line}"
@@ -73,8 +74,8 @@ def _build_config(host, port, user, passfile, tls_type, cert_file,
         "Account clouddump\n"
         "\n"
         "MaildirStore clouddump-local\n"
-        f'Path "{destination}/"\n'
-        f'Inbox "{destination}/INBOX"\n'
+        f"Path {_quote(destination + '/')}\n"
+        f"Inbox {_quote(destination + '/INBOX')}\n"
         "SubFolders Verbatim\n"
         "\n"
         "Channel clouddump\n"
@@ -115,26 +116,22 @@ def run_imap_sync(target, logfile_path):
         log.error("Invalid tls '%s'. Must be one of: ssl, starttls, none.", tls)
         return 1
 
-    # Every operator-supplied value is written into the generated mbsyncrc;
-    # reject anything that could break out of a quoted value or inject a
-    # directive. IMAP names use the stricter check (backslash is an mbsync
-    # escape); paths are quoted, so they only reject line breaks / quotes.
-    if _reject_config_chars(user):
-        log.error("Invalid characters in imap user.")
-        return 1
-    for field, value in (("destination", destination), ("cert_file", cert_file)):
-        if value and _reject_path_chars(value):
+    # Every operator-supplied value is escaped and quoted before being written
+    # into the mbsyncrc, so backslashes (e.g. DOMAIN\user), quotes, and spaces
+    # are all safe. Only newline/CR can't live in a single-line directive.
+    for field, value in (("user", user), ("destination", destination), ("cert_file", cert_file)):
+        if value and _reject_unrepresentable(value):
             log.error("Invalid characters in imap %s.", field)
             return 1
     for pat in exclude:
-        if _reject_config_chars(pat):
+        if _reject_unrepresentable(pat):
             log.error("Invalid characters in imap exclude pattern %r.", pat)
             return 1
 
     os.makedirs(destination, exist_ok=True)
 
     # Patterns: all folders, minus any excluded ones (mbsync negation syntax).
-    patterns = " ".join(["*"] + [f'!"{p}"' for p in exclude])
+    patterns = " ".join(["*"] + [f"!{_quote(p)}" for p in exclude])
 
     log.info("Syncing via mbsync", extra={"host": host, "destination": destination})
     log.debug("Port: %s, user: %s, tls: %s, delete: %s", port, user, tls, delete)
