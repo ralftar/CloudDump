@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   check:
@@ -48,6 +49,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Open PR
+        id: cpr
         if: steps.bump.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
@@ -68,3 +70,13 @@ jobs:
             breaking changes (azstorage jobs) before merging.
 
             Opened automatically by the `check-azcopy` workflow.
+
+      # PRs opened with GITHUB_TOKEN don't trigger pull_request workflows,
+      # so dispatch CI explicitly on the PR branch.
+      - name: Trigger CI on the PR branch
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run ci.yaml --ref automated/azcopy-update \
+            -f pr_number="${{ steps.cpr.outputs.pull-request-number }}"

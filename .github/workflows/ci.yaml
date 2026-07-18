@@ -3,6 +3,13 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Dispatched by check-azcopy on its PR branch: PRs opened with GITHUB_TOKEN
+  # never trigger pull_request workflows, but workflow_dispatch is exempt.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to post CI results on"
+        required: false
 
 permissions:
   contents: read
@@ -196,7 +203,7 @@ jobs:
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
           INTEGRATION_TIME: ${{ needs.integration-tests.outputs.run_time }}
         run: |
-          SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
+          SHA=$(echo "${{ github.event.pull_request.head.sha || github.sha }}" | cut -c1-7)
           NOW=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
           icon() { [ "$1" = "success" ] && echo ":white_check_mark:" || echo ":x:"; }
@@ -294,7 +301,13 @@ jobs:
             const fs = require('fs');
             const body = fs.readFileSync('comment-body.txt', 'utf8');
             const marker = '<!-- ci-sticky-comment -->';
-            const prNumber = context.payload.pull_request.number;
+            const prNumber = context.payload.pull_request
+              ? context.payload.pull_request.number
+              : Number(context.payload.inputs && context.payload.inputs.pr_number);
+            if (!prNumber) {
+              console.log('No PR number available; skipping comment.');
+              return;
+            }
 
             // Find existing comment
             const comments = await github.rest.issues.listComments({
