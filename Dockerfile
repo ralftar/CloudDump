@@ -1,7 +1,7 @@
 FROM debian:13.5-slim
 
 # Bumped by the check-azcopy workflow (PR on each new azcopy release).
-ARG AZCOPY_VERSION=10.32.6
+ARG AZCOPY_VERSION=10.32.7
 
 RUN apt-get update && \
     apt-get upgrade -y && \
