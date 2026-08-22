@@ -380,7 +380,7 @@ def test_validate_settings_bad_health_port(val):
 
 
 def _job(**overrides):
-    base = {"id": "backup1", "type": "s3bucket"}
+    base = {"id": "backup1", "type": "pgsql"}
     base.update(overrides)
     return base
 
@@ -415,10 +415,6 @@ def test_validate_jobs_github_valid():
     assert "github" in summary
 
 
-def test_validate_jobs_mysql_valid():
-    errors, summary = validate_jobs([_job(type="mysql")])
-    assert errors == 0
-    assert "mysql" in summary
 
 
 def test_validate_jobs_duplicate_id():
@@ -573,34 +569,13 @@ def test_verify_connectivity_db_connection_failure(mock_run):
     mock_run.return_value.returncode = 2
     mock_run.return_value.stdout = ""
     mock_run.return_value.stderr = "connection refused\n"
-    job = _job(type="mysql", servers=[{"host": "mysql.example.com", "port": 3306, "user": "backup", "pass": "secret"}])
+    job = _job(type="pgsql", servers=[{"host": "db.example.com", "port": 5432, "user": "backup", "pass": "secret"}])
     results = verify_connectivity([job])
     assert any("WARN" in r for r in results)
 
 
-@patch("subprocess.run")
-def test_verify_s3_bucket_ok(mock_run):
-    mock_run.return_value.returncode = 0
-    mock_run.return_value.stdout = ""
-    mock_run.return_value.stderr = ""
-    job = _job(type="s3bucket", buckets=[{
-        "source": "s3://my-bucket/prefix",
-        "aws_access_key_id": "AKIA...", "aws_secret_access_key": "secret", "aws_region": "eu-west-1"}])
-    results = verify_connectivity([job])
-    assert any("OK" in r and "S3" in r for r in results)
-    cmd = mock_run.call_args[0][0]
-    assert "head-bucket" in cmd
-    assert "my-bucket" in cmd
 
 
-@patch("subprocess.run")
-def test_verify_s3_bucket_failure(mock_run):
-    mock_run.return_value.returncode = 1
-    mock_run.return_value.stdout = ""
-    mock_run.return_value.stderr = "404 Not Found\n"
-    job = _job(type="s3bucket", buckets=[{"source": "s3://bad-bucket"}])
-    results = verify_connectivity([job])
-    assert any("WARN" in r and "S3" in r for r in results)
 
 
 @patch("subprocess.run")
@@ -712,17 +687,6 @@ def test_verify_pgsql_skips_tables_when_db_missing(mock_run):
     assert mock_run.call_count == 1  # only the DB list query
 
 
-@patch("subprocess.run")
-def test_verify_mysql_databases(mock_run):
-    mock_run.return_value.returncode = 0
-    mock_run.return_value.stdout = "app_db\nanalytics\n"
-    mock_run.return_value.stderr = ""
-    job = _job(type="mysql", servers=[{
-        "host": "mysql.example.com", "user": "backup", "pass": "secret",
-        "databases": ["app_db", "gone_db"]}])
-    results = verify_connectivity([job])
-    assert any("OK" in r and "mysql" in r for r in results)
-    assert any("WARN" in r and "gone_db" in r for r in results)
 
 
 # ── fmt_bytes ───────────────────────────────────────────────────────────────
@@ -744,7 +708,7 @@ def test_fmt_bytes(n, expected):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix paths only")
-@pytest.mark.parametrize("path", ["/backup/s3", "/mnt/clouddump", "/tmp/test"])
+@pytest.mark.parametrize("path", ["/backup/pgsql", "/mnt/clouddump", "/tmp/test"])
 def test_validate_backup_path_allowed(path):
     assert validate_backup_path(path) is None
 
@@ -767,7 +731,7 @@ def test_format_job_config_redacts_secrets():
 
 
 def test_format_job_config_valid_json():
-    job = {"id": "test", "type": "s3bucket"}
+    job = {"id": "test", "type": "pgsql"}
     result = format_job_config(job)
     parsed = json.loads(result)
     assert parsed["id"] == "test"
@@ -807,8 +771,8 @@ def test_update_job_metric():
 def test_update_job_metric_without_net():
     old = _state["jobs"].copy()
     try:
-        update_job_metric("test-s3", "s3bucket", "failure", 60)
-        m = _state["jobs"]["test-s3"]
+        update_job_metric("test-pg", "pgsql", "failure", 60)
+        m = _state["jobs"]["test-pg"]
         assert m["status"] == "failure"
         assert "rx_bytes" not in m
     finally:

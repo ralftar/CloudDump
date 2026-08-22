@@ -1,4 +1,4 @@
-FROM debian:13.5-slim
+FROM debian:13.6-slim
 
 # Bumped by the check-azcopy workflow (PR on each new azcopy release).
 ARG AZCOPY_VERSION=10.32.7
@@ -24,9 +24,8 @@ RUN apt-get update && \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     postgresql-client-18 \
-    default-mysql-client \
     rsync \
-    awscli \
+    isync \
     procps \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL -o /tmp/azcopy.tar.gz "https://github.com/Azure/azure-storage-azcopy/releases/download/v${AZCOPY_VERSION}/azcopy_linux_amd64_${AZCOPY_VERSION}.tar.gz" \

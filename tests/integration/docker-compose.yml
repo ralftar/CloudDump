@@ -1,16 +1,4 @@
 services:
-  minio:
-    image: minio/minio
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   postgres:
     image: postgres
     environment:
@@ -21,18 +9,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  mysql:
-    image: mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_USER: testuser
-      MYSQL_PASSWORD: testpass
-    healthcheck:
-      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -u root -prootpass -e 'SELECT 1'"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   mailpit:
     image: axllent/mailpit

@@ -46,10 +46,9 @@ def _tool_versions():
     """Collect version strings for installed backup tools."""
     tools = [
         ("pg_dump", ["pg_dump", "--version"]),
-        ("mysqldump", ["mysqldump", "--version"]),
-        ("aws", ["aws", "--version"]),
         ("azcopy", ["azcopy", "--version"]),
         ("rsync", ["rsync", "--version"]),
+        ("mbsync", ["mbsync", "--version"]),
         ("git", ["git", "--version"]),
     ]
     versions = []

@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -98,7 +98,7 @@ jobs:
             echo ""
             PASS=0
             FAIL=0
-            for tool in "github-backup --help" "git --version" "aws --version" "azcopy --version" "pg_dump --version" "psql --version" "mysqldump --version" "mysql --version"; do
+            for tool in "github-backup --help" "git --version" "azcopy --version" "pg_dump --version" "psql --version" "mbsync --version" "rsync --version"; do
               name=$(echo "$tool" | cut -d' ' -f1)
               if docker run --rm clouddump:ci-test $tool >/dev/null 2>&1; then
                 echo "- :white_check_mark: \`$name\`"
@@ -138,11 +138,8 @@ jobs:
 
       - name: Pull compose images (cached by runner)
         run: |
-          docker pull minio/minio &
           docker pull postgres:15 &
-          docker pull mysql:8.0 &
           docker pull axllent/mailpit &
-          docker pull minio/mc &
           wait
 
       - name: Record start time

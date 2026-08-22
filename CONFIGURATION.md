@@ -69,40 +69,13 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 | Key | Required | Default | Description |
 |-----|----------|---------|-------------|
 | `id` | Yes | — | Unique job identifier |
-| `type` | Yes | — | `s3bucket`, `azstorage`, `pgsql`, `mysql`, `github`, or `rsync` |
+| `type` | Yes | — | `azstorage`, `pgsql`, `github`, `rsync`, or `imap` |
 | `enabled` | No | `true` | Skip the job when `false`. Still validated at startup. |
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
 
-Plus type-specific fields (`buckets`, `blobstorages`, `servers`, `organizations`,
-`targets`) — see below.
-
-## S3 bucket
-
-```json
-{
-  "type": "s3bucket",
-  "id": "my-s3-job",
-
-  "buckets": [
-    {
-      "source": "s3://bucket-name/optional-prefix",
-      "destination": "/mnt/clouddump/s3",
-      "delete_destination": false,
-      "aws_access_key_id": "AKIA...",
-      "aws_secret_access_key": "...",
-      "aws_region": "us-east-1",
-      "endpoint_url": ""
-    }
-  ]
-}
-```
-
-Set `endpoint_url` for S3-compatible storage like MinIO:
-
-```json
-"endpoint_url": "https://minio.example.com:9000"
-```
+Plus type-specific fields (`blobstorages`, `servers`, `organizations`,
+`targets`, `accounts`) — see below.
 
 ## Azure Blob Storage
 
@@ -153,39 +126,6 @@ The source URL includes the SAS token for authentication.
 - `compress`: bzip2 compression of dump files.
 - `filenamedate`: append timestamp to dump filenames.
 - `db_retries`: number of retry attempts per individual database dump (default: `3`).
-
-## MySQL / MariaDB
-
-```json
-{
-  "type": "mysql",
-  "id": "my-mysql-job",
-
-  "servers": [
-    {
-      "host": "mysql.example.com",
-      "port": 3306,
-      "user": "backup_user",
-      "pass": "password",
-      "databases": ["app_db", "analytics"],
-      "databases_excluded": [],
-      "backuppath": "/mnt/clouddump/mysql",
-      "filenamedate": true,
-      "compress": true
-    }
-  ]
-}
-```
-
-- `databases`: explicit list. If empty, all databases are dumped (except
-  `databases_excluded` and system databases `information_schema`,
-  `performance_schema`, `sys`).
-- `compress`: bzip2 compression of dump files.
-- `filenamedate`: append timestamp to dump filenames.
-- `db_retries`: number of retry attempts per individual database dump (default: `3`).
-
-Dumps use `--single-transaction --routines --triggers --events` for
-consistent, complete backups without locking tables.
 
 ## GitHub organization or user
 
@@ -274,6 +214,96 @@ docker run -d \
 
 SSH uses `StrictHostKeyChecking=accept-new` (auto-accepts new host keys but
 rejects changed ones) and `BatchMode=yes` (never prompts for passwords).
+
+## IMAP mailbox
+
+Mirrors an IMAP account to a local **Maildir** — one directory per folder,
+one file per message (raw RFC822). Uses [`mbsync`](https://isync.sourceforge.io/)
+(isync). The sync is strictly one-directional: **the remote mailbox is never
+modified**. Works against any IMAP server; the primary use case is Proton Mail
+via Proton Bridge.
+
+```json
+{
+  "type": "imap",
+  "id": "my-mail-job",
+
+  "accounts": [
+    {
+      "host": "127.0.0.1",
+      "port": 1143,
+      "user": "you@proton.me",
+      "pass": "bridge-generated-password",
+      "destination": "/mnt/clouddump/proton",
+      "tls": "starttls",
+      "cert_file": "/config/bridge-cert.pem",
+      "delete_destination": true,
+      "exclude": ["All Mail"]
+    }
+  ]
+}
+```
+
+- `host`: IMAP server hostname or IPv4 (required). For Proton Bridge running as
+  a sidecar, this is `127.0.0.1` or the compose service name.
+- `port`: IMAP port. Defaults to `993` when `tls` is `"ssl"`, otherwise `143`.
+  Proton Bridge listens on `1143`, so set it explicitly.
+- `user`: IMAP username — usually the full email address (required).
+- `pass`: IMAP password (required). For Proton this is the **Bridge-generated**
+  password, not your Proton account password.
+- `destination`: local Maildir root directory (required). mbsync keeps its sync
+  state here, so the directory is self-contained across runs.
+- `tls`: transport security — `"ssl"` (default, IMAPS), `"starttls"`, or
+  `"none"`. Use `"starttls"` for Proton Bridge on port 1143.
+- `cert_file`: path to a CA/cert to trust, for self-signed servers like Proton
+  Bridge. Export it from Bridge's settings and mount it into the container.
+- `delete_destination`: mirror mode — propagate remote deletions to the local
+  copy (default: `true`). The remote mailbox is never touched. Set to `false`
+  to keep messages locally after they are deleted on the server.
+- `exclude`: IMAP folder names to skip (default: none), e.g. `"All Mail"` to
+  avoid duplicating every message that also lives in a label.
+
+### Proton Mail via Proton Bridge
+
+Proton Bridge is **not** part of the CloudDump image — it runs as its own
+container (a sidecar), so it is updated on its own release cadence and its
+decrypted-mail/session state stays isolated. CloudDump just points the generic
+`imap` job at the Bridge's local IMAP port.
+
+```yaml
+services:
+  protonmail-bridge:
+    image: shenxn/protonmail-bridge:latest
+    restart: unless-stopped
+    volumes:
+      - bridge-data:/root  # persists keychain + session across restarts
+
+  clouddump:
+    image: ghcr.io/ralftar/clouddump:latest
+    restart: unless-stopped
+    depends_on: [protonmail-bridge]
+    volumes:
+      - ./config.json:/config/config.json:ro
+      - /mnt/nas/clouddump:/backup
+
+volumes:
+  bridge-data:
+```
+
+With this compose, set the account's `host` to `protonmail-bridge` (the service
+name) and `port` to `1143`.
+
+**One-time setup:** Bridge requires a single interactive login (username +
+password + 2FA) that cannot be automated. Run it once:
+
+```sh
+docker exec -it protonmail-bridge protonmail-bridge --cli
+# then: login   (enter credentials + 2FA), and note the Bridge IMAP password
+```
+
+After that the session is cached in the `bridge-data` volume and survives
+restarts — all subsequent syncs run unattended. Proton Bridge requires a paid
+Proton plan.
 
 ## Storage
 

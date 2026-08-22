@@ -16,15 +16,15 @@ VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
 VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
 VALID_LOG_FORMATS = {"text", "json"}
 CONFIG_FILE = "/config/config.json"
-VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"}
+VALID_JOB_TYPES = {"azstorage", "pgsql", "github", "rsync", "imap"}
 _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
+VALID_IMAP_TLS = {"ssl", "starttls", "none"}
 TOOL_REQUIREMENTS = {
-    "s3bucket": ["aws"],
     "azstorage": ["azcopy"],
     "pgsql": ["pg_dump", "psql"],
-    "mysql": ["mysqldump", "mysql"],
     "github": ["github-backup", "git", "curl"],
     "rsync": ["rsync", "ssh"],
+    "imap": ["mbsync", "curl"],
 }
 
 
@@ -153,21 +153,20 @@ def validate_jobs(jobs):
 
         # Validate field types in targets
         _TARGET_BOOLS = {
-            "s3bucket": ("buckets", ["delete_destination"]),
             "azstorage": ("blobstorages", ["delete_destination"]),
             "pgsql": ("servers", ["filenamedate", "compress"]),
-            "mysql": ("servers", ["filenamedate", "compress"]),
             "github": ("organizations", [
                 "include_repos", "include_issues", "include_pulls",
                 "include_labels", "include_milestones", "include_releases",
                 "include_wikis", "include_forks", "include_archived", "include_lfs",
             ]),
             "rsync": ("targets", ["delete_destination", "delete_excluded"]),
+            "imap": ("accounts", ["delete_destination"]),
         }
         _TARGET_INTS = {
             "pgsql": ("servers", ["port", "db_retries"]),
-            "mysql": ("servers", ["port", "db_retries"]),
             "rsync": ("targets", ["ssh_port", "min_age_days"]),
+            "imap": ("accounts", ["port"]),
         }
         if job_type in _TARGET_BOOLS:
             coll, fields = _TARGET_BOOLS[job_type]
@@ -190,12 +189,11 @@ def validate_jobs(jobs):
 
         # Validate backup paths
         path_keys = {
-            "s3bucket": ("buckets", "destination"),
             "azstorage": ("blobstorages", "destination"),
             "pgsql": ("servers", "backuppath"),
-            "mysql": ("servers", "backuppath"),
             "github": ("organizations", "destination"),
             "rsync": ("targets", "destination"),
+            "imap": ("accounts", "destination"),
         }
         if job_type in path_keys:
             collection_key, field = path_keys[job_type]
@@ -247,6 +245,15 @@ def validate_jobs(jobs):
                               acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
                     errors += 1
 
+        # Validate tls mode for IMAP accounts (config error, not connectivity)
+        if job_type == "imap":
+            for account in cfg(job, "accounts", []):
+                tls = cfg(account, "tls", "ssl")
+                if tls not in VALID_IMAP_TLS:
+                    log.error("Invalid tls '%s' for '%s' in job ID %s. Must be one of: %s.",
+                              tls, cfg(account, "user"), job_id, ", ".join(sorted(VALID_IMAP_TLS)))
+                    errors += 1
+
         disabled_tag = "" if cfg(job, "enabled", True) else " (DISABLED)"
         summaries.append(f"ID: {job_id}{disabled_tag}\nType: {job_type}")
 
@@ -280,27 +287,6 @@ def _run_verify(cmd, label, job_id, results, env=None, timeout=15):
     log.warning("%s failed (job %s): %s", label, job_id, err)
     return None
 
-
-def _verify_s3_bucket(job, job_id, results):
-    """Verify S3 bucket accessibility and credentials (warn only)."""
-    for bucket in cfg(job, "buckets", []):
-        source = cfg(bucket, "source")
-        if not source:
-            continue
-        env = {**os.environ}
-        for key, envvar in [("aws_access_key_id", "AWS_ACCESS_KEY_ID"),
-                            ("aws_secret_access_key", "AWS_SECRET_ACCESS_KEY"),
-                            ("aws_region", "AWS_DEFAULT_REGION")]:
-            val = cfg(bucket, key)
-            if val:
-                env[envvar] = val
-        # Extract bucket name from s3://bucket/prefix
-        bucket_name = source.replace("s3://", "").split("/")[0]
-        cmd = ["aws", "s3api", "head-bucket", "--bucket", bucket_name]
-        endpoint = cfg(bucket, "endpoint_url")
-        if endpoint:
-            cmd += ["--endpoint-url", endpoint]
-        _run_verify(cmd, f"S3 '{source}'", job_id, results, env=env)
 
 
 def _verify_az_container(job, job_id, results):
@@ -350,26 +336,67 @@ def _verify_rsync_ssh(job, job_id, results):
         )
 
 
-def _verify_db_connection(job, job_id, job_type, results):
-    """Verify database credentials with SELECT 1 (warn only)."""
+def _verify_db_connection(job, job_id, results):
+    """Verify PostgreSQL credentials with SELECT 1 (warn only)."""
     for server in cfg(job, "servers", []):
         host = cfg(server, "host")
         password = cfg(server, "pass")
         if not host or not password:
             continue
-        if job_type == "pgsql":
-            port, user = str(cfg(server, "port", "5432")), cfg(server, "user", "postgres")
-            env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
-            cmd = ["psql", "-h", host, "-p", port, "-U", user,
-                   "-d", "postgres", "-t", "-A", "-c", "SELECT 1"]
-        else:
-            port, user = str(cfg(server, "port", "3306")), cfg(server, "user")
-            if not user:
-                continue
-            env = {**os.environ, "MYSQL_PWD": password}
-            cmd = ["mysql", "-h", host, "-P", port, "-u", user,
-                   "--batch", "--skip-column-names", "-e", "SELECT 1"]
-        _run_verify(cmd, f"{job_type} {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+        port, user = str(cfg(server, "port", "5432")), cfg(server, "user", "postgres")
+        env = {**os.environ, "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5"}
+        cmd = ["psql", "-h", host, "-p", port, "-U", user,
+               "-d", "postgres", "-t", "-A", "-c", "SELECT 1"]
+        _run_verify(cmd, f"pgsql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+
+
+def _verify_imap(job, job_id, results):
+    """Verify IMAP credentials by listing mailboxes via curl (warn only).
+
+    Uses ``curl`` for parity with the other subprocess-based probes — it logs
+    in and issues a LIST, exercising the same host/port/TLS path the sync job
+    uses. Credentials are written to a temporary 0600 netrc file (never placed
+    on the command line, where they would be visible in the process list).
+    """
+    import tempfile
+
+    for account in cfg(job, "accounts", []):
+        host = cfg(account, "host")
+        user = cfg(account, "user")
+        password = cfg(account, "pass")
+        tls = cfg(account, "tls", "ssl")
+        cert_file = cfg(account, "cert_file")
+        if not host or not user or not password:
+            continue
+        # Match the sync job's TLS-aware default port (993 IMAPS, else 143).
+        default_port = "993" if tls == "ssl" else "143"
+        port = str(cfg(account, "port", default_port))
+        scheme = "imaps" if tls == "ssl" else "imap"
+
+        fd, netrc_path = tempfile.mkstemp(prefix="clouddump_imap_netrc_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(f"default login {user} password {password}\n")
+            cmd = ["curl", "-sS", "--max-time", "10",
+                   "--netrc-file", netrc_path,
+                   "--url", f"{scheme}://{host}:{port}/"]
+            if tls == "starttls":
+                cmd.append("--ssl-reqd")
+            if cert_file:
+                # A pinned (often self-signed) cert is trusted by mbsync via
+                # exact match without a hostname check; curl --cacert would also
+                # enforce the cert SAN, falsely WARNing when the server is reached
+                # by a service name (e.g. a Proton Bridge cert issued for
+                # 127.0.0.1). This probe only checks reachability + auth — mbsync
+                # does the real cert validation on the data path — so skip curl's
+                # TLS verification when a cert is pinned.
+                cmd.append("--insecure")
+            _run_verify(cmd, f"imap {user}@{host}:{port}", job_id, results, timeout=15)
+        finally:
+            try:
+                os.remove(netrc_path)
+            except OSError:
+                pass
 
 
 def _verify_github_token(job, job_id, results):
@@ -457,31 +484,6 @@ def _verify_pgsql(job, job_id, results):
                         log.warning("%s '%s' not found in %s@%s (job %s).", key, t, dbname, host, job_id)
 
 
-def _verify_mysql(job, job_id, results):
-    """Verify configured MySQL databases exist on the server (warn only)."""
-    for server in cfg(job, "servers", []):
-        host = cfg(server, "host")
-        port = str(cfg(server, "port", "3306"))
-        user = cfg(server, "user")
-        password = cfg(server, "pass")
-        if not host or not user or not password:
-            continue
-        configured_dbs = list(cfg(server, "databases", []))
-        if not configured_dbs:
-            continue
-        env = {**os.environ, "MYSQL_PWD": password}
-        proc = _run_verify(
-            ["mysql", "-h", host, "-P", port, "-u", user,
-             "--batch", "--skip-column-names", "-e", "SHOW DATABASES"],
-            f"mysql {user}@{host}:{port}", job_id, results, env=env, timeout=10)
-        if not proc:
-            continue
-        actual = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
-        for db in configured_dbs:
-            if db not in actual:
-                results.append(f"WARN: Database '{db}' not found on {host} (job {job_id})")
-                log.warning("Database '%s' not found on %s (job %s).", db, host, job_id)
-
 
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
@@ -497,9 +499,6 @@ def verify_connectivity(jobs):
         if not cfg(job, "enabled", True):
             continue
 
-        if job_type == "s3bucket":
-            _verify_s3_bucket(job, job_id, results)
-
         if job_type == "azstorage":
             _verify_az_container(job, job_id, results)
 
@@ -507,18 +506,15 @@ def verify_connectivity(jobs):
             if any(cfg(s, "databases", []) for s in cfg(job, "servers", [])):
                 _verify_pgsql(job, job_id, results)
             else:
-                _verify_db_connection(job, job_id, "pgsql", results)
-
-        if job_type == "mysql":
-            if any(cfg(s, "databases", []) for s in cfg(job, "servers", [])):
-                _verify_mysql(job, job_id, results)
-            else:
-                _verify_db_connection(job, job_id, "mysql", results)
+                _verify_db_connection(job, job_id, results)
 
         if job_type == "rsync":
             _verify_rsync_ssh(job, job_id, results)
 
         if job_type == "github":
             _verify_github_token(job, job_id, results)
+
+        if job_type == "imap":
+            _verify_imap(job, job_id, results)
 
     return results
