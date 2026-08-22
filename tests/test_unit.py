@@ -878,6 +878,8 @@ class _FakeSMTP:
 
     def __init__(self, *a, **k):
         self.sent = []
+        self.init_args = a
+        self.init_kwargs = k
         _FakeSMTP.last = self
 
     def __enter__(self):
@@ -925,3 +927,24 @@ def test_send_email_failure_returns_false(caplog):
 
 def test_send_email_not_configured_returns_none():
     assert send_email({}, "subj", "body") is None
+
+
+def test_send_email_ssl_passes_timeout():
+    """A hung SMTP server must not stall the main loop indefinitely."""
+    from clouddump.email import SMTP_TIMEOUT_SECONDS
+
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        send_email(_smtp_config(), "subj", "body")
+    assert _FakeSMTP.last.init_kwargs.get("timeout") == SMTP_TIMEOUT_SECONDS
+
+
+def test_send_email_starttls_passes_timeout():
+    from clouddump.email import SMTP_TIMEOUT_SECONDS
+
+    class _FakeSTARTTLS(_FakeSMTP):
+        def starttls(self, *a, **k):
+            pass
+
+    with patch("clouddump.email.smtplib.SMTP", _FakeSTARTTLS):
+        send_email(_smtp_config(smtp_security="starttls", smtp_port=587), "subj", "body")
+    assert _FakeSMTP.last.init_kwargs.get("timeout") == SMTP_TIMEOUT_SECONDS

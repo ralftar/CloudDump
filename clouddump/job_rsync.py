@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -19,9 +20,16 @@ _LIST_LINE_RE = re.compile(
 
 
 def _build_ssh_args(ssh_key, ssh_port):
-    """Return the common SSH option list used by rsync."""
+    """Return the common SSH option list used by rsync.
+
+    rsync hands the ``-e`` value to a shell, so every element here is joined
+    into one shell word-list by the callers. ssh_key is operator-supplied and
+    unconstrained (unlike ``source``, which _SOURCE_RE pins down), so quote it:
+    an unquoted path with a space silently breaks the command, and one with a
+    semicolon would inject.
+    """
     return [
-        "ssh", "-i", ssh_key, "-p", ssh_port,
+        "ssh", "-i", shlex.quote(ssh_key), "-p", shlex.quote(ssh_port),
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "BatchMode=yes",
     ]
