@@ -13,6 +13,22 @@ This is intentional. Sequential execution prevents resource contention
 parallel execution or isolated scheduling, run multiple CloudDump instances
 with separate configurations and backup destinations.
 
+## Unknown keys are rejected
+
+CloudDump refuses to start if `config.json` contains a key it does not
+recognise — at the top level, on a job, or on a target. The error names the key
+and lists the valid ones for that position.
+
+This is deliberate. A misspelled key is not ignorable: the option you meant to
+set silently falls back to its default, and several defaults are consequential
+(`delete_destination` defaults to `true`, which mirror-deletes). Unlike a server
+that is merely unreachable, a misread config never recovers on its own — it just
+does the wrong thing on every run. Failing to start gets noticed; a silent
+default does not.
+
+Connectivity problems are treated the opposite way: an unreachable host or a
+rejected credential is logged as a warning and CloudDump starts anyway.
+
 ## Top-level settings
 
 All settings are top-level keys in `config.json`, alongside `jobs`.
