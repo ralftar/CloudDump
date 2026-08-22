@@ -1,2 +1,2 @@
 croniter==6.2.4
-github-backup==0.64.2
+github-backup==0.65.1
