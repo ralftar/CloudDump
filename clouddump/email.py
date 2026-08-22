@@ -14,6 +14,11 @@ from clouddump import cfg, fmt_bytes, log, redact
 
 DEFAULT_EMAIL_SIZE_LIMIT_MB = 15
 
+# A hung SMTP server must not stall the main loop. Every other blocking call in
+# CloudDump is deadline-bound (run_cmd, _run_verify, PGCONNECT_TIMEOUT); this
+# closes the last gap. Generous enough for a large attachment over a slow link.
+SMTP_TIMEOUT_SECONDS = 60
+
 
 def _resolve_smtp_security(config):
     """Determine SMTP security mode from config.
@@ -144,9 +149,9 @@ def send_email(config, subject, body, attachments=None):
     log.info("Sending email to %s from %s.", ", ".join(recipients), mail_from)
     try:
         if security == "ssl":
-            srv = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            srv = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=SMTP_TIMEOUT_SECONDS)
         else:
-            srv = smtplib.SMTP(smtp_server, smtp_port)
+            srv = smtplib.SMTP(smtp_server, smtp_port, timeout=SMTP_TIMEOUT_SECONDS)
             if security == "starttls":
                 srv.starttls()
         with srv:

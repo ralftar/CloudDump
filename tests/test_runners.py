@@ -574,6 +574,40 @@ class TestGitHubRunner:
         assert "ghp_testtoken123" not in log_text
         assert "REDACTED" in log_text
 
+    def test_token_file_is_outside_backup_dir(self, monkeypatch, tmp_path, _tmp_logfile):
+        """A hard kill must not strand a live PAT inside the mirrored backup tree."""
+        from clouddump.job_github import run_github_backup
+
+        dest = tmp_path / "ghout"
+        seen = {}
+
+        def fake_run_cmd(cmd, **kwargs):
+            seen["token_path"] = cmd[cmd.index("--token") + 1][len("file://"):]
+            return 0
+
+        monkeypatch.setattr("clouddump.job_github.run_cmd", fake_run_cmd)
+        run_github_backup(self._cfg(destination=str(dest)), _tmp_logfile)
+
+        token_path = os.path.realpath(seen["token_path"])
+        assert not token_path.startswith(os.path.realpath(str(dest)))
+        assert not os.path.exists(token_path)
+
+    def test_no_token_residue_in_destination(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Even mid-run, the destination holds no token-shaped file."""
+        from clouddump.job_github import run_github_backup
+
+        dest = tmp_path / "ghout"
+        during = {}
+
+        def fake_run_cmd(cmd, **kwargs):
+            during["entries"] = os.listdir(str(dest))
+            return 0
+
+        monkeypatch.setattr("clouddump.job_github.run_cmd", fake_run_cmd)
+        run_github_backup(self._cfg(destination=str(dest)), _tmp_logfile)
+
+        assert during["entries"] == []
+
 
 # ── Rsync runner ───────────────────────────────────────────────────────────
 
@@ -714,6 +748,35 @@ class TestRsyncRunner:
 
         rc = run_rsync_sync(self._cfg(ssh_key=""), _tmp_logfile)
         assert rc == 1
+
+    def test_ssh_key_with_space_is_quoted(self, monkeypatch, tmp_path, _tmp_logfile):
+        """rsync hands -e to a shell; an unquoted path with a space would split."""
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, ssh_key="/config/my key"), _tmp_logfile)
+
+        cmd = calls[0][0]
+        ssh_cmd = cmd[cmd.index("-e") + 1]
+        assert "'/config/my key'" in ssh_cmd
+
+    def test_ssh_key_cannot_inject(self, monkeypatch, tmp_path, _tmp_logfile):
+        """A semicolon in ssh_key must stay inside one shell word."""
+        from clouddump.job_rsync import run_rsync_sync
+        import shlex
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+
+        run_rsync_sync(self._cfg(destination=dest, ssh_key="/k; touch /tmp/pwned"),
+                       _tmp_logfile)
+
+        cmd = calls[0][0]
+        ssh_cmd = cmd[cmd.index("-e") + 1]
+        # The whole key must survive shell-splitting as a single argument.
+        assert "/k; touch /tmp/pwned" in shlex.split(ssh_cmd)
 
     def test_nonzero_exit(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync

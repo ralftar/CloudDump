@@ -29,8 +29,11 @@ def run_github_backup(org, logfile_path):
 
     # Write token to a temp file to keep it out of process arguments
     # (visible via ps aux). github-backup doesn't support env vars.
-    fd, token_path = tempfile.mkstemp(prefix="gh-token-", dir=destination)
-    os.chmod(token_path, 0o600)
+    #
+    # Deliberately NOT dir=destination: a hard kill between mkstemp and the
+    # finally-block would strand a live PAT inside the backup tree, which then
+    # gets mirrored onward. mkstemp already creates the file 0600.
+    fd, token_path = tempfile.mkstemp(prefix="clouddump_gh_token_")
     os.write(fd, token.encode())
     os.close(fd)
 

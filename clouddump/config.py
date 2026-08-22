@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import sys
 import urllib.parse
@@ -325,8 +326,10 @@ def _verify_rsync_ssh(job, job_id, results):
         ssh_port = str(cfg(target, "ssh_port", "22"))
         if not source or not ssh_key or ":" not in source:
             continue
+        # Quoted for the same reason as job_rsync._build_ssh_args: rsync passes
+        # this string to a shell, and ssh_key is unconstrained operator input.
         ssh_cmd = (
-            f"ssh -i {ssh_key} -p {ssh_port} "
+            f"ssh -i {shlex.quote(ssh_key)} -p {shlex.quote(ssh_port)} "
             "-o StrictHostKeyChecking=accept-new "
             "-o BatchMode=yes -o ConnectTimeout=5"
         )
