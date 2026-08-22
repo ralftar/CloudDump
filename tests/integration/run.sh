@@ -102,7 +102,7 @@ for i in $(seq 1 30); do
     fi
 
     # pgsql finished?
-    if compgen -G "$BACKUP_DIR/pgsql/"*.bz2 >/dev/null 2>&1; then
+    if compgen -G "$BACKUP_DIR/pgsql/"*.dump >/dev/null 2>&1; then
         echo "  All jobs finished after ~$((i * 5))s."
         sleep 3
         DONE=true
@@ -133,9 +133,9 @@ check "CloudDump is still running" \
 
 echo ""
 echo "  PostgreSQL dump:"
-check "testuser dump exists and non-empty"  test -s "$BACKUP_DIR/pgsql/testuser.dump.bz2"
-check "testdb1 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb1.dump.bz2"
-check "testdb2 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb2.dump.bz2"
+check "testuser dump exists and non-empty"  test -s "$BACKUP_DIR/pgsql/testuser.dump"
+check "testdb1 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb1.dump"
+check "testdb2 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb2.dump"
 
 echo ""
 echo "  Email (SMTP via Mailpit):"

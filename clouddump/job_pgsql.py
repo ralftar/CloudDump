@@ -3,13 +3,16 @@
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
 
 import clouddump
 from clouddump import cfg, fmt_bytes, log, run_cmd, _safe_remove
 
 # In-progress dumps are staged with a `.tmp` suffix; atomic rename is the final
 # step. Anything with `.tmp` on disk is by definition a partial dump.
+#
+# `.dump.tmp.bz2` is legacy: v1 compressed the staging file with bzip2 before
+# renaming. v2 compresses inside pg_dump and never produces it, but an install
+# upgrading from v1 can still have one on disk, so keep sweeping it up.
 _TMP_SUFFIXES = (".dump.tmp", ".dump.tmp.bz2")
 
 # Databases that should never be dumped.
@@ -83,7 +86,6 @@ def run_pg_dump(server, logfile_path):
     user = cfg(server, "user", "postgres")
     password = cfg(server, "pass")
     backuppath = cfg(server, "backuppath")
-    filenamedate = cfg(server, "filenamedate", False)
     compress = cfg(server, "compress", True)
     databases_cfg = cfg(server, "databases", [])
     databases_excluded = cfg(server, "databases_excluded", [])
@@ -97,7 +99,7 @@ def run_pg_dump(server, logfile_path):
     _cleanup_tmp_files(backuppath)
 
     log.info("Dumping PostgreSQL server", extra={"host": host, "port": int(port), "destination": backuppath})
-    log.debug("Username: %s, filenamedate: %s, compress: %s", user, filenamedate, compress)
+    log.debug("Username: %s, compress: %s", user, compress)
 
     all_dbs = _list_databases(host, port, user, password)
     if all_dbs is None:
@@ -139,7 +141,14 @@ def run_pg_dump(server, logfile_path):
         tables_included = tbl_cfg.get("tables_included", [])
         tables_excluded = tbl_cfg.get("tables_excluded", [])
 
+        # The custom format is zlib-compressed by default, so a separate
+        # compression pass only re-packs an already-packed file. `compress:
+        # false` therefore has to switch pg_dump's own compression off (-Z 0)
+        # — otherwise the dump stays compressed and downstream dedup (Veeam,
+        # borg, restic) still can't see through it.
         cmd = ["pg_dump", "-d", _conninfo(host, port, user, database), "-F", "custom"]
+        if not compress:
+            cmd += ["-Z", "0"]
         if clouddump.debug:
             cmd.append("-v")
         for t in tables_included:
@@ -184,27 +193,9 @@ def run_pg_dump(server, logfile_path):
         total_bytes += size
         log.info("pg_dump completed", extra={"database": database, "bytes": size})
 
-        if compress:
-            log.debug("Compressing %s...", staging)
-            rc = run_cmd(["bzip2", "-f", staging])
-            if rc != 0:
-                log.error("Compression of %s failed.", staging)
-                _safe_remove(staging)
-                _safe_remove(staging + ".bz2")
-                overall_result = 1
-                continue
-            staging += ".bz2"
-
         # Atomic rename is the final step. Anything that doesn't reach this line
         # leaves a .tmp file that the next cleanup pass will remove.
-        if filenamedate:
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            basename = f"{database}-{timestamp}.dump"
-        else:
-            basename = f"{database}.dump"
-        if compress:
-            basename += ".bz2"
-        final_file = os.path.join(backuppath, basename)
+        final_file = os.path.join(backuppath, f"{database}.dump")
 
         try:
             os.replace(staging, final_file)

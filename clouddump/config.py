@@ -155,7 +155,7 @@ def validate_jobs(jobs):
         # Validate field types in targets
         _TARGET_BOOLS = {
             "azstorage": ("blobstorages", ["delete_destination"]),
-            "pgsql": ("servers", ["filenamedate", "compress"]),
+            "pgsql": ("servers", ["compress"]),
             "github": ("organizations", [
                 "include_repos", "include_issues", "include_pulls",
                 "include_labels", "include_milestones", "include_releases",
@@ -205,6 +205,23 @@ def validate_jobs(jobs):
                     if err:
                         log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
                         errors += 1
+
+        # min_age_days restricts the transfer to files older than N days;
+        # delete_destination adds --delete, which prunes whatever is not in
+        # that restricted list. The two describe opposite intents, and the
+        # combination is either destructive or a no-op depending on rsync's
+        # --files-from semantics. Refuse it rather than pick a winner.
+        if job_type == "rsync":
+            for target in cfg(job, "targets", []):
+                if target.get("min_age_days") and cfg(target, "delete_destination", True):
+                    log.error(
+                        "Target '%s' in job ID %s sets min_age_days with "
+                        "delete_destination enabled. These conflict: min_age_days "
+                        "transfers only old files, delete_destination then deletes "
+                        "everything else from the destination. Set "
+                        "delete_destination to false, or drop min_age_days.",
+                        cfg(target, "source"), job_id)
+                    errors += 1
 
         # Validate PostgreSQL table filter syntax
         if job_type == "pgsql":

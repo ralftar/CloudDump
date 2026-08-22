@@ -417,6 +417,45 @@ def test_validate_jobs_github_valid():
 
 
 
+_MIN_AGE_MSG = "min_age_days with delete_destination"
+
+
+def _rsync_job(**target_over):
+    target = {"source": "user@host:/data", "ssh_key": "/config/k"}
+    target.update(target_over)
+    return _job(type="rsync", targets=[target])
+
+
+def _has_min_age_error(caplog):
+    return any(_MIN_AGE_MSG in r.getMessage() for r in caplog.records)
+
+
+def test_min_age_days_with_delete_destination_is_rejected(caplog):
+    """The two describe opposite intents; the combination must not be configurable."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30, delete_destination=True)])
+    assert _has_min_age_error(caplog)
+
+
+def test_min_age_days_rejected_when_delete_destination_defaults(caplog):
+    """delete_destination defaults to true, so omitting it is the same trap."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30)])
+    assert _has_min_age_error(caplog)
+
+
+def test_min_age_days_allowed_without_delete(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30, delete_destination=False)])
+    assert not _has_min_age_error(caplog)
+
+
+def test_delete_destination_allowed_without_min_age(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(delete_destination=True)])
+    assert not _has_min_age_error(caplog)
+
+
 def test_validate_jobs_duplicate_id():
     errors, _ = validate_jobs([_job(), _job()])
     assert errors >= 1

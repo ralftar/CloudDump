@@ -23,7 +23,6 @@
           "pass": "testpass",
           "backuppath": "/backup/pgsql",
           "compress": true,
-          "filenamedate": false,
           "databases_excluded": [
             "template0",
             "template1",

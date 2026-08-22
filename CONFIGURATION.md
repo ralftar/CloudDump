@@ -114,7 +114,6 @@ The source URL includes the SAS token for authentication.
       ],
       "databases_excluded": ["template0", "template1"],
       "backuppath": "/mnt/clouddump/pg",
-      "filenamedate": true,
       "compress": true
     }
   ]
@@ -123,8 +122,12 @@ The source URL includes the SAS token for authentication.
 
 - `databases`: explicit list with per-database table filters. If empty, all
   databases are dumped (except `databases_excluded`).
-- `compress`: bzip2 compression of dump files.
-- `filenamedate`: append timestamp to dump filenames.
+- `compress`: compression inside `pg_dump` (default: `true`). The custom format
+  is zlib-compressed by default, so this is not an extra pass — setting it to
+  `false` passes `-Z 0` and produces an **uncompressed** dump. Use `false` when
+  something downstream does compression or deduplication (Veeam, borg, restic):
+  a compressed dump changes wholesale between runs and defeats dedup.
+  Dumps are always written as `<database>.dump`, overwritten each run.
 - `db_retries`: number of retry attempts per individual database dump (default: `3`).
 
 ## GitHub organization or user
@@ -184,7 +187,7 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
       "destination": "/mnt/clouddump/rsync",
       "ssh_key": "/config/id_ed25519",
       "ssh_port": 22,
-      "delete_destination": true,
+      "delete_destination": false,
       "delete_excluded": false,
       "exclude": ["*.tmp", "cache/"],
       "min_age_days": 30
@@ -197,10 +200,10 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
 - `destination`: local backup directory (required).
 - `ssh_key`: path to the SSH private key file, mounted into the container (required).
 - `ssh_port`: SSH port (default: `22`).
-- `delete_destination`: remove files at destination that no longer exist at source (default: `true`). When combined with `min_age_days`, the destination becomes an exact mirror of the filtered file set: any destination file that is **not** in the age-filtered list is removed. This means files newer than `min_age_days` will **not** be present at the destination. Set `delete_destination` to `false` if you want to accumulate old files while keeping previously synced files intact.
+- `delete_destination`: remove files at destination that no longer exist at source (default: `true`). **Cannot be combined with `min_age_days`** — CloudDump rejects that at startup. The two describe opposite intents: `min_age_days` narrows the transfer to old files, and `--delete` would then remove everything else from the destination, including every file newer than the cutoff. Set `delete_destination` to `false` on any target that uses `min_age_days`.
 - `exclude`: list of rsync exclude patterns (default: none).
 - `delete_excluded`: also delete `exclude`d paths from the destination (default: `false`). Implies deletion (`--delete`), so already-mirrored copies of newly-excluded paths (e.g. regenerable caches) are purged on the next run. Without this, excluded paths already present at the destination are left untouched.
-- `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). When set, CloudDump enumerates remote files via `rsync --list-only`, filters by mtime client-side, and passes the qualifying paths to the main rsync with `--files-from`. Uses the rsync protocol only — no remote shell commands — so it works with restricted SSH accounts (forced commands, `rrsync`, etc.).
+- `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). Requires `delete_destination: false` (see above). When set, CloudDump enumerates remote files via `rsync --list-only`, filters by mtime client-side, and passes the qualifying paths to the main rsync with `--files-from`. Uses the rsync protocol only — no remote shell commands — so it works with restricted SSH accounts (forced commands, `rrsync`, etc.).
 
 The SSH key file should be mounted read-only into the container:
 
