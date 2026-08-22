@@ -1,4 +1,4 @@
-FROM debian:13.5-slim
+FROM debian:13.6-slim
 
 # Bumped by the check-azcopy workflow (PR on each new azcopy release).
 ARG AZCOPY_VERSION=10.32.6
