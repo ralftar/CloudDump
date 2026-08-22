@@ -5,19 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE="docker compose -f $SCRIPT_DIR/docker-compose.yml"
 
-# ── MinIO (S3) ───────────────────────────────────────────────────────────────
-
-echo "  Seeding MinIO..."
-docker run --rm --network clouddump-integration \
-  --entrypoint sh minio/mc -c '
-    mc alias set local http://minio:9000 minioadmin minioadmin &&
-    mc mb --ignore-existing local/test-bucket &&
-    echo "Hello from integration test - file1" | mc pipe local/test-bucket/file1.txt &&
-    echo "Hello from integration test - file2" | mc pipe local/test-bucket/subdir/file2.txt &&
-    echo "Hello from integration test - file3" | mc pipe local/test-bucket/subdir/nested/file3.txt
-  '
-echo "  MinIO seeded: test-bucket (3 files)"
-
 # ── PostgreSQL ───────────────────────────────────────────────────────────────
 
 echo "  Seeding PostgreSQL..."
@@ -57,38 +44,5 @@ $COMPOSE exec -T postgres psql -U testuser -d testdb2 -c "
 "
 
 echo "  PostgreSQL seeded: testdb1 (users), testdb2 (products + orders)"
-
-# ── MySQL ─────────────────────────────────────────────────────────────────
-
-echo "  Seeding MySQL..."
-
-$COMPOSE exec -T mysql mysql -h 127.0.0.1 -u root -prootpass -e "
-  CREATE DATABASE IF NOT EXISTS testdb1;
-  CREATE DATABASE IF NOT EXISTS testdb2;
-"
-
-$COMPOSE exec -T mysql mysql -h 127.0.0.1 -u root -prootpass testdb1 -e "
-  CREATE TABLE IF NOT EXISTS users (
-    id    INT AUTO_INCREMENT PRIMARY KEY,
-    name  VARCHAR(255),
-    email VARCHAR(255)
-  );
-  INSERT INTO users (name, email) VALUES
-    ('Alice',   'alice@example.com'),
-    ('Bob',     'bob@example.com'),
-    ('Charlie', 'charlie@example.com');
-"
-
-$COMPOSE exec -T mysql mysql -h 127.0.0.1 -u root -prootpass testdb2 -e "
-  CREATE TABLE IF NOT EXISTS products (
-    id    INT AUTO_INCREMENT PRIMARY KEY,
-    name  VARCHAR(255),
-    price DECIMAL(10, 2)
-  );
-  INSERT INTO products (name, price) VALUES
-    ('Widget', 9.99), ('Gadget', 19.99), ('Thingamajig', 29.99);
-"
-
-echo "  MySQL seeded: testdb1 (users), testdb2 (products)"
 
 echo "  Seeding complete."

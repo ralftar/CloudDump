@@ -68,7 +68,7 @@ echo "  Image built."
 
 # ── 2. Start fakes ──────────────────────────────────────────────────────────
 
-echo "[2/6] Starting fake services (MinIO, PostgreSQL, MySQL, Mailpit)..."
+echo "[2/6] Starting fake services (PostgreSQL, Mailpit)..."
 $COMPOSE up -d --wait
 echo "  All services healthy."
 
@@ -101,10 +101,8 @@ for i in $(seq 1 30); do
         break
     fi
 
-    # S3 local + pgsql + mysql all finished?
-    if [ -f "$BACKUP_DIR/s3/file1.txt" ] \
-        && compgen -G "$BACKUP_DIR/pgsql/"*.bz2 >/dev/null 2>&1 \
-        && compgen -G "$BACKUP_DIR/mysql/"*.bz2 >/dev/null 2>&1; then
+    # pgsql finished?
+    if compgen -G "$BACKUP_DIR/pgsql/"*.bz2 >/dev/null 2>&1; then
         echo "  All jobs finished after ~$((i * 5))s."
         sleep 3
         DONE=true
@@ -134,22 +132,10 @@ check "CloudDump is still running" \
     docker inspect "$CONTAINER" --format='{{.State.Running}}' 2>/dev/null
 
 echo ""
-echo "  S3 sync:"
-check "file1.txt exists"                test -f "$BACKUP_DIR/s3/file1.txt"
-check "file1.txt has expected content"  grep -q "file1" "$BACKUP_DIR/s3/file1.txt"
-check "subdir/file2.txt exists"         test -f "$BACKUP_DIR/s3/subdir/file2.txt"
-check "subdir/nested/file3.txt exists"  test -f "$BACKUP_DIR/s3/subdir/nested/file3.txt"
-
-echo ""
 echo "  PostgreSQL dump:"
 check "testuser dump exists and non-empty"  test -s "$BACKUP_DIR/pgsql/testuser.dump.bz2"
 check "testdb1 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb1.dump.bz2"
 check "testdb2 dump exists and non-empty"   test -s "$BACKUP_DIR/pgsql/testdb2.dump.bz2"
-
-echo ""
-echo "  MySQL dump:"
-check "testdb1 dump exists and non-empty"  test -s "$BACKUP_DIR/mysql/testdb1.sql.bz2"
-check "testdb2 dump exists and non-empty"  test -s "$BACKUP_DIR/mysql/testdb2.sql.bz2"
 
 echo ""
 echo "  Email (SMTP via Mailpit):"
@@ -165,7 +151,6 @@ echo ""
 echo "  Bundled tools (in Docker image):"
 check "github-backup installed"  docker exec "$CONTAINER" github-backup --help
 check "git installed"            docker exec "$CONTAINER" git --version
-check "aws CLI installed"        docker exec "$CONTAINER" aws --version
 check "azcopy installed"         docker exec "$CONTAINER" azcopy --version
 check "pg_dump installed"        docker exec "$CONTAINER" pg_dump --version
 check "psql installed"           docker exec "$CONTAINER" psql --version

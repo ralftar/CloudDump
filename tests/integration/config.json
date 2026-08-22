@@ -11,23 +11,6 @@
   "crontab": "* * * * *",
   "jobs": [
     {
-      "type": "s3bucket",
-      "id": "test-s3",
-      "retries": 1,
-      "timeout": 300,
-      "buckets": [
-        {
-          "source": "s3://test-bucket",
-          "destination": "/backup/s3",
-          "endpoint_url": "http://minio:9000",
-          "aws_access_key_id": "minioadmin",
-          "aws_secret_access_key": "minioadmin",
-          "aws_region": "us-east-1",
-          "delete_destination": true
-        }
-      ]
-    },
-    {
       "type": "pgsql",
       "id": "test-pgsql",
       "retries": 1,
@@ -41,25 +24,11 @@
           "backuppath": "/backup/pgsql",
           "compress": true,
           "filenamedate": false,
-          "databases_excluded": ["template0", "template1", "postgres"]
-        }
-      ]
-    },
-    {
-      "type": "mysql",
-      "id": "test-mysql",
-      "retries": 1,
-      "timeout": 300,
-      "servers": [
-        {
-          "host": "mysql",
-          "port": 3306,
-          "user": "root",
-          "pass": "rootpass",
-          "backuppath": "/backup/mysql",
-          "compress": true,
-          "filenamedate": false,
-          "databases_excluded": []
+          "databases_excluded": [
+            "template0",
+            "template1",
+            "postgres"
+          ]
         }
       ]
     }

@@ -86,13 +86,12 @@
         "id": { "type": "string", "minLength": 1, "description": "Unique job identifier." },
         "type": {
           "type": "string",
-          "enum": ["s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync", "imap"],
+          "enum": ["azstorage", "pgsql", "github", "rsync", "imap"],
           "description": "Job type."
         },
         "enabled": { "type": "boolean", "default": true, "description": "Skip the job when false. Still validated at startup." },
         "timeout": { "type": "integer", "minimum": 1, "default": 604800, "description": "Timeout in seconds." },
         "retries": { "type": "integer", "minimum": 1, "default": 3, "description": "Number of retry attempts." },
-        "buckets": { "type": "array", "items": { "$ref": "#/$defs/s3_bucket" } },
         "blobstorages": { "type": "array", "items": { "$ref": "#/$defs/azure_blob" } },
         "servers": {
           "type": "array",
@@ -103,28 +102,12 @@
         "accounts": { "type": "array", "items": { "$ref": "#/$defs/imap_account" } }
       },
       "allOf": [
-        { "if": { "properties": { "type": { "const": "s3bucket" } } }, "then": { "required": ["buckets"] } },
         { "if": { "properties": { "type": { "const": "azstorage" } } }, "then": { "required": ["blobstorages"] } },
         { "if": { "properties": { "type": { "const": "pgsql" } } }, "then": { "required": ["servers"] } },
-        { "if": { "properties": { "type": { "const": "mysql" } } }, "then": { "required": ["servers"] } },
         { "if": { "properties": { "type": { "const": "github" } } }, "then": { "required": ["organizations"] } },
         { "if": { "properties": { "type": { "const": "rsync" } } }, "then": { "required": ["targets"] } },
         { "if": { "properties": { "type": { "const": "imap" } } }, "then": { "required": ["accounts"] } }
       ]
-    },
-    "s3_bucket": {
-      "type": "object",
-      "required": ["source", "destination"],
-      "properties": {
-        "source": { "type": "string", "pattern": "^s3://", "description": "S3 bucket URI." },
-        "destination": { "type": "string", "description": "Local backup directory." },
-        "delete_destination": { "type": "boolean", "default": true, "description": "Mirror mode — delete files not in source." },
-        "aws_access_key_id": { "type": "string" },
-        "aws_secret_access_key": { "type": "string" },
-        "aws_region": { "type": "string", "default": "us-east-1" },
-        "endpoint_url": { "type": "string", "description": "S3-compatible endpoint (MinIO, etc.)." }
-      },
-      "additionalProperties": false
     },
     "azure_blob": {
       "type": "object",
@@ -145,7 +128,7 @@
         "user": { "type": "string" },
         "pass": { "type": "string" },
         "backuppath": { "type": "string" },
-        "databases": { "type": "array", "description": "Explicit database list. For pgsql, items can be objects with table filters." },
+        "databases": { "type": "array", "description": "Explicit database list. Items can be objects with table filters." },
         "databases_excluded": { "type": "array", "items": { "type": "string" } },
         "db_retries": { "type": "integer", "minimum": 1, "default": 3 },
         "filenamedate": { "type": "boolean", "default": false },

@@ -1,4 +1,4 @@
-"""CloudDump - Backup orchestrator for S3, Azure Storage, PostgreSQL, MySQL, and GitHub."""
+"""CloudDump - Backup orchestrator for Azure Storage, PostgreSQL, GitHub, rsync, and IMAP."""
 
 __version__ = "0.0.0"  # patched by CI/release pipeline
 
@@ -179,7 +179,7 @@ def redact(text):
         r"-----END[A-Z \n]*KEY-----",
         "REDACTED_PRIVATE_KEY", text,
     )
-    # JSON-quoted fields: "pass": "secret", "aws_secret_access_key": "value", etc.
+    # JSON-quoted fields: "pass": "secret", "sas_token": "value", etc.
     text = re.sub(
         r'("[^"]*(?:password|pass|passwd|pwd|key|token|secret|credential|cred)[^"]*"'
         r'\s*:\s*)"[^"]*"',

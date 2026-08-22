@@ -24,10 +24,8 @@ RUN apt-get update && \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     postgresql-client-18 \
-    default-mysql-client \
     rsync \
     isync \
-    awscli \
     procps \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL -o /tmp/azcopy.tar.gz "https://github.com/Azure/azure-storage-azcopy/releases/download/v${AZCOPY_VERSION}/azcopy_linux_amd64_${AZCOPY_VERSION}.tar.gz" \
