@@ -50,6 +50,7 @@ def _tool_versions():
         ("aws", ["aws", "--version"]),
         ("azcopy", ["azcopy", "--version"]),
         ("rsync", ["rsync", "--version"]),
+        ("mbsync", ["mbsync", "--version"]),
         ("git", ["git", "--version"]),
     ]
     versions = []

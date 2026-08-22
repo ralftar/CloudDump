@@ -26,6 +26,7 @@ RUN apt-get update && \
     postgresql-client-18 \
     default-mysql-client \
     rsync \
+    isync \
     awscli \
     procps \
     && rm -rf /var/lib/apt/lists/* \

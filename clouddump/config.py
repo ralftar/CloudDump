@@ -16,8 +16,9 @@ VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
 VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
 VALID_LOG_FORMATS = {"text", "json"}
 CONFIG_FILE = "/config/config.json"
-VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync"}
+VALID_JOB_TYPES = {"s3bucket", "azstorage", "pgsql", "mysql", "github", "rsync", "imap"}
 _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
+VALID_IMAP_TLS = {"ssl", "starttls", "none"}
 TOOL_REQUIREMENTS = {
     "s3bucket": ["aws"],
     "azstorage": ["azcopy"],
@@ -25,6 +26,7 @@ TOOL_REQUIREMENTS = {
     "mysql": ["mysqldump", "mysql"],
     "github": ["github-backup", "git", "curl"],
     "rsync": ["rsync", "ssh"],
+    "imap": ["mbsync", "curl"],
 }
 
 
@@ -163,11 +165,13 @@ def validate_jobs(jobs):
                 "include_wikis", "include_forks", "include_archived", "include_lfs",
             ]),
             "rsync": ("targets", ["delete_destination", "delete_excluded"]),
+            "imap": ("accounts", ["delete_destination"]),
         }
         _TARGET_INTS = {
             "pgsql": ("servers", ["port", "db_retries"]),
             "mysql": ("servers", ["port", "db_retries"]),
             "rsync": ("targets", ["ssh_port", "min_age_days"]),
+            "imap": ("accounts", ["port"]),
         }
         if job_type in _TARGET_BOOLS:
             coll, fields = _TARGET_BOOLS[job_type]
@@ -196,6 +200,7 @@ def validate_jobs(jobs):
             "mysql": ("servers", "backuppath"),
             "github": ("organizations", "destination"),
             "rsync": ("targets", "destination"),
+            "imap": ("accounts", "destination"),
         }
         if job_type in path_keys:
             collection_key, field = path_keys[job_type]
@@ -245,6 +250,15 @@ def validate_jobs(jobs):
                     acct_name = cfg(account, "name")
                     log.error("Invalid account_type '%s' for '%s' in job ID %s. Must be one of: %s.",
                               acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
+                    errors += 1
+
+        # Validate tls mode for IMAP accounts (config error, not connectivity)
+        if job_type == "imap":
+            for account in cfg(job, "accounts", []):
+                tls = cfg(account, "tls", "ssl")
+                if tls not in VALID_IMAP_TLS:
+                    log.error("Invalid tls '%s' for '%s' in job ID %s. Must be one of: %s.",
+                              tls, cfg(account, "user"), job_id, ", ".join(sorted(VALID_IMAP_TLS)))
                     errors += 1
 
         disabled_tag = "" if cfg(job, "enabled", True) else " (DISABLED)"
@@ -370,6 +384,55 @@ def _verify_db_connection(job, job_id, job_type, results):
             cmd = ["mysql", "-h", host, "-P", port, "-u", user,
                    "--batch", "--skip-column-names", "-e", "SELECT 1"]
         _run_verify(cmd, f"{job_type} {user}@{host}:{port}", job_id, results, env=env, timeout=10)
+
+
+def _verify_imap(job, job_id, results):
+    """Verify IMAP credentials by listing mailboxes via curl (warn only).
+
+    Uses ``curl`` for parity with the other subprocess-based probes — it logs
+    in and issues a LIST, exercising the same host/port/TLS path the sync job
+    uses. Credentials are written to a temporary 0600 netrc file (never placed
+    on the command line, where they would be visible in the process list).
+    """
+    import tempfile
+
+    for account in cfg(job, "accounts", []):
+        host = cfg(account, "host")
+        user = cfg(account, "user")
+        password = cfg(account, "pass")
+        tls = cfg(account, "tls", "ssl")
+        cert_file = cfg(account, "cert_file")
+        if not host or not user or not password:
+            continue
+        # Match the sync job's TLS-aware default port (993 IMAPS, else 143).
+        default_port = "993" if tls == "ssl" else "143"
+        port = str(cfg(account, "port", default_port))
+        scheme = "imaps" if tls == "ssl" else "imap"
+
+        fd, netrc_path = tempfile.mkstemp(prefix="clouddump_imap_netrc_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(f"default login {user} password {password}\n")
+            cmd = ["curl", "-sS", "--max-time", "10",
+                   "--netrc-file", netrc_path,
+                   "--url", f"{scheme}://{host}:{port}/"]
+            if tls == "starttls":
+                cmd.append("--ssl-reqd")
+            if cert_file:
+                # A pinned (often self-signed) cert is trusted by mbsync via
+                # exact match without a hostname check; curl --cacert would also
+                # enforce the cert SAN, falsely WARNing when the server is reached
+                # by a service name (e.g. a Proton Bridge cert issued for
+                # 127.0.0.1). This probe only checks reachability + auth — mbsync
+                # does the real cert validation on the data path — so skip curl's
+                # TLS verification when a cert is pinned.
+                cmd.append("--insecure")
+            _run_verify(cmd, f"imap {user}@{host}:{port}", job_id, results, timeout=15)
+        finally:
+            try:
+                os.remove(netrc_path)
+            except OSError:
+                pass
 
 
 def _verify_github_token(job, job_id, results):
@@ -520,5 +583,8 @@ def verify_connectivity(jobs):
 
         if job_type == "github":
             _verify_github_token(job, job_id, results)
+
+        if job_type == "imap":
+            _verify_imap(job, job_id, results)
 
     return results
