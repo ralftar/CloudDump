@@ -9,14 +9,14 @@
 ![CloudDump](cloud_dump_illustration.png)
 
 The cloud is just someone else's computer. CloudDump pulls your persistent
-data — S3 buckets, Azure Blob Storage, PostgreSQL databases, MySQL
-databases, GitHub repos — to an offsite location the cloud provider knows
+data — Azure Blob Storage, PostgreSQL databases, GitHub repos, remote
+servers, IMAP mailboxes — to an offsite location the cloud provider knows
 nothing about. On a schedule, unattended, with email notifications when
 things succeed or fail.
 
 ## Why
 
-You store data in S3 or Azure. Your databases run in the cloud. That's
+You store data in Azure. Your databases run in the cloud. That's
 fine — until a provider has an outage, a misconfigured IAM policy deletes
 your bucket, or you just want to sleep better knowing there's a copy
 somewhere else — another cloud, a VPS, a NAS, wherever.
@@ -29,10 +29,8 @@ you get an email.
 
 | Source | Job type | Tool used | Auth |
 |--------|----------|-----------|------|
-| AWS S3 / S3-compatible (MinIO, etc.) | `s3bucket` | [AWS CLI](https://aws.amazon.com/cli/) | Access key + secret |
 | Azure Blob Storage | `azstorage` | [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | SAS token in source URL |
 | PostgreSQL | `pgsql` | [pg_dump / psql](https://www.postgresql.org/docs/current/app-pgdump.html) | Host, port, user, password |
-| MySQL / MariaDB | `mysql` | [mysqldump / mysql](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Host, port, user, password |
 | GitHub (org or user) | `github` | [github-backup](https://github.com/josegonzalez/python-github-backup) | Personal access token |
 | Remote server (SSH) | `rsync` | [rsync](https://rsync.samba.org/) | SSH private key |
 | IMAP mailbox (Proton Bridge, Gmail, etc.) | `imap` | [mbsync](https://isync.sourceforge.io/) | Host, port, user, password |
@@ -80,13 +78,11 @@ A typical DR setup:
 
 ## Architecture
 
-CloudDump is a single-process Python application in a Debian 12 container.
+CloudDump is a single-process Python application in a Debian 13 container.
 
 ```
-config.json ──> [Orchestrator] ──> aws s3 sync
-                     │          ──> azcopy sync
+config.json ──> [Orchestrator] ──> azcopy sync
                      │          ──> pg_dump / psql
-                     │          ──> mysqldump
                      │          ──> github-backup
                      │          ──> rsync
                      │          ──> mbsync (IMAP → Maildir)
@@ -109,10 +105,8 @@ execution, run multiple CloudDump instances with separate configurations.
 
 | Tool | Source | Update mechanism |
 |------|--------|-----------------|
-| [AWS CLI](https://aws.amazon.com/cli/) | Debian apt (v1) | Debian base image |
 | [AzCopy](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10) | Microsoft apt repo | Debian base image |
 | [PostgreSQL client](https://www.postgresql.org/docs/current/app-pgdump.html) | PostgreSQL apt repo | Scheduled GitHub Action opens PR |
-| [MySQL client](https://dev.mysql.com/doc/refman/en/mysqldump.html) | Debian apt (default-mysql-client) | Debian base image |
 | [github-backup](https://github.com/josegonzalez/python-github-backup) | pip (requirements.txt) | Dependabot (pip) |
 
 ### Dependency update strategy
@@ -123,12 +117,12 @@ weekly (Monday 07:00 CET) and manages three ecosystems:
 | What | How |
 |------|-----|
 | GitHub Actions | One PR per action bump |
-| Debian base image (`docker`) | Tag bump (e.g. `12.13-slim` → `12.14-slim`) |
+| Debian base image (`docker`) | Tag bump (e.g. `13.5-slim` → `13.6-slim`) |
 | Python packages (`pip`) | `requirements.txt` |
 
 When Dependabot bumps the Debian tag, the image rebuilds from scratch
 and `apt-get upgrade -y` pulls the latest versions of all apt-managed
-tools (AWS CLI, AzCopy, MySQL client, git, etc.).
+tools (AzCopy, rsync, isync, git, etc.).
 
 Between Debian releases, apt-managed tool versions stay fixed. This is
 intentional — it keeps the image deterministic and avoids surprise
@@ -155,7 +149,7 @@ ghcr.io/ralftar/clouddump:v0.9.0
 ```
 
 No other installation is needed. The image includes all bundled tools
-(AWS CLI, AzCopy, pg_dump, mysqldump, github-backup, rsync).
+(AzCopy, pg_dump, github-backup, rsync, mbsync).
 
 ## Quick start
 
@@ -173,15 +167,15 @@ No other installation is needed. The image includes all bundled tools
   "crontab": "0 3 * * *",
   "jobs": [
     {
-      "type": "s3bucket",
-      "id": "prod-assets",
-      "buckets": [
+      "type": "pgsql",
+      "id": "prod-db",
+      "servers": [
         {
-          "source": "s3://my-bucket",
-          "destination": "/mnt/clouddump/s3",
-          "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
-          "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-          "aws_region": "eu-west-1"
+          "host": "db.example.com",
+          "port": 5432,
+          "user": "postgres",
+          "pass": "database-password",
+          "backuppath": "/mnt/clouddump/pgsql"
         }
       ]
     }
@@ -200,7 +194,7 @@ docker run -d --restart always \
   ghcr.io/ralftar/clouddump:latest
 ```
 
-That's it. CloudDump will sync your S3 bucket to `/backup/s3` every day at
+That's it. CloudDump will dump your databases to `/backup/pgsql` every day at
 03:00 and email you the result.
 
 **3. Trigger jobs manually** (optional — skip the cron wait)
@@ -270,8 +264,8 @@ CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
       "rx_bytes": 1024000,
       "tx_bytes": 512
     },
-    "prod-s3": {
-      "type": "s3bucket",
+    "prod-blob": {
+      "type": "azstorage",
       "status": "success",
       "elapsed_seconds": 187,
       "rx_bytes": 52428800,

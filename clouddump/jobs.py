@@ -1,19 +1,15 @@
 """Job dispatch — routes each job to its type-specific runner."""
 
 from clouddump import cfg, log
-from clouddump.job_s3 import run_s3_sync
 from clouddump.job_azure import run_az_sync
 from clouddump.job_pgsql import run_pg_dump
 from clouddump.job_github import run_github_backup
-from clouddump.job_mysql import run_mysql_dump
 from clouddump.job_rsync import run_rsync_sync
 from clouddump.job_imap import run_imap_sync
 
 _RUNNERS = {
-    "s3bucket": ("buckets", run_s3_sync),
     "azstorage": ("blobstorages", run_az_sync),
     "pgsql": ("servers", run_pg_dump),
-    "mysql": ("servers", run_mysql_dump),
     "github": ("organizations", run_github_backup),
     "rsync": ("targets", run_rsync_sync),
     "imap": ("accounts", run_imap_sync),
@@ -22,10 +18,8 @@ _RUNNERS = {
 # For the per-target summary at the end of each attempt. The field we read is
 # typically enough to identify the target ("asset", "db.example.com", etc.).
 _TARGET_LABEL_FIELDS = {
-    "s3bucket": "source",
     "azstorage": "source",
     "pgsql": "host",
-    "mysql": "host",
     "github": "name",
     "rsync": "source",
     "imap": "user",
@@ -37,7 +31,7 @@ def _target_label(target, job_type):
     if not field:
         return "?"
     val = cfg(target, field) or "?"
-    if job_type in ("s3bucket", "azstorage", "rsync"):
+    if job_type in ("azstorage", "rsync"):
         # Strip query strings and protocol noise so the label fits one line.
         val = val.split("?", 1)[0]
     return val

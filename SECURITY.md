@@ -15,8 +15,8 @@ mitigation within 7 days for critical issues.
 
 ## Scope
 
-CloudDump handles sensitive credentials (AWS keys, database passwords,
-API tokens). The following are in scope:
+CloudDump handles sensitive credentials (database passwords, SAS tokens,
+API tokens, SSH keys). The following are in scope:
 
 - Credential leakage in logs, emails, or process arguments
 - Path traversal in backup destinations
@@ -29,15 +29,13 @@ API tokens). The following are in scope:
 These are by design and not considered vulnerabilities:
 
 - **Credentials in config file** — All credentials (database passwords,
-  API tokens, AWS keys) live in the JSON config file. CloudDump just reads
+  API tokens, SSH keys) live in the JSON config file. CloudDump just reads
   a file — it does not care how that file is populated. You can use
   Kubernetes Secrets, Docker secrets, Vault agent injection, or any
   mechanism that produces a file at `/config/config.json`. Mount it
   read-only.
-- **AWS CLI v1** is used (Debian 12 apt). v2 is not available via apt
-  for this release.
 - **Database credentials** are passed via environment variables to
-  pg_dump/mysqldump. This is standard practice for these tools.
+  pg_dump/psql. This is standard practice for these tools.
 - **GitHub token** is written to a temporary file (deleted after use)
   because `github-backup` does not support environment variables.
 - The container requires write access to `/backup`. Use appropriate

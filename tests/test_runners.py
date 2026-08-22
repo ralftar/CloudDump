@@ -31,106 +31,6 @@ def _tmp_logfile(tmp_path):
     return str(tmp_path / "test.log")
 
 
-# ── S3 runner ───────────────────────────────────────────────────────────────
-
-
-class TestS3Runner:
-    """Tests for clouddump.job_s3.run_s3_sync."""
-
-    @staticmethod
-    def _cfg(**overrides):
-        base = {
-            "source": "s3://my-bucket",
-            "destination": "/backup/s3",
-            "aws_access_key_id": "AKIAEXAMPLE",
-            "aws_secret_access_key": "secret",
-            "aws_region": "eu-west-1",
-        }
-        base.update(overrides)
-        return base
-
-    def test_basic_sync(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        dest = str(tmp_path / "s3out")
-        calls = _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd")
-
-        rc = run_s3_sync(self._cfg(destination=dest), _tmp_logfile)
-
-        assert rc == 0
-        assert len(calls) == 1
-        cmd = calls[0][0]
-        assert cmd[:3] == ["aws", "s3", "sync"]
-        assert "s3://my-bucket" in cmd
-        assert dest in cmd
-        assert "--delete" in cmd
-
-    def test_delete_disabled(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        dest = str(tmp_path / "s3out")
-        calls = _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd")
-
-        run_s3_sync(self._cfg(destination=dest, delete_destination=False), _tmp_logfile)
-
-        assert "--delete" not in calls[0][0]
-
-    def test_endpoint_url(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        dest = str(tmp_path / "s3out")
-        calls = _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd")
-
-        run_s3_sync(self._cfg(destination=dest, endpoint_url="http://minio:9000"), _tmp_logfile)
-
-        cmd = calls[0][0]
-        idx = cmd.index("--endpoint-url")
-        assert cmd[idx + 1] == "http://minio:9000"
-
-    def test_env_credentials(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        dest = str(tmp_path / "s3out")
-        calls = _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd")
-
-        run_s3_sync(self._cfg(destination=dest), _tmp_logfile)
-
-        env = calls[0][1]["env"]
-        assert env["AWS_ACCESS_KEY_ID"] == "AKIAEXAMPLE"
-        assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
-        assert env["AWS_DEFAULT_REGION"] == "eu-west-1"
-
-    def test_missing_source(self, monkeypatch, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        rc = run_s3_sync(self._cfg(source=""), _tmp_logfile)
-        assert rc == 1
-
-    def test_invalid_source_prefix(self, monkeypatch, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        rc = run_s3_sync(self._cfg(source="http://wrong"), _tmp_logfile)
-        assert rc == 1
-
-    def test_nonzero_exit(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        dest = str(tmp_path / "s3out")
-        _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd", rc=1)
-
-        rc = run_s3_sync(self._cfg(destination=dest), _tmp_logfile)
-        assert rc == 1
-
-    def test_creates_destination_dir(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_s3 import run_s3_sync
-
-        dest = str(tmp_path / "deep" / "nested" / "dir")
-        _capture_cmd(monkeypatch, "clouddump.job_s3.run_cmd")
-
-        run_s3_sync(self._cfg(destination=dest), _tmp_logfile)
-        assert os.path.isdir(dest)
-
-
 # ── Azure runner ────────────────────────────────────────────────────────────
 
 
@@ -407,185 +307,6 @@ class TestPgSQLRunner:
         from clouddump.job_pgsql import _cleanup_tmp_files
 
         _cleanup_tmp_files(str(tmp_path / "does-not-exist"))  # must not raise
-
-
-# ── MySQL runner ────────────────────────────────────────────────────────────
-
-
-class TestMySQLRunner:
-    """Tests for clouddump.job_mysql.run_mysql_dump."""
-
-    @staticmethod
-    def _cfg(**overrides):
-        base = {
-            "host": "mysql.example.com",
-            "port": "3306",
-            "user": "backupuser",
-            "pass": "secret",
-            "backuppath": "/backup/mysql",
-        }
-        base.update(overrides)
-        return base
-
-    @staticmethod
-    def _fake_mysql_run_cmd(recorded=None):
-        """Return a fake run_cmd that simulates mysqldump."""
-        if recorded is None:
-            recorded = []
-
-        def fake(cmd, **kwargs):
-            recorded.append((cmd, kwargs))
-            if cmd[0] == "mysqldump":
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("-- MySQL dump\nCREATE TABLE...\n")
-            # bzip2 — just ignore
-            return 0
-
-        return fake, recorded
-
-    def test_basic_dump(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-        fake, recorded = self._fake_mysql_run_cmd()
-        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
-
-        rc = run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
-
-        assert rc == 0
-        assert len(recorded) == 1
-        assert recorded[0][0][0] == "mysqldump"
-        cmd = recorded[0][0]
-        assert "-h" in cmd
-        assert "mysql.example.com" in cmd
-        assert "--single-transaction" in cmd
-        assert "--routines" in cmd
-        assert "--triggers" in cmd
-        assert "--events" in cmd
-
-    def test_env_password(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-        fake, recorded = self._fake_mysql_run_cmd()
-        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
-
-        run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
-
-        for _, call_kwargs in recorded:
-            env = call_kwargs.get("env", {})
-            assert env.get("MYSQL_PWD") == "secret"
-
-    def test_excludes_system_databases(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-        dumped = []
-
-        def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysqldump":
-                dumped.append(cmd[-1])
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("-- dump\n")
-            return 0
-
-        monkeypatch.setattr("clouddump.job_mysql._list_databases",
-                            lambda *a: ["information_schema", "performance_schema", "sys", "userdb"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
-
-        run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
-
-        assert dumped == ["userdb"]
-
-    def test_explicit_databases(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-        dumped = []
-
-        def fake_run_cmd(cmd, **kwargs):
-            if cmd[0] == "mysqldump":
-                dumped.append(cmd[-1])
-                stdout = kwargs.get("stdout")
-                if stdout:
-                    stdout.write("-- dump\n")
-            return 0
-
-        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["db1", "db2", "db3"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
-
-        run_mysql_dump(self._cfg(backuppath=dest, compress=False, databases=["db1", "db3"]), _tmp_logfile)
-
-        assert dumped == ["db1", "db3"]
-
-    def test_missing_host(self, monkeypatch, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        rc = run_mysql_dump(self._cfg(host=""), _tmp_logfile)
-        assert rc == 1
-
-    def test_missing_password(self, monkeypatch, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        rc = run_mysql_dump(self._cfg(**{"pass": ""}), _tmp_logfile)
-        assert rc == 1
-
-    def test_nonzero_exit(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-
-        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", lambda cmd, **kw: 1)
-        monkeypatch.setattr("clouddump.job_mysql.time.sleep", lambda _: None)
-
-        rc = run_mysql_dump(self._cfg(backuppath=dest), _tmp_logfile)
-        assert rc == 1
-
-    def test_custom_db_retries(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-        attempts = []
-
-        def fake_run_cmd(cmd, **kwargs):
-            attempts.append(1)
-            return 1  # mysqldump always fails
-
-        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake_run_cmd)
-        monkeypatch.setattr("clouddump.job_mysql.time.sleep", lambda _: None)
-
-        rc = run_mysql_dump(self._cfg(backuppath=dest, db_retries=2), _tmp_logfile)
-        assert rc == 1
-        assert len(attempts) == 2  # exactly 2, not default 3
-
-    def test_creates_destination_dir(self, monkeypatch, tmp_path, _tmp_logfile):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "deep" / "nested")
-        fake, _ = self._fake_mysql_run_cmd()
-        monkeypatch.setattr("clouddump.job_mysql._list_databases", lambda *a: ["testdb"])
-        monkeypatch.setattr("clouddump.job_mysql.run_cmd", fake)
-
-        run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
-        assert os.path.isdir(dest)
-
-    def test_only_system_databases_returns_success(self, monkeypatch, tmp_path, _tmp_logfile, caplog):
-        from clouddump.job_mysql import run_mysql_dump
-
-        dest = str(tmp_path / "mysqlout")
-
-        monkeypatch.setattr("clouddump.job_mysql._list_databases",
-                            lambda *a: ["information_schema", "mysql", "performance_schema", "sys"])
-
-        rc = run_mysql_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
-        assert rc == 0
-        assert any(r.levelno == logging.WARNING and "No databases to backup" in r.message for r in caplog.records)
 
 
 # ── GitHub runner ───────────────────────────────────────────────────────────
@@ -1467,23 +1188,23 @@ class TestJobDispatch:
     def test_empty_targets_returns_1(self, _tmp_logfile):
         from clouddump.jobs import execute_job
 
-        rc = execute_job({"type": "s3bucket", "buckets": []}, _tmp_logfile)
+        rc = execute_job({"type": "azstorage", "blobstorages": []}, _tmp_logfile)
         assert rc == 1
 
-    def test_dispatches_to_s3(self, monkeypatch, tmp_path, _tmp_logfile):
+    def test_dispatches_to_azure(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.jobs import execute_job
         from clouddump import jobs
 
         called_with = []
         monkeypatch.setattr(jobs, "_RUNNERS", {
-            "s3bucket": ("buckets", lambda target, lf: (called_with.append(target), 0)[1]),
+            "azstorage": ("blobstorages", lambda target, lf: (called_with.append(target), 0)[1]),
         })
 
-        job = {"type": "s3bucket", "buckets": [{"source": "s3://b"}]}
+        job = {"type": "azstorage", "blobstorages": [{"source": "https://b"}]}
         rc = execute_job(job, _tmp_logfile)
 
         assert rc == 0
-        assert called_with == [{"source": "s3://b"}]
+        assert called_with == [{"source": "https://b"}]
 
     def test_dispatches_to_github(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.jobs import execute_job
@@ -1513,10 +1234,10 @@ class TestJobDispatch:
             return next(results)
 
         monkeypatch.setattr(jobs, "_RUNNERS", {
-            "s3bucket": ("buckets", fake_runner),
+            "azstorage": ("blobstorages", fake_runner),
         })
 
-        job = {"type": "s3bucket", "buckets": [{"id": "a"}, {"id": "b"}]}
+        job = {"type": "azstorage", "blobstorages": [{"id": "a"}, {"id": "b"}]}
         rc = execute_job(job, _tmp_logfile)
 
         assert rc == 1  # worst exit code
@@ -1527,9 +1248,9 @@ class TestJobDispatch:
         from clouddump import jobs
 
         monkeypatch.setattr(jobs, "_RUNNERS", {
-            "s3bucket": ("buckets", lambda t, lf: 0),
+            "azstorage": ("blobstorages", lambda t, lf: 0),
         })
 
-        job = {"type": "s3bucket", "buckets": [{"id": "a"}, {"id": "b"}]}
+        job = {"type": "azstorage", "blobstorages": [{"id": "a"}, {"id": "b"}]}
         rc = execute_job(job, _tmp_logfile)
         assert rc == 0

@@ -69,40 +69,13 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 | Key | Required | Default | Description |
 |-----|----------|---------|-------------|
 | `id` | Yes | — | Unique job identifier |
-| `type` | Yes | — | `s3bucket`, `azstorage`, `pgsql`, `mysql`, `github`, `rsync`, or `imap` |
+| `type` | Yes | — | `azstorage`, `pgsql`, `github`, `rsync`, or `imap` |
 | `enabled` | No | `true` | Skip the job when `false`. Still validated at startup. |
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
 
-Plus type-specific fields (`buckets`, `blobstorages`, `servers`, `organizations`,
+Plus type-specific fields (`blobstorages`, `servers`, `organizations`,
 `targets`, `accounts`) — see below.
-
-## S3 bucket
-
-```json
-{
-  "type": "s3bucket",
-  "id": "my-s3-job",
-
-  "buckets": [
-    {
-      "source": "s3://bucket-name/optional-prefix",
-      "destination": "/mnt/clouddump/s3",
-      "delete_destination": false,
-      "aws_access_key_id": "AKIA...",
-      "aws_secret_access_key": "...",
-      "aws_region": "us-east-1",
-      "endpoint_url": ""
-    }
-  ]
-}
-```
-
-Set `endpoint_url` for S3-compatible storage like MinIO:
-
-```json
-"endpoint_url": "https://minio.example.com:9000"
-```
 
 ## Azure Blob Storage
 
@@ -153,39 +126,6 @@ The source URL includes the SAS token for authentication.
 - `compress`: bzip2 compression of dump files.
 - `filenamedate`: append timestamp to dump filenames.
 - `db_retries`: number of retry attempts per individual database dump (default: `3`).
-
-## MySQL / MariaDB
-
-```json
-{
-  "type": "mysql",
-  "id": "my-mysql-job",
-
-  "servers": [
-    {
-      "host": "mysql.example.com",
-      "port": 3306,
-      "user": "backup_user",
-      "pass": "password",
-      "databases": ["app_db", "analytics"],
-      "databases_excluded": [],
-      "backuppath": "/mnt/clouddump/mysql",
-      "filenamedate": true,
-      "compress": true
-    }
-  ]
-}
-```
-
-- `databases`: explicit list. If empty, all databases are dumped (except
-  `databases_excluded` and system databases `information_schema`,
-  `performance_schema`, `sys`).
-- `compress`: bzip2 compression of dump files.
-- `filenamedate`: append timestamp to dump filenames.
-- `db_retries`: number of retry attempts per individual database dump (default: `3`).
-
-Dumps use `--single-transaction --routines --triggers --events` for
-consistent, complete backups without locking tables.
 
 ## GitHub organization or user
 
