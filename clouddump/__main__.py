@@ -1,5 +1,6 @@
 """Entry point — run with ``python -m clouddump``."""
 
+import glob
 import json
 import logging
 import os
@@ -72,6 +73,110 @@ def _tool_versions():
             pass
 
     return "\n".join(versions)
+
+
+def _run_one_job(job, config, version, host):
+    """Run one job to completion: retries, per-attempt logging, report, cleanup.
+
+    Returns the job's final exit code. The caller owns the succeeded/failed
+    tally and the run-level summary; everything scoped to a single job lives
+    here, so it can be exercised without driving the whole main loop.
+    """
+    job_id = cfg(job, "id")
+    job_type = cfg(job, "type")
+    # If retries were somehow 0 the attempt loop never runs; report failure
+    # rather than inheriting whatever the previous job left in this name.
+    result = 1
+    clouddump.current_job = job_id
+    try:
+        log.info("Starting job", extra={"job_type": job_type})
+
+        timeout = int(cfg(job, "timeout", 604800))
+        max_attempts = int(cfg(job, "retries", 3))
+
+        job_t_start = time.time()
+        logfile_paths = []
+        final_attempt = 0
+
+        for attempt in range(1, max_attempts + 1):
+            final_attempt = attempt
+            fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
+            os.close(fd)
+            logfile_paths.append(logfile_path)
+
+            t_start = time.time()
+            clouddump.job_deadline = t_start + timeout
+
+            file_handler = _add_file_handler(logfile_path)
+            log.info("Starting attempt", extra={"attempt": attempt, "max_attempts": max_attempts})
+
+            net_before = net_bytes()
+
+            try:
+                result = execute_job(job, logfile_path)
+                t_end = time.time()
+            except Exception:
+                t_end = time.time()
+                tb = traceback.format_exc()
+                log.error("Crashed:\n%s", tb)
+                result = 1
+            finally:
+                clouddump.job_deadline = None
+                log.removeHandler(file_handler)
+                file_handler.close()
+
+            elapsed = int(t_end - t_start)
+
+            net_after = net_bytes()
+            rx_bytes = max(0, net_after[0] - net_before[0]) if net_before and net_after else None
+            tx_bytes = max(0, net_after[1] - net_before[1]) if net_before and net_after else None
+            metric_status = "success" if result == 0 else "failure"
+            update_job_metric(job_id, job_type, metric_status, elapsed, rx=rx_bytes, tx=tx_bytes)
+
+            extras = {"status": metric_status, "elapsed_s": elapsed,
+                      "attempt": attempt, "max_attempts": max_attempts}
+            if rx_bytes is not None:
+                extras["rx_bytes"] = rx_bytes
+            if tx_bytes is not None:
+                extras["tx_bytes"] = tx_bytes
+
+            if result == 0:
+                log.info("Attempt completed successfully", extra=extras)
+                break
+            else:
+                extras["exit_code"] = result
+                log.warning("Attempt completed with errors", extra=extras)
+                if attempt < max_attempts:
+                    log.warning("Retrying in 60s...")
+                    for _ in range(60):
+                        if clouddump.shutdown_requested:
+                            break
+                        time.sleep(1)
+                else:
+                    log.error("Failed after all attempts",
+                              extra={"max_attempts": max_attempts})
+
+        # Determine three-tier status and send one email
+        job_t_end = time.time()
+        if result == 0 and final_attempt == 1:
+            job_status = "Success"
+        elif result == 0:
+            job_status = "Warning"
+        else:
+            job_status = "Failure"
+
+        send_job_report(config, version, host, job, result,
+                        job_t_start, job_t_end, logfile_paths,
+                        status=job_status, attempts_used=final_attempt,
+                        max_attempts=max_attempts)
+
+        for lf in logfile_paths:
+            for sidecar in glob.glob(f"{lf}.*.log"):
+                _safe_remove(sidecar)
+            _safe_remove(lf)
+        return result
+    finally:
+        clouddump.current_job = ""
 
 
 def main():
@@ -196,112 +301,15 @@ def main():
                              extra={"job": job_id, "job_type": job_type})
                     continue
 
-                clouddump.current_job = job_id
-                log.info("Starting job", extra={"job_type": job_type})
-
-                timeout = int(cfg(job, "timeout", 604800))
-                max_attempts = int(cfg(job, "retries", 3))
-
-                job_t_start = time.time()
-                logfile_paths = []
-                total_rx = 0
-                total_tx = 0
-                final_attempt = 0
-
-                for attempt in range(1, max_attempts + 1):
-                    final_attempt = attempt
-                    fd, logfile_path = tempfile.mkstemp(prefix=f"clouddump-{job_id}-", suffix=".log")
-                    os.close(fd)
-                    logfile_paths.append(logfile_path)
-
-                    t_start = time.time()
-                    clouddump.job_deadline = t_start + timeout
-
-                    file_handler = _add_file_handler(logfile_path)
-                    log.info("Starting attempt", extra={"attempt": attempt, "max_attempts": max_attempts})
-
-                    net_before = net_bytes()
-
-                    try:
-                        result = execute_job(job, logfile_path)
-                        t_end = time.time()
-                    except Exception:
-                        t_end = time.time()
-                        tb = traceback.format_exc()
-                        log.error("Crashed:\n%s", tb)
-                        result = 1
-                    finally:
-                        clouddump.job_deadline = None
-                        log.removeHandler(file_handler)
-                        file_handler.close()
-
-                    elapsed = int(t_end - t_start)
-                    minutes, seconds = divmod(elapsed, 60)
-
-                    net_after = net_bytes()
-                    if net_before and net_after:
-                        total_rx += max(0, net_after[0] - net_before[0])
-                        total_tx += max(0, net_after[1] - net_before[1])
-
-                    rx_bytes = max(0, net_after[0] - net_before[0]) if net_before and net_after else None
-                    tx_bytes = max(0, net_after[1] - net_before[1]) if net_before and net_after else None
-                    metric_status = "success" if result == 0 else "failure"
-                    update_job_metric(job_id, job_type, metric_status, elapsed, rx=rx_bytes, tx=tx_bytes)
-
-                    extras = {"status": metric_status, "elapsed_s": elapsed,
-                              "attempt": attempt, "max_attempts": max_attempts}
-                    if rx_bytes is not None:
-                        extras["rx_bytes"] = rx_bytes
-                    if tx_bytes is not None:
-                        extras["tx_bytes"] = tx_bytes
-
-                    if result == 0:
-                        log.info("Attempt completed successfully", extra=extras)
-                        break
-                    else:
-                        extras["exit_code"] = result
-                        log.warning("Attempt completed with errors", extra=extras)
-                        if attempt < max_attempts:
-                            log.warning("Retrying in 60s...")
-                            for _ in range(60):
-                                if clouddump.shutdown_requested:
-                                    break
-                                time.sleep(1)
-                        else:
-                            log.error("Failed after all attempts",
-                                      extra={"max_attempts": max_attempts})
-
-                # Determine three-tier status and send one email
-                job_t_end = time.time()
-                if result == 0 and final_attempt == 1:
-                    job_status = "Success"
-                elif result == 0:
-                    job_status = "Warning"
-                else:
-                    job_status = "Failure"
-
-                send_job_report(config, version, host, job, result,
-                                job_t_start, job_t_end, logfile_paths,
-                                status=job_status, attempts_used=final_attempt,
-                                max_attempts=max_attempts)
-
-                import glob
-                for lf in logfile_paths:
-                    for sidecar in glob.glob(f"{lf}.*.log"):
-                        _safe_remove(sidecar)
-                    _safe_remove(lf)
-
+                result = _run_one_job(job, config, version, host)
                 if result == 0:
                     succeeded += 1
                 else:
                     failed += 1
 
-                clouddump.current_job = ""
-
             if not clouddump.shutdown_requested:
                 run_end = datetime.now(timezone.utc)
                 run_elapsed = int((run_end - run_start).total_seconds())
-                run_min, run_sec = divmod(run_elapsed, 60)
                 run_extras = {"succeeded": succeeded, "failed": failed,
                               "total": len(jobs), "elapsed_s": run_elapsed}
                 if failed:
