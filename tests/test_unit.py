@@ -472,6 +472,123 @@ def test_info_delimiter_non_string_rejected(caplog):
     assert any("exactly one character" in m for m in _delim_errors(caplog))
 
 
+def test_imap_duplicate_destination_rejected(caplog):
+    """mbsync keeps sync state in the Maildir; two accounts sharing one corrupt it."""
+    job = _job(type="imap", accounts=[
+        {"host": "h", "user": "a@x", "pass": "p", "destination": "/tmp/mail"},
+        {"host": "h", "user": "b@x", "pass": "p", "destination": "/tmp/mail"},
+    ])
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        errors, _ = validate_jobs([job])
+    assert errors >= 1
+    assert any("share destination" in r.getMessage() for r in caplog.records)
+
+
+def test_imap_duplicate_destination_normalises_path(caplog):
+    """/tmp/mail and /tmp/./mail are the same directory."""
+    job = _job(type="imap", accounts=[
+        {"host": "h", "user": "a@x", "pass": "p", "destination": "/tmp/mail"},
+        {"host": "h", "user": "b@x", "pass": "p", "destination": "/tmp/./mail"},
+    ])
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([job])
+    assert any("share destination" in r.getMessage() for r in caplog.records)
+
+
+def test_imap_distinct_destinations_accepted(caplog):
+    job = _job(type="imap", accounts=[
+        {"host": "h", "user": "a@x", "pass": "p", "destination": "/tmp/mail/a"},
+        {"host": "h", "user": "b@x", "pass": "p", "destination": "/tmp/mail/b"},
+    ])
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([job])
+    assert not any("share destination" in r.getMessage() for r in caplog.records)
+
+
+# ── health state ────────────────────────────────────────────────────────────
+
+
+def test_update_job_metric_is_gated_by_the_lock():
+    """Deterministic: while the lock is held, a writer must not complete.
+
+    Racing the two threads empirically proved nothing — the writer finishes
+    before the reader's first deepcopy, so the test passed even with the lock
+    stubbed out. Asserting the gating directly is both faster and honest.
+    """
+    import threading as _th
+    from clouddump.health import _state, _lock, update_job_metric
+
+    started, finished = _th.Event(), _th.Event()
+
+    def writer():
+        started.set()
+        update_job_metric("locktest", "pgsql", "success", 1)
+        finished.set()
+
+    old = _state["jobs"].copy()
+    try:
+        with _lock:
+            t = _th.Thread(target=writer, daemon=True)
+            t.start()
+            assert started.wait(timeout=2), "writer thread never ran"
+            assert not finished.wait(timeout=0.3), "write completed while lock was held"
+        t.join(timeout=2)
+        assert finished.is_set(), "write did not complete after the lock was released"
+    finally:
+        _state["jobs"] = old
+
+
+def test_healthz_serves_valid_json_while_metrics_are_written():
+    """Smoke test: the real handler over a real socket, under concurrent writes.
+
+    Not a race detector — it passes with the lock stubbed out too, because the
+    writer usually finishes between requests. It is here to catch the handler
+    breaking outright (truncated body, wrong status, serialisation error). The
+    locking guarantee is covered deterministically by the test above.
+    """
+    import json as _json
+    import threading as _th
+    import urllib.request as _rq
+    from clouddump.health import _state, start_health_server, update_job_metric
+
+    server = start_health_server(port=0)  # ask the OS for a free port
+    assert server is not None
+    port = server.server_address[1]
+
+    done = _th.Event()
+
+    def writer():
+        try:
+            for i in range(3000):
+                update_job_metric(f"race-{i}", "pgsql", "success", i)
+        finally:
+            done.set()
+
+    old = _state["jobs"].copy()
+    try:
+        w = _th.Thread(target=writer, daemon=True)
+        w.start()
+        reads = 0
+        while not done.is_set() and reads < 40:
+            with _rq.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=5) as r:
+                assert r.status == 200
+                _json.loads(r.read())  # must never be truncated or malformed
+            reads += 1
+        w.join(timeout=10)
+    finally:
+        _state["jobs"] = old
+
+
+def test_disabled_job_uses_a_field_the_json_formatter_keeps():
+    """'job_id' is not in _EXTRA_FIELDS, so it would be silently dropped."""
+    from clouddump import _EXTRA_FIELDS
+
+    assert "job" in _EXTRA_FIELDS
+    source = pathlib.Path(__file__).resolve().parent.parent / "clouddump" / "__main__.py"
+    text = source.read_text(encoding="utf-8")
+    assert 'extra={"job_id"' not in text
+
+
 # ── unknown config keys ─────────────────────────────────────────────────────
 
 

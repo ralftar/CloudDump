@@ -90,6 +90,12 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
 
+A job may hold several targets, and all of them are attempted even if earlier
+ones fail — one bad server does not stop the rest. A retry then re-runs **only
+the targets that failed**, so a target that already succeeded is not synced
+again. A crash (as opposed to a target reporting failure) says nothing about
+what got through, so it retries the whole job.
+
 Plus type-specific fields (`blobstorages`, `servers`, `organizations`,
 `targets`, `accounts`) — see below.
 
