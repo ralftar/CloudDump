@@ -143,9 +143,9 @@ def run_pg_dump(server, logfile_path):
 
         # The custom format is zlib-compressed by default, so a separate
         # compression pass only re-packs an already-packed file. `compress:
-        # false` therefore has to switch pg_dump's own compression off (-Z 0)
-        # — otherwise the dump stays compressed and downstream dedup (Veeam,
-        # borg, restic) still can't see through it.
+        # false` therefore has to switch pg_dump's own compression off (-Z 0),
+        # or it does not mean what it says: the dump comes out compressed
+        # either way and the option is decorative.
         cmd = ["pg_dump", "-d", _conninfo(host, port, user, database), "-F", "custom"]
         if not compress:
             cmd += ["-Z", "0"]

@@ -140,9 +140,10 @@ The source URL includes the SAS token for authentication.
   databases are dumped (except `databases_excluded`).
 - `compress`: compression inside `pg_dump` (default: `true`). The custom format
   is zlib-compressed by default, so this is not an extra pass — setting it to
-  `false` passes `-Z 0` and produces an **uncompressed** dump. Use `false` when
-  something downstream does compression or deduplication (Veeam, borg, restic):
-  a compressed dump changes wholesale between runs and defeats dedup.
+  `false` passes `-Z 0` and produces a genuinely **uncompressed** dump. Set it
+  to `false` if whatever consumes the dump does its own compression, or does
+  deduplication: a compressed dump changes wholesale between runs, so a
+  deduplicating store cannot see that most of the data is unchanged.
   Dumps are always written as `<database>.dump`, overwritten each run.
 - `db_retries`: number of retry attempts per individual database dump (default: `3`).
 
