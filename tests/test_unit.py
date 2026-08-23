@@ -418,6 +418,60 @@ def test_validate_jobs_github_valid():
 
 
 
+# ── imap info_delimiter ─────────────────────────────────────────────────────
+
+
+def _imap_job(**account_over):
+    account = {"host": "imap.example.com", "user": "u@example.com",
+               "pass": "x", "destination": "/tmp/mail"}
+    account.update(account_over)
+    return _job(type="imap", accounts=[account])
+
+
+def _delim_errors(caplog):
+    return [r.getMessage() for r in caplog.records if "info_delimiter" in r.getMessage()]
+
+
+def test_info_delimiter_single_char_accepted(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_imap_job(info_delimiter=";")])
+    assert _delim_errors(caplog) == []
+
+
+def test_info_delimiter_omitted_is_fine(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_imap_job()])
+    assert _delim_errors(caplog) == []
+
+
+def test_info_delimiter_colon_allowed(caplog):
+    """The Maildir standard; setting it explicitly is a legitimate no-op."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_imap_job(info_delimiter=":")])
+    assert _delim_errors(caplog) == []
+
+
+@pytest.mark.parametrize("delim", ["", ";;", "abc"])
+def test_info_delimiter_must_be_one_char(delim, caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_imap_job(info_delimiter=delim)])
+    assert any("exactly one character" in m for m in _delim_errors(caplog))
+
+
+@pytest.mark.parametrize("delim", ["/", "#", "*", "?", '"', "<", ">", "|", "\\", " "])
+def test_info_delimiter_rejects_unusable_characters(delim, caplog):
+    """Path separator, mbsyncrc comment char, and the Windows-reserved set."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_imap_job(info_delimiter=delim)])
+    assert any("cannot be used" in m for m in _delim_errors(caplog))
+
+
+def test_info_delimiter_non_string_rejected(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_imap_job(info_delimiter=59)])
+    assert any("exactly one character" in m for m in _delim_errors(caplog))
+
+
 # ── unknown config keys ─────────────────────────────────────────────────────
 
 

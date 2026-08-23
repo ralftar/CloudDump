@@ -184,7 +184,8 @@
         "tls": { "type": "string", "enum": ["ssl", "starttls", "none"], "default": "ssl", "description": "Transport security. Use 'starttls' for Proton Bridge on port 1143." },
         "cert_file": { "type": "string", "description": "Path to a CA/cert to trust, for self-signed servers like Proton Bridge." },
         "delete_destination": { "type": "boolean", "default": true, "description": "Mirror mode — propagate remote deletions to the local copy. The remote mailbox is never modified." },
-        "exclude": { "type": "array", "items": { "type": "string" }, "description": "IMAP folder names to skip. Gmail and Proton need \"All Mail\" excluded; providers with plain folders need nothing." }
+        "exclude": { "type": "array", "items": { "type": "string" }, "description": "IMAP folder names to skip. Gmail and Proton need \"All Mail\" excluded; providers with plain folders need nothing." },
+        "info_delimiter": { "type": "string", "minLength": 1, "maxLength": 1, "description": "Character separating the flag suffix in Maildir filenames. Defaults to \":\", which Windows/NTFS cannot store — use \";\" for a destination on an SMB share. Cannot be changed after the first sync." }
       },
       "additionalProperties": false
     }
