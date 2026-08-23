@@ -97,6 +97,10 @@ def _run_one_job(job, config, version, host):
         job_t_start = time.time()
         logfile_paths = []
         final_attempt = 0
+        # Targets still to run. After a partial failure the next attempt gets
+        # only what failed, so a healthy target is not re-synced — and for a
+        # pgsql server, not dumped a second time.
+        pending = None
 
         for attempt in range(1, max_attempts + 1):
             final_attempt = attempt
@@ -113,13 +117,16 @@ def _run_one_job(job, config, version, host):
             net_before = net_bytes()
 
             try:
-                result = execute_job(job, logfile_path)
+                result, pending = execute_job(job, logfile_path, pending)
                 t_end = time.time()
             except Exception:
                 t_end = time.time()
                 tb = traceback.format_exc()
                 log.error("Crashed:\n%s", tb)
                 result = 1
+                # A crash says nothing about which targets got through,
+                # so fall back to retrying the whole job.
+                pending = None
             finally:
                 clouddump.job_deadline = None
                 log.removeHandler(file_handler)
@@ -147,7 +154,11 @@ def _run_one_job(job, config, version, host):
                 extras["exit_code"] = result
                 log.warning("Attempt completed with errors", extra=extras)
                 if attempt < max_attempts:
-                    log.warning("Retrying in 60s...")
+                    if pending:
+                        log.warning("Retrying %d failed target(s) in 60s...",
+                                    len(pending))
+                    else:
+                        log.warning("Retrying in 60s...")
                     for _ in range(60):
                         if clouddump.shutdown_requested:
                             break

@@ -1323,14 +1323,16 @@ class TestJobDispatch:
     def test_unknown_type_returns_1(self, _tmp_logfile):
         from clouddump.jobs import execute_job
 
-        rc = execute_job({"type": "nonexistent"}, _tmp_logfile)
+        rc, failed = execute_job({"type": "nonexistent"}, _tmp_logfile)
         assert rc == 1
+        assert failed == []
 
     def test_empty_targets_returns_1(self, _tmp_logfile):
         from clouddump.jobs import execute_job
 
-        rc = execute_job({"type": "azstorage", "blobstorages": []}, _tmp_logfile)
+        rc, failed = execute_job({"type": "azstorage", "blobstorages": []}, _tmp_logfile)
         assert rc == 1
+        assert failed == []
 
     def test_dispatches_to_azure(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.jobs import execute_job
@@ -1342,7 +1344,7 @@ class TestJobDispatch:
         })
 
         job = {"type": "azstorage", "blobstorages": [{"source": "https://b"}]}
-        rc = execute_job(job, _tmp_logfile)
+        rc, _ = execute_job(job, _tmp_logfile)
 
         assert rc == 0
         assert called_with == [{"source": "https://b"}]
@@ -1357,7 +1359,7 @@ class TestJobDispatch:
         })
 
         job = {"type": "github", "organizations": [{"name": "org1"}]}
-        rc = execute_job(job, _tmp_logfile)
+        rc, _ = execute_job(job, _tmp_logfile)
 
         assert rc == 0
         assert called_with == [{"name": "org1"}]
@@ -1379,10 +1381,60 @@ class TestJobDispatch:
         })
 
         job = {"type": "azstorage", "blobstorages": [{"id": "a"}, {"id": "b"}]}
-        rc = execute_job(job, _tmp_logfile)
+        rc, _ = execute_job(job, _tmp_logfile)
 
         assert rc == 1  # worst exit code
         assert called == ["a", "b"]  # both attempted
+
+    def test_failed_targets_are_returned(self, monkeypatch, _tmp_logfile):
+        """The retry loop needs to know which targets to run again."""
+        from clouddump.jobs import execute_job
+        from clouddump import jobs
+
+        a, b, c = {"id": "a"}, {"id": "b"}, {"id": "c"}
+        monkeypatch.setattr(jobs, "_RUNNERS", {
+            "azstorage": ("blobstorages", lambda t, lf: 0 if t["id"] == "b" else 1),
+        })
+
+        rc, failed = execute_job(
+            {"type": "azstorage", "blobstorages": [a, b, c]}, _tmp_logfile)
+
+        assert rc == 1
+        assert failed == [a, c], "the succeeding target must not be retried"
+
+    def test_targets_override_replaces_the_job_list(self, monkeypatch, _tmp_logfile):
+        """A retry runs only the subset it is given."""
+        from clouddump.jobs import execute_job
+        from clouddump import jobs
+
+        a, b, c = {"id": "a"}, {"id": "b"}, {"id": "c"}
+        seen = []
+        monkeypatch.setattr(jobs, "_RUNNERS", {
+            "azstorage": ("blobstorages", lambda t, lf: (seen.append(t["id"]), 0)[1]),
+        })
+
+        rc, failed = execute_job(
+            {"type": "azstorage", "blobstorages": [a, b, c]}, _tmp_logfile, targets=[c])
+
+        assert rc == 0
+        assert seen == ["c"]
+        assert failed == []
+
+    def test_empty_targets_override_is_not_treated_as_all(self, monkeypatch, _tmp_logfile):
+        """An empty subset must not silently fall back to running everything."""
+        from clouddump.jobs import execute_job
+        from clouddump import jobs
+
+        seen = []
+        monkeypatch.setattr(jobs, "_RUNNERS", {
+            "azstorage": ("blobstorages", lambda t, lf: (seen.append(t), 0)[1]),
+        })
+
+        rc, _ = execute_job(
+            {"type": "azstorage", "blobstorages": [{"id": "a"}]}, _tmp_logfile, targets=[])
+
+        assert seen == []
+        assert rc == 1
 
     def test_multiple_targets_all_succeed(self, monkeypatch, _tmp_logfile):
         from clouddump.jobs import execute_job
@@ -1393,5 +1445,5 @@ class TestJobDispatch:
         })
 
         job = {"type": "azstorage", "blobstorages": [{"id": "a"}, {"id": "b"}]}
-        rc = execute_job(job, _tmp_logfile)
+        rc, _ = execute_job(job, _tmp_logfile)
         assert rc == 0

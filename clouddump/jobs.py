@@ -37,35 +37,46 @@ def _target_label(target, job_type):
     return val
 
 
-def execute_job(job, logfile_path):
-    """Dispatch a job to the appropriate runner by type. Returns exit code.
+def execute_job(job, logfile_path, targets=None):
+    """Dispatch a job to its runner. Returns ``(exit_code, failed_targets)``.
 
-    Each job type may contain multiple targets (buckets, blobstorages, servers).
-    All targets are attempted even if earlier ones fail; the worst exit code wins.
+    Each job type may contain multiple targets (blobstorages, servers, ...).
+    All are attempted even if earlier ones fail; the worst exit code wins.
+
+    *targets* overrides the job's own list. The retry loop passes the subset that
+    failed last time, so a second attempt does not re-run targets that already
+    succeeded — re-syncing a healthy target is wasted work at best, and for a
+    pgsql server it is a second full dump.
+
+    The returned list holds the target dicts that failed, ready to be passed back
+    in as *targets* on the next attempt.
     """
     job_type = cfg(job, "type")
 
     entry = _RUNNERS.get(job_type)
     if entry is None:
         log.error("Unknown job type %s.", job_type)
-        return 1
+        return 1, []
 
     key, runner = entry
-    targets = cfg(job, key, [])
+    if targets is None:
+        targets = cfg(job, key, [])
     if not targets:
         log.error("No %s configured.", key)
-        return 1
+        return 1, []
 
     rc = 0
     results = []
+    failed = []
     for target in targets:
         r = runner(target, logfile_path)
         results.append((_target_label(target, job_type), r))
         if r != 0:
             rc = max(rc, r)
+            failed.append(target)
 
     if len(results) > 1:
         lines = [f"  {'OK  ' if r == 0 else 'FAIL'}  {label}" for label, r in results]
         ok = sum(1 for _, r in results if r == 0)
         log.info("Job summary (%d/%d OK):\n%s", ok, len(results), "\n".join(lines))
-    return rc
+    return rc, failed
