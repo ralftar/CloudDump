@@ -337,6 +337,26 @@ def validate_jobs(jobs):
                               acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
                     errors += 1
 
+        # Two IMAP accounts must not share a destination: mbsync keeps its sync
+        # state inside the Maildir, so a shared directory means each account
+        # overwrites the other's state. With delete_destination at its default
+        # of true, that resolves as deletion.
+        if job_type == "imap":
+            seen_dests = {}
+            for account in cfg(job, "accounts", []):
+                dest = cfg(account, "destination")
+                if not dest:
+                    continue
+                key = os.path.normpath(dest)
+                if key in seen_dests:
+                    log.error("Accounts '%s' and '%s' in job ID %s share destination "
+                              "'%s'. mbsync stores its sync state there, so they would "
+                              "corrupt each other. Give each account its own directory.",
+                              seen_dests[key], cfg(account, "user"), job_id, dest)
+                    errors += 1
+                else:
+                    seen_dests[key] = cfg(account, "user")
+
         # Validate tls mode and info_delimiter for IMAP accounts
         if job_type == "imap":
             for account in cfg(job, "accounts", []):

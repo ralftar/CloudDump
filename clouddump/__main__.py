@@ -188,7 +188,12 @@ def main():
 
                 job_type = cfg(job, "type")
                 if not cfg(job, "enabled", True):
-                    log.info("Skipping disabled job", extra={"job_id": job_id, "job_type": job_type})
+                    # "job", not "job_id": _EXTRA_FIELDS only carries the former,
+                    # and the JSON formatter drops anything it does not know. This
+                    # line runs before current_job is set, so the id has to be
+                    # passed explicitly to appear at all.
+                    log.info("Skipping disabled job",
+                             extra={"job": job_id, "job_type": job_type})
                     continue
 
                 clouddump.current_job = job_id
