@@ -281,6 +281,8 @@ via Proton Bridge.
   copy (default: `true`). The remote mailbox is never touched. Set to `false`
   to keep messages locally after they are deleted on the server.
 - `exclude`: IMAP folder names to skip (default: none).
+- `info_delimiter`: single character separating the flag suffix in Maildir
+  filenames (default: `:`, the Maildir standard). See the note below.
 
 > **Note — `All Mail` on Gmail and Proton.** Both expose an `All Mail` folder
 > that contains *every* message a second time, alongside the folder or label the
@@ -295,6 +297,24 @@ via Proton Bridge.
 > Fastmail, Migadu, a self-hosted Dovecot — have no such pseudo-folder, and want
 > no excludes at all. Excluding a folder that does not exist is harmless, but
 > excluding a real one silently skips mail, so check the folder list first.
+
+> **Note — a destination on an SMB share backed by Windows.** Maildir names each
+> message `<unique>:2,<flags>`, and NTFS cannot store a colon in a filename — it
+> reserves it for alternate data streams. Writing a Maildir onto a CIFS mount
+> against a Windows server therefore fails, or depends on the mount silently
+> remapping the character. Set a delimiter Windows accepts:
+>
+> ```json
+> "info_delimiter": ";"
+> ```
+>
+> **This cannot be changed after the first sync.** mbsync would not recognise
+> the existing files, would download every message again, and would leave the
+> old copies behind. Decide before the first run.
+>
+> Rejected values: whitespace, `/` (path separator), `#` (starts a comment in
+> the generated mbsyncrc), and the characters Windows reserves — picking one of
+> those would defeat the point.
 
 ### Proton Mail via Proton Bridge
 

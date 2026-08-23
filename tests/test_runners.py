@@ -1128,6 +1128,32 @@ class TestImapRunner:
 
         assert 'CertificateFile "/config/bridge.pem"' in calls[0]["config"]
 
+    def test_no_info_delimiter_by_default(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Unset means mbsync keeps the Maildir standard colon."""
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "mail")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest), _tmp_logfile)
+
+        assert "InfoDelimiter" not in calls[0]["config"]
+
+    def test_info_delimiter_emitted(self, monkeypatch, tmp_path, _tmp_logfile):
+        """A destination on an SMB share backed by Windows cannot store ':'."""
+        from clouddump.job_imap import run_imap_sync
+
+        dest = str(tmp_path / "mail")
+        calls = self._capture(monkeypatch)
+
+        run_imap_sync(self._cfg(destination=dest, info_delimiter=";"), _tmp_logfile)
+
+        config = calls[0]["config"]
+        assert "InfoDelimiter ;" in config
+        # Must land inside the MaildirStore block, before SubFolders.
+        assert config.index("MaildirStore") < config.index("InfoDelimiter")
+        assert config.index("InfoDelimiter") < config.index("SubFolders")
+
     def test_exclude_patterns(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_imap import run_imap_sync
 

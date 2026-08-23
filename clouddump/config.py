@@ -20,6 +20,13 @@ CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"azstorage", "pgsql", "github", "rsync", "imap"}
 _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
 VALID_IMAP_TLS = {"ssl", "starttls", "none"}
+
+# Characters that cannot serve as a Maildir info delimiter. '/' is a path
+# separator; '#' starts a comment in the generated mbsyncrc; the rest are the
+# characters Windows reserves, and picking one of those would defeat the only
+# reason to change the delimiter in the first place. ':' stays allowed — it is
+# the Maildir standard, and setting it explicitly is a legitimate no-op.
+_BAD_INFO_DELIMITERS = set('/#*?"<>|' + chr(92))
 # Every key CloudDump reads. An unrecognised key is refused at startup rather
 # than ignored: a config that does not mean what it says will never fix itself,
 # and the defaults it silently falls back to are not harmless (delete_destination
@@ -55,7 +62,7 @@ TARGET_KEYS = {
     "rsync": {"source", "destination", "ssh_key", "ssh_port", "delete_destination",
               "delete_excluded", "exclude", "min_age_days"},
     "imap": {"host", "port", "user", "pass", "destination", "tls", "cert_file",
-             "delete_destination", "exclude"},
+             "delete_destination", "exclude", "info_delimiter"},
 }
 
 
@@ -330,9 +337,22 @@ def validate_jobs(jobs):
                               acct_type, acct_name, job_id, ", ".join(sorted(VALID_GITHUB_ACCOUNT_TYPES)))
                     errors += 1
 
-        # Validate tls mode for IMAP accounts (config error, not connectivity)
+        # Validate tls mode and info_delimiter for IMAP accounts
         if job_type == "imap":
             for account in cfg(job, "accounts", []):
+                delim = account.get("info_delimiter")
+                if delim is not None:
+                    if not isinstance(delim, str) or len(delim) != 1:
+                        log.error("info_delimiter for '%s' in job ID %s must be exactly "
+                                  "one character, got %r.",
+                                  cfg(account, "user"), job_id, delim)
+                        errors += 1
+                    elif delim.isspace() or delim in _BAD_INFO_DELIMITERS:
+                        log.error("info_delimiter %r for '%s' in job ID %s cannot be used. "
+                                  "Not allowed: whitespace, and %s.",
+                                  delim, cfg(account, "user"), job_id,
+                                  " ".join(sorted(_BAD_INFO_DELIMITERS)))
+                        errors += 1
                 tls = cfg(account, "tls", "ssl")
                 if tls not in VALID_IMAP_TLS:
                     log.error("Invalid tls '%s' for '%s' in job ID %s. Must be one of: %s.",

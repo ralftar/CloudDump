@@ -48,9 +48,17 @@ def _quote(value):
 
 
 def _build_config(host, port, user, passfile, tls_type, cert_file,
-                  destination, patterns, delete):
+                  destination, patterns, delete, info_delimiter=None):
     """Render an mbsyncrc for a one-directional far->near (remote->local) sync."""
     cert_line = f"CertificateFile {_quote(cert_file)}\n" if cert_file else ""
+
+    # Maildir separates the flag suffix from the unique part with ':' by
+    # default, which NTFS cannot store — it reserves the colon for alternate
+    # data streams. A destination on an SMB share backed by Windows therefore
+    # needs a different delimiter. Emitted bare rather than quoted: validation
+    # has already ruled out whitespace, quotes and '#' (the mbsyncrc comment
+    # character), so there is nothing left for quoting to protect.
+    delim_line = f"InfoDelimiter {info_delimiter}\n" if info_delimiter else ""
 
     if delete:
         # Full mirror: pull new/changed/deleted, and actually remove locally.
@@ -76,6 +84,7 @@ def _build_config(host, port, user, passfile, tls_type, cert_file,
         "MaildirStore clouddump-local\n"
         f"Path {_quote(destination + '/')}\n"
         f"Inbox {_quote(destination + '/INBOX')}\n"
+        f"{delim_line}"
         "SubFolders Verbatim\n"
         "\n"
         "Channel clouddump\n"
@@ -97,6 +106,7 @@ def run_imap_sync(target, logfile_path):
     cert_file = cfg(target, "cert_file")
     delete = cfg(target, "delete_destination", True)
     exclude = cfg(target, "exclude", [])
+    info_delimiter = cfg(target, "info_delimiter") or None
 
     # Default port depends on transport: 993 for implicit TLS (IMAPS),
     # 143 for STARTTLS or plaintext.
@@ -146,7 +156,8 @@ def run_imap_sync(target, logfile_path):
         with os.fdopen(pass_fd, "w") as f:
             f.write(password)
         config = _build_config(host, port, user, passfile, tls_type,
-                               cert_file, destination, patterns, delete)
+                               cert_file, destination, patterns, delete,
+                               info_delimiter)
         with os.fdopen(config_fd, "w") as f:
             f.write(config)
 
