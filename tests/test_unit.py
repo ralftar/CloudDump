@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import pathlib
 import sys
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -415,6 +416,113 @@ def test_validate_jobs_github_valid():
     assert "github" in summary
 
 
+
+
+# ── unknown config keys ─────────────────────────────────────────────────────
+
+
+def _unknown_key_errors(caplog):
+    return [r.getMessage() for r in caplog.records if "Unknown key" in r.getMessage()]
+
+
+def test_unknown_top_level_key_is_an_error(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        errors = validate_settings({"host": "h", "crontab": "0 0 * * *", "smtp_ssl": True})
+    assert errors >= 1
+    assert any("smtp_ssl" in m for m in _unknown_key_errors(caplog))
+
+
+def test_unknown_job_key_is_an_error(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        errors, _ = validate_jobs([_job(type="pgsql", retires=5)])
+    assert errors >= 1
+    assert any("retires" in m for m in _unknown_key_errors(caplog))
+
+
+def test_unknown_target_key_is_an_error(caplog):
+    """The typo that would silently arm a mirror-delete."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        errors, _ = validate_jobs([_job(type="rsync", targets=[{
+            "source": "u@h:/d", "ssh_key": "/k", "delete_destinaton": False}])])
+    assert errors >= 1
+    assert any("delete_destinaton" in m for m in _unknown_key_errors(caplog))
+
+
+def test_valid_keys_are_listed_on_failure(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_settings({"host": "h", "crontab": "0 0 * * *", "nonsense": 1})
+    assert any("Valid keys" in r.getMessage() and "smtp_security" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_known_keys_produce_no_unknown_key_error(caplog):
+    job = _job(type="rsync", enabled=True, timeout=60, retries=2, targets=[{
+        "source": "u@h:/d", "ssh_key": "/k", "ssh_port": 22,
+        "delete_destination": False, "delete_excluded": False,
+        "exclude": ["*.tmp"], "min_age_days": 7}])
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([job])
+    assert _unknown_key_errors(caplog) == []
+
+
+def test_schema_matches_allowed_keys():
+    """config.schema.json and the runtime key sets must not drift apart."""
+    import json as _j
+    from clouddump.config import (ALLOWED_TOP_LEVEL_KEYS, JOB_COMMON_KEYS,
+                                  JOB_COLLECTIONS, TARGET_KEYS)
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    schema = _j.loads((root / "config.schema.json").read_text(encoding="utf-8"))
+    defs = schema["$defs"]
+
+    assert set(schema["properties"]) == ALLOWED_TOP_LEVEL_KEYS
+    assert set(defs["job"]["properties"]) == JOB_COMMON_KEYS | set(JOB_COLLECTIONS.values())
+
+    ref_for = {
+        "azstorage": "azure_blob", "pgsql": "db_server", "github": "github_org",
+        "rsync": "rsync_target", "imap": "imap_account",
+    }
+    for job_type, def_name in ref_for.items():
+        assert set(defs[def_name]["properties"]) == TARGET_KEYS[job_type], job_type
+
+
+_MIN_AGE_MSG = "min_age_days with delete_destination"
+
+
+def _rsync_job(**target_over):
+    target = {"source": "user@host:/data", "ssh_key": "/config/k"}
+    target.update(target_over)
+    return _job(type="rsync", targets=[target])
+
+
+def _has_min_age_error(caplog):
+    return any(_MIN_AGE_MSG in r.getMessage() for r in caplog.records)
+
+
+def test_min_age_days_with_delete_destination_is_rejected(caplog):
+    """The two describe opposite intents; the combination must not be configurable."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30, delete_destination=True)])
+    assert _has_min_age_error(caplog)
+
+
+def test_min_age_days_rejected_when_delete_destination_defaults(caplog):
+    """delete_destination defaults to true, so omitting it is the same trap."""
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30)])
+    assert _has_min_age_error(caplog)
+
+
+def test_min_age_days_allowed_without_delete(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30, delete_destination=False)])
+    assert not _has_min_age_error(caplog)
+
+
+def test_delete_destination_allowed_without_min_age(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(delete_destination=True)])
+    assert not _has_min_age_error(caplog)
 
 
 def test_validate_jobs_duplicate_id():

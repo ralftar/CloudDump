@@ -10,7 +10,6 @@ RUN apt-get update && \
     openssh-client \
     tar \
     gzip \
-    bzip2 \
     curl \
     git \
     python3 \

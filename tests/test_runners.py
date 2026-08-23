@@ -229,6 +229,58 @@ class TestPgSQLRunner:
         base.update(overrides)
         return base
 
+    @staticmethod
+    def _fake_dump(monkeypatch, dest):
+        """Patch pg_dump so it writes a non-empty staging file. Returns cmd list."""
+        calls = []
+
+        def fake_run_cmd(cmd, env=None, stdout=None, **kwargs):
+            calls.append(cmd)
+            if stdout is not None:
+                stdout.write(b"PGDMP-fake")
+            return 0
+
+        monkeypatch.setattr("clouddump.job_pgsql._list_databases", lambda *a: ["testdb"])
+        monkeypatch.setattr("clouddump.job_pgsql.run_cmd", fake_run_cmd)
+        return calls
+
+    def test_compress_true_omits_Z_flag(self, monkeypatch, tmp_path, _tmp_logfile):
+        """The custom format compresses by default; no extra pass, no -Z."""
+        from clouddump.job_pgsql import run_pg_dump
+
+        dest = str(tmp_path / "pgout")
+        calls = self._fake_dump(monkeypatch, dest)
+
+        rc = run_pg_dump(self._cfg(backuppath=dest, compress=True), _tmp_logfile)
+
+        assert rc == 0
+        assert len(calls) == 1, "no separate compression subprocess"
+        assert "-Z" not in calls[0]
+        assert "bzip2" not in calls[0]
+
+    def test_compress_false_passes_Z_zero(self, monkeypatch, tmp_path, _tmp_logfile):
+        """compress:false must actually disable pg_dump's own zlib, not just skip bzip2."""
+        from clouddump.job_pgsql import run_pg_dump
+
+        dest = str(tmp_path / "pgout")
+        calls = self._fake_dump(monkeypatch, dest)
+
+        rc = run_pg_dump(self._cfg(backuppath=dest, compress=False), _tmp_logfile)
+
+        assert rc == 0
+        cmd = calls[0]
+        assert cmd[cmd.index("-Z") + 1] == "0"
+
+    def test_output_filename_has_no_bz2(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_pgsql import run_pg_dump
+
+        dest = tmp_path / "pgout"
+        self._fake_dump(monkeypatch, str(dest))
+
+        run_pg_dump(self._cfg(backuppath=str(dest), compress=True), _tmp_logfile)
+
+        assert sorted(p.name for p in dest.iterdir()) == ["testdb.dump"]
+
     def test_custom_db_retries(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_pgsql import run_pg_dump
 

@@ -131,8 +131,7 @@
         "databases": { "type": "array", "description": "Explicit database list. Items can be objects with table filters." },
         "databases_excluded": { "type": "array", "items": { "type": "string" } },
         "db_retries": { "type": "integer", "minimum": 1, "default": 3 },
-        "filenamedate": { "type": "boolean", "default": false },
-        "compress": { "type": "boolean", "default": true }
+        "compress": { "type": "boolean", "default": true, "description": "Compress the dump inside pg_dump. Set false (-Z 0) for an uncompressed dump that downstream dedup can see through." }
       },
       "additionalProperties": false
     },

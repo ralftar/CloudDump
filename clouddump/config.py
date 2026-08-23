@@ -20,6 +20,63 @@ CONFIG_FILE = "/config/config.json"
 VALID_JOB_TYPES = {"azstorage", "pgsql", "github", "rsync", "imap"}
 _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
 VALID_IMAP_TLS = {"ssl", "starttls", "none"}
+# Every key CloudDump reads. An unrecognised key is refused at startup rather
+# than ignored: a config that does not mean what it says will never fix itself,
+# and the defaults it silently falls back to are not harmless (delete_destination
+# defaults to true). A typo must stop the process, not arm a mirror-delete.
+#
+# Kept in lockstep with config.schema.json by test_schema_matches_allowed_keys.
+ALLOWED_TOP_LEVEL_KEYS = {
+    "host", "crontab", "jobs", "debug", "log_format",
+    "health_port", "health_log",
+    "smtp_server", "smtp_port", "smtp_user", "smtp_pass", "smtp_security",
+    "mail_from", "mail_to", "email_log_attached", "email_size_limit_mb",
+}
+
+JOB_COMMON_KEYS = {"id", "type", "enabled", "timeout", "retries"}
+
+# Job type -> the key holding its list of targets.
+JOB_COLLECTIONS = {
+    "azstorage": "blobstorages",
+    "pgsql": "servers",
+    "github": "organizations",
+    "rsync": "targets",
+    "imap": "accounts",
+}
+
+TARGET_KEYS = {
+    "azstorage": {"source", "destination", "delete_destination"},
+    "pgsql": {"host", "port", "user", "pass", "backuppath", "databases",
+              "databases_excluded", "db_retries", "compress"},
+    "github": {"name", "destination", "token", "account_type", "repositories",
+               "include_repos", "include_issues", "include_pulls", "include_labels",
+               "include_milestones", "include_releases", "include_wikis",
+               "include_forks", "include_archived", "include_lfs"},
+    "rsync": {"source", "destination", "ssh_key", "ssh_port", "delete_destination",
+              "delete_excluded", "exclude", "min_age_days"},
+    "imap": {"host", "port", "user", "pass", "destination", "tls", "cert_file",
+             "delete_destination", "exclude"},
+}
+
+
+def _report_unknown_keys(actual, allowed, where):
+    """Log one error per unrecognised key. Returns the number of errors.
+
+    Lists the valid keys rather than guessing a correction: the nearest string
+    match is often the wrong one (``smtp_ssl`` scores closer to ``smtp_pass``
+    than to ``smtp_security``, which is what the operator actually meant), and a
+    confidently wrong suggestion costs more than none. The key sets are small
+    enough to read.
+    """
+    unknown = sorted(set(actual) - allowed)
+    if not unknown:
+        return 0
+    for key in unknown:
+        log.error("Unknown key '%s' in %s.", key, where)
+    log.error("Valid keys for %s: %s.", where, ", ".join(sorted(allowed)))
+    return len(unknown)
+
+
 TOOL_REQUIREMENTS = {
     "azstorage": ["azcopy"],
     "pgsql": ["pg_dump", "psql"],
@@ -44,7 +101,7 @@ def load_config():
 
 def validate_settings(config):
     """Validate top-level config settings. Returns error count."""
-    errors = 0
+    errors = _report_unknown_keys(config, ALLOWED_TOP_LEVEL_KEYS, "the top-level configuration")
     for field in ("debug", "email_log_attached", "health_log"):
         val = config.get(field)
         if val is not None and not isinstance(val, bool):
@@ -129,6 +186,16 @@ def validate_jobs(jobs):
             errors += 1
             continue
 
+        # Unknown keys on the job and on each of its targets.
+        collection = JOB_COLLECTIONS[job_type]
+        errors += _report_unknown_keys(
+            job, JOB_COMMON_KEYS | {collection}, f"job ID {job_id}")
+        for i_t, target in enumerate(cfg(job, collection, [])):
+            if isinstance(target, dict):
+                errors += _report_unknown_keys(
+                    target, TARGET_KEYS[job_type],
+                    f"{collection}[{i_t}] of job ID {job_id}")
+
         for tool in TOOL_REQUIREMENTS.get(job_type, []):
             if not shutil.which(tool):
                 log.error("Required tool '%s' not found for job ID %s (type: %s).", tool, job_id, job_type)
@@ -155,7 +222,7 @@ def validate_jobs(jobs):
         # Validate field types in targets
         _TARGET_BOOLS = {
             "azstorage": ("blobstorages", ["delete_destination"]),
-            "pgsql": ("servers", ["filenamedate", "compress"]),
+            "pgsql": ("servers", ["compress"]),
             "github": ("organizations", [
                 "include_repos", "include_issues", "include_pulls",
                 "include_labels", "include_milestones", "include_releases",
@@ -205,6 +272,23 @@ def validate_jobs(jobs):
                     if err:
                         log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
                         errors += 1
+
+        # min_age_days restricts the transfer to files older than N days;
+        # delete_destination adds --delete, which prunes whatever is not in
+        # that restricted list. The two describe opposite intents, and the
+        # combination is either destructive or a no-op depending on rsync's
+        # --files-from semantics. Refuse it rather than pick a winner.
+        if job_type == "rsync":
+            for target in cfg(job, "targets", []):
+                if target.get("min_age_days") and cfg(target, "delete_destination", True):
+                    log.error(
+                        "Target '%s' in job ID %s sets min_age_days with "
+                        "delete_destination enabled. These conflict: min_age_days "
+                        "transfers only old files, delete_destination then deletes "
+                        "everything else from the destination. Set "
+                        "delete_destination to false, or drop min_age_days.",
+                        cfg(target, "source"), job_id)
+                    errors += 1
 
         # Validate PostgreSQL table filter syntax
         if job_type == "pgsql":
