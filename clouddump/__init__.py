@@ -39,6 +39,7 @@ _EXTRA_FIELDS = frozenset({
     "host", "port", "database", "bytes", "database_count",
     "source", "destination",
     "account", "account_type",
+    "container",
 })
 
 _LEVEL_NAMES = {"WARNING": "warn", "CRITICAL": "crit"}
