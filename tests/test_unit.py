@@ -579,6 +579,29 @@ def test_healthz_serves_valid_json_while_metrics_are_written():
         _state["jobs"] = old
 
 
+def test_every_extra_key_survives_the_json_formatter():
+    """_JsonFormatter emits only keys in _EXTRA_FIELDS; the rest vanish silently.
+
+    Two bugs of this shape have shipped — `job_id` on the disabled-job line and
+    `container` in the Azure runner — both invisible because the text formatter
+    does not use the allowlist at all, so they only disappeared in json mode.
+    Scanning the source makes the class impossible to reintroduce quietly.
+    """
+    import re
+    from clouddump import _EXTRA_FIELDS
+
+    pkg = pathlib.Path(__file__).resolve().parent.parent / "clouddump"
+    offenders = {}
+    for src in sorted(pkg.glob("*.py")):
+        text = src.read_text(encoding="utf-8")
+        for literal in re.finditer(r"extra=\{([^}]*)\}", text, re.S):
+            for key in re.findall(r'"(\w+)"\s*:', literal.group(1)):
+                if key not in _EXTRA_FIELDS:
+                    offenders.setdefault(src.name, set()).add(key)
+
+    assert not offenders, f"extra= keys missing from _EXTRA_FIELDS: {offenders}"
+
+
 def test_disabled_job_uses_a_field_the_json_formatter_keeps():
     """'job_id' is not in _EXTRA_FIELDS, so it would be silently dropped."""
     from clouddump import _EXTRA_FIELDS
