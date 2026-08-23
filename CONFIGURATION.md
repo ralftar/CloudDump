@@ -280,8 +280,21 @@ via Proton Bridge.
 - `delete_destination`: mirror mode — propagate remote deletions to the local
   copy (default: `true`). The remote mailbox is never touched. Set to `false`
   to keep messages locally after they are deleted on the server.
-- `exclude`: IMAP folder names to skip (default: none), e.g. `"All Mail"` to
-  avoid duplicating every message that also lives in a label.
+- `exclude`: IMAP folder names to skip (default: none).
+
+> **Note — `All Mail` on Gmail and Proton.** Both expose an `All Mail` folder
+> that contains *every* message a second time, alongside the folder or label the
+> message already lives in. Syncing it downloads and stores the whole mailbox
+> twice, so exclude it:
+>
+> ```json
+> "exclude": ["All Mail"]
+> ```
+>
+> This is provider-specific, not general advice. Providers with plain folders —
+> Fastmail, Migadu, a self-hosted Dovecot — have no such pseudo-folder, and want
+> no excludes at all. Excluding a folder that does not exist is harmless, but
+> excluding a real one silently skips mail, so check the folder list first.
 
 ### Proton Mail via Proton Bridge
 
