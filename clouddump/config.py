@@ -280,20 +280,28 @@ def validate_jobs(jobs):
                         log.error("Unsafe %s for job ID %s: %s", field, job_id, err)
                         errors += 1
 
-        # min_age_days restricts the transfer to files older than N days;
-        # delete_destination adds --delete, which prunes whatever is not in
-        # that restricted list. The two describe opposite intents, and the
-        # combination is either destructive or a no-op depending on rsync's
-        # --files-from semantics. Refuse it rather than pick a winner.
+        # With min_age_days, delete_destination means "mirror the aged part":
+        # files older than the cutoff that are gone from the source are
+        # deleted locally, newer files are never touched. delete_destination
+        # defaults to true, so a min_age_days target must state it
+        # explicitly — deletion is never the silent consequence of adding
+        # an age filter. delete_excluded has no aged equivalent; refuse it.
         if job_type == "rsync":
             for target in cfg(job, "targets", []):
-                if target.get("min_age_days") and cfg(target, "delete_destination", True):
+                if not target.get("min_age_days"):
+                    continue
+                if "delete_destination" not in target:
+                    log.error(
+                        "Target '%s' in job ID %s sets min_age_days without "
+                        "delete_destination. Set it explicitly: true deletes "
+                        "local files older than min_age_days that are gone "
+                        "from the source, false keeps everything.",
+                        cfg(target, "source"), job_id)
+                    errors += 1
+                if cfg(target, "delete_excluded", False):
                     log.error(
                         "Target '%s' in job ID %s sets min_age_days with "
-                        "delete_destination enabled. These conflict: min_age_days "
-                        "transfers only old files, delete_destination then deletes "
-                        "everything else from the destination. Set "
-                        "delete_destination to false, or drop min_age_days.",
+                        "delete_excluded. The two cannot be combined.",
                         cfg(target, "source"), job_id)
                     errors += 1
 

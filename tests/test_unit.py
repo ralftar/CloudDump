@@ -680,7 +680,8 @@ def test_schema_matches_allowed_keys():
         assert set(defs[def_name]["properties"]) == TARGET_KEYS[job_type], job_type
 
 
-_MIN_AGE_MSG = "min_age_days with delete_destination"
+_MIN_AGE_MSG = "min_age_days without delete_destination"
+_MIN_AGE_EXCLUDED_MSG = "min_age_days with delete_excluded"
 
 
 def _rsync_job(**target_over):
@@ -689,19 +690,19 @@ def _rsync_job(**target_over):
     return _job(type="rsync", targets=[target])
 
 
-def _has_min_age_error(caplog):
-    return any(_MIN_AGE_MSG in r.getMessage() for r in caplog.records)
+def _has_min_age_error(caplog, msg=_MIN_AGE_MSG):
+    return any(msg in r.getMessage() for r in caplog.records)
 
 
-def test_min_age_days_with_delete_destination_is_rejected(caplog):
-    """The two describe opposite intents; the combination must not be configurable."""
+def test_min_age_days_with_explicit_delete_destination_is_allowed(caplog):
+    """Explicit true means: mirror the part of the source older than the cutoff."""
     with caplog.at_level(logging.ERROR, logger="clouddump"):
         validate_jobs([_rsync_job(min_age_days=30, delete_destination=True)])
-    assert _has_min_age_error(caplog)
+    assert not _has_min_age_error(caplog)
 
 
 def test_min_age_days_rejected_when_delete_destination_defaults(caplog):
-    """delete_destination defaults to true, so omitting it is the same trap."""
+    """delete_destination defaults to true; deletion must never be implicit."""
     with caplog.at_level(logging.ERROR, logger="clouddump"):
         validate_jobs([_rsync_job(min_age_days=30)])
     assert _has_min_age_error(caplog)
@@ -711,6 +712,13 @@ def test_min_age_days_allowed_without_delete(caplog):
     with caplog.at_level(logging.ERROR, logger="clouddump"):
         validate_jobs([_rsync_job(min_age_days=30, delete_destination=False)])
     assert not _has_min_age_error(caplog)
+
+
+def test_min_age_days_with_delete_excluded_is_rejected(caplog):
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        validate_jobs([_rsync_job(min_age_days=30, delete_destination=True,
+                                  delete_excluded=True)])
+    assert _has_min_age_error(caplog, _MIN_AGE_EXCLUDED_MSG)
 
 
 def test_delete_destination_allowed_without_min_age(caplog):

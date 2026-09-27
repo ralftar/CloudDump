@@ -223,10 +223,16 @@ By default only repository code is backed up. Metadata options (issues, pulls, l
 - `destination`: local backup directory (required).
 - `ssh_key`: path to the SSH private key file, mounted into the container (required).
 - `ssh_port`: SSH port (default: `22`).
-- `delete_destination`: remove files at destination that no longer exist at source (default: `true`). **Cannot be combined with `min_age_days`** — CloudDump rejects that at startup. The two describe opposite intents: `min_age_days` narrows the transfer to old files, and `--delete` would then remove everything else from the destination, including every file newer than the cutoff. Set `delete_destination` to `false` on any target that uses `min_age_days`.
+- `delete_destination`: remove files at destination that no longer exist at source (default: `true`). Together with `min_age_days` it mirrors only the aged part: see `min_age_days`.
 - `exclude`: list of rsync exclude patterns (default: none).
 - `delete_excluded`: also delete `exclude`d paths from the destination (default: `false`). Implies deletion (`--delete`), so already-mirrored copies of newly-excluded paths (e.g. regenerable caches) are purged on the next run. Without this, excluded paths already present at the destination are left untouched.
-- `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). Requires `delete_destination: false` (see above). When set, CloudDump enumerates remote files via `rsync --list-only`, filters by mtime client-side, and passes the qualifying paths to the main rsync with `--files-from`. Uses the rsync protocol only — no remote shell commands — so it works with restricted SSH accounts (forced commands, `rrsync`, etc.).
+- `min_age_days`: only copy files whose modification time is older than this many days (default: none — copy all files). When set, CloudDump enumerates remote files via `rsync --list-only`, filters by mtime client-side, and passes the qualifying paths to the main rsync with `--files-from`. Uses the rsync protocol only — no remote shell commands — so it works with restricted SSH accounts (forced commands, `rrsync`, etc.).
+
+  A target with `min_age_days` must set `delete_destination` explicitly — CloudDump rejects it at startup otherwise, so deletion is never the silent consequence of adding an age filter:
+  - `false`: accumulate. Nothing is ever deleted from the destination.
+  - `true`: mirror the aged part. After a successful transfer, destination files older than `min_age_days` that no longer exist at the source are deleted, and directories left empty by that are removed. Files newer than the cutoff are never touched. If the source listing is empty, CloudDump refuses to delete anything and fails the job — an empty source is treated as a missing mount, not as "everything was deleted".
+
+  `delete_excluded` cannot be combined with `min_age_days`.
 
 The SSH key file should be mounted read-only into the container:
 
