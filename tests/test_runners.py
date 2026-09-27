@@ -848,70 +848,146 @@ class TestRsyncRunner:
         run_rsync_sync(self._cfg(destination=dest), _tmp_logfile)
         assert os.path.isdir(dest)
 
+    @staticmethod
+    def _stub_listing(monkeypatch, files):
+        """Stub the remote listing; *files* maps path -> age in days (None = failure)."""
+        import time as _t
+        listing = None if files is None else {
+            name: _t.time() - age * 86400 for name, age in files.items()}
+        monkeypatch.setattr("clouddump.job_rsync._list_remote_files",
+                            lambda *a, **kw: listing)
+
     def test_min_age_days_builds_filelist(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync
 
         dest = str(tmp_path / "rsyncout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+        self._stub_listing(monkeypatch, {"old/file1.txt": 60, "old/file2.log": 45, "new/x": 1})
 
-        # Stub _find_old_files to return a known file list
-        monkeypatch.setattr(
-            "clouddump.job_rsync._find_old_files",
-            lambda *a, **kw: ["old/file1.txt", "old/file2.log"],
-        )
-
-        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=30), _tmp_logfile)
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=30,
+                                      delete_destination=True), _tmp_logfile)
 
         assert rc == 0
         cmd = calls[0][0]
         assert "--files-from" in cmd
-        # delete_destination defaults to True — mirror mode
-        assert "--delete" in cmd
+        # Deletion for aged targets is done by _prune, never rsync --delete
+        assert "--delete" not in cmd
+
+    def test_min_age_days_filelist_holds_only_old_files(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        seen = {}
+
+        def fake_run(cmd, logfile_path=None):
+            with open(cmd[cmd.index("--files-from") + 1]) as f:
+                seen["files"] = f.read().split()
+            return 0
+
+        monkeypatch.setattr("clouddump.job_rsync.run_cmd", fake_run)
+        self._stub_listing(monkeypatch, {"old/a": 60, "new/b": 1})
+
+        run_rsync_sync(self._cfg(destination=dest, min_age_days=30,
+                                 delete_destination=False), _tmp_logfile)
+        assert seen["files"] == ["old/a"]
 
     def test_min_age_days_no_delete(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync
 
         dest = str(tmp_path / "rsyncout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
-
-        monkeypatch.setattr(
-            "clouddump.job_rsync._find_old_files",
-            lambda *a, **kw: ["old/file.txt"],
-        )
+        self._stub_listing(monkeypatch, {"old/file.txt": 60})
+        pruned = []
+        monkeypatch.setattr("clouddump.job_rsync._prune_aged_orphans",
+                            lambda *a: pruned.append(a) or 0)
 
         run_rsync_sync(self._cfg(destination=dest, min_age_days=30, delete_destination=False), _tmp_logfile)
 
         cmd = calls[0][0]
         assert "--files-from" in cmd
         assert "--delete" not in cmd
+        assert pruned == []
+
+    def test_min_age_days_prunes_after_successful_sync(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+        self._stub_listing(monkeypatch, {"old/file.txt": 60})
+        pruned = []
+        monkeypatch.setattr("clouddump.job_rsync._prune_aged_orphans",
+                            lambda *a: pruned.append(a) or 3)
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=30,
+                                      delete_destination=True), _tmp_logfile)
+        assert rc == 0
+        assert len(pruned) == 1
+
+    def test_min_age_days_no_prune_when_rsync_fails(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd", rc=23)
+        self._stub_listing(monkeypatch, {"old/file.txt": 60})
+        pruned = []
+        monkeypatch.setattr("clouddump.job_rsync._prune_aged_orphans",
+                            lambda *a: pruned.append(a) or 0)
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=30,
+                                      delete_destination=True), _tmp_logfile)
+        assert rc == 23
+        assert pruned == []
+
+    def test_min_age_days_refused_prune_fails_job(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+        self._stub_listing(monkeypatch, {"old/file.txt": 60})
+        monkeypatch.setattr("clouddump.job_rsync._prune_aged_orphans", lambda *a: None)
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=30,
+                                      delete_destination=True), _tmp_logfile)
+        assert rc == 1
 
     def test_min_age_days_no_files_returns_0(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync
 
         dest = str(tmp_path / "rsyncout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+        self._stub_listing(monkeypatch, {"new/x": 1})
 
-        monkeypatch.setattr(
-            "clouddump.job_rsync._find_old_files",
-            lambda *a, **kw: [],
-        )
-
-        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7), _tmp_logfile)
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7,
+                                      delete_destination=False), _tmp_logfile)
 
         assert rc == 0
         assert len(calls) == 0  # rsync should not have been called
+
+    def test_min_age_days_no_old_files_still_prunes(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Every aged file deleted at the source: nothing to copy, but the backup must follow."""
+        from clouddump.job_rsync import run_rsync_sync
+
+        dest = str(tmp_path / "rsyncout")
+        calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+        self._stub_listing(monkeypatch, {"new/x": 1})
+        pruned = []
+        monkeypatch.setattr("clouddump.job_rsync._prune_aged_orphans",
+                            lambda *a: pruned.append(a) or 2)
+
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7,
+                                      delete_destination=True), _tmp_logfile)
+        assert rc == 0
+        assert len(calls) == 0
+        assert len(pruned) == 1
 
     def test_min_age_days_find_failure(self, monkeypatch, tmp_path, _tmp_logfile):
         from clouddump.job_rsync import run_rsync_sync
 
         dest = str(tmp_path / "rsyncout")
+        self._stub_listing(monkeypatch, None)
 
-        monkeypatch.setattr(
-            "clouddump.job_rsync._find_old_files",
-            lambda *a, **kw: None,  # signals failure
-        )
-
-        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7), _tmp_logfile)
+        rc = run_rsync_sync(self._cfg(destination=dest, min_age_days=7,
+                                      delete_destination=True), _tmp_logfile)
         assert rc == 1
 
     def test_min_age_days_cleans_up_tempfile(self, monkeypatch, tmp_path, _tmp_logfile):
@@ -919,13 +995,10 @@ class TestRsyncRunner:
 
         dest = str(tmp_path / "rsyncout")
         calls = _capture_cmd(monkeypatch, "clouddump.job_rsync.run_cmd")
+        self._stub_listing(monkeypatch, {"somefile.txt": 60})
 
-        monkeypatch.setattr(
-            "clouddump.job_rsync._find_old_files",
-            lambda *a, **kw: ["somefile.txt"],
-        )
-
-        run_rsync_sync(self._cfg(destination=dest, min_age_days=5), _tmp_logfile)
+        run_rsync_sync(self._cfg(destination=dest, min_age_days=5,
+                                 delete_destination=False), _tmp_logfile)
 
         # The temp file referenced in --files-from should be cleaned up
         cmd = calls[0][0]
@@ -1005,6 +1078,77 @@ class TestFindOldFiles:
         assert "--list-only" in captured["cmd"]
         # No shell redirects or find commands
         assert not any("find" in a or "2>" in a for a in captured["cmd"])
+
+
+
+class TestPruneAgedOrphans:
+    """Tests for _prune_aged_orphans against a real directory tree."""
+
+    @staticmethod
+    def _file(root, rel, age_days):
+        import time as _t
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+        t = _t.time() - age_days * 86400
+        os.utime(path, (t, t))
+        return path
+
+    @staticmethod
+    def _run(root, remote, days=30):
+        import time as _t
+        from clouddump.job_rsync import _prune_aged_orphans
+        now = _t.time()
+        listing = {name: now - age * 86400 for name, age in remote.items()}
+        return _prune_aged_orphans(str(root), listing, now - days * 86400)
+
+    def test_deletes_old_file_gone_from_remote(self, tmp_path):
+        gone = self._file(tmp_path, "cam/2023/01/a.jpeg", 900)
+        kept = self._file(tmp_path, "cam/2023/01/b.jpeg", 900)
+
+        assert self._run(tmp_path, {"cam/2023/01/b.jpeg": 900, "cam/new.jpeg": 1}) == 1
+        assert not gone.exists()
+        assert kept.exists()
+
+    def test_never_touches_files_newer_than_cutoff(self, tmp_path):
+        recent = self._file(tmp_path, "cam/recent.jpeg", 5)
+
+        assert self._run(tmp_path, {"cam/other.jpeg": 60}) == 0
+        assert recent.exists()
+
+    def test_removes_directories_it_emptied(self, tmp_path):
+        self._file(tmp_path, "old-name/2019/03/a.jpeg", 2000)
+        self._file(tmp_path, "keep/x.jpeg", 2000)
+
+        self._run(tmp_path, {"keep/x.jpeg": 2000})
+        assert not (tmp_path / "old-name").exists()
+        assert (tmp_path / "keep" / "x.jpeg").exists()
+        assert tmp_path.exists()
+
+    def test_keeps_directory_with_recent_files(self, tmp_path):
+        self._file(tmp_path, "cam/old.jpeg", 100)
+        self._file(tmp_path, "cam/recent.jpeg", 2)
+
+        self._run(tmp_path, {"other": 100})
+        assert (tmp_path / "cam" / "recent.jpeg").exists()
+        assert not (tmp_path / "cam" / "old.jpeg").exists()
+
+    def test_refuses_on_empty_remote_listing(self, tmp_path):
+        survivor = self._file(tmp_path, "cam/a.jpeg", 900)
+
+        assert self._run(tmp_path, {}) is None
+        assert survivor.exists()
+
+    def test_skips_symlinks(self, tmp_path):
+        target = self._file(tmp_path, "real.jpeg", 900)
+        link = tmp_path / "link.jpeg"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not available")
+
+        self._run(tmp_path, {"real.jpeg": 900})
+        assert link.is_symlink()
 
 
 # ── IMAP runner ─────────────────────────────────────────────────────────────

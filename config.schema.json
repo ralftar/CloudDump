@@ -165,10 +165,10 @@
         "destination": { "type": "string" },
         "ssh_key": { "type": "string", "description": "Path to SSH private key." },
         "ssh_port": { "type": "integer", "default": 22 },
-        "delete_destination": { "type": "boolean", "default": true },
-        "delete_excluded": { "type": "boolean", "default": false, "description": "Also delete excluded paths from the destination (implies --delete). Purges already-mirrored copies of newly-excluded paths." },
+        "delete_destination": { "type": "boolean", "default": true, "description": "Mirror mode — delete local files that are gone from the source. With min_age_days it must be set explicitly, and only files older than the cutoff are deleted." },
+        "delete_excluded": { "type": "boolean", "default": false, "description": "Also delete excluded paths from the destination (implies --delete). Purges already-mirrored copies of newly-excluded paths. Cannot be combined with min_age_days." },
         "exclude": { "type": "array", "items": { "type": "string" }, "description": "Rsync exclude patterns." },
-        "min_age_days": { "type": "integer", "minimum": 1, "description": "Only sync files older than N days." }
+        "min_age_days": { "type": "integer", "minimum": 1, "description": "Only sync files older than N days. Requires an explicit delete_destination." }
       },
       "additionalProperties": false
     },

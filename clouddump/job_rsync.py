@@ -3,6 +3,7 @@
 import os
 import re
 import shlex
+import stat
 import subprocess
 import tempfile
 import time
@@ -35,13 +36,13 @@ def _build_ssh_args(ssh_key, ssh_port):
     ]
 
 
-def _find_old_files(host_part, remote_path, min_age_days, ssh_args):
-    """List remote files older than *min_age_days* via ``rsync --list-only``.
+def _list_remote_files(host_part, remote_path, ssh_args):
+    """List remote regular files via ``rsync --list-only``.
 
     Uses the rsync protocol itself to enumerate files — no remote shell
     invocation, so it works with restricted accounts (forced commands,
-    rrsync, etc.). Returns paths relative to *remote_path*, or ``None``
-    on failure.
+    rrsync, etc.). Returns ``{path: mtime}`` with paths relative to
+    *remote_path*, or ``None`` on failure.
     """
     if not remote_path.endswith("/"):
         remote_path += "/"
@@ -52,8 +53,7 @@ def _find_old_files(host_part, remote_path, min_age_days, ssh_args):
         log.error("Remote listing failed (rc %d): %s", proc.returncode, proc.stderr.strip())
         return None
 
-    cutoff = time.time() - (min_age_days * 86400)
-    files = []
+    files = {}
     for line in proc.stdout.splitlines():
         m = _LIST_LINE_RE.match(line)
         if not m or not m.group("perms").startswith("-"):
@@ -64,9 +64,65 @@ def _find_old_files(host_part, remote_path, min_age_days, ssh_args):
             ))
         except ValueError:
             continue
-        if mtime < cutoff:
-            files.append(m.group("name"))
+        files[m.group("name")] = mtime
     return files
+
+
+def _find_old_files(host_part, remote_path, min_age_days, ssh_args):
+    """List remote files older than *min_age_days*, or ``None`` on failure."""
+    files = _list_remote_files(host_part, remote_path, ssh_args)
+    if files is None:
+        return None
+    cutoff = time.time() - (min_age_days * 86400)
+    return [name for name, mtime in files.items() if mtime < cutoff]
+
+
+def _prune_aged_orphans(destination, remote_files, cutoff):
+    """Delete local files older than *cutoff* that no longer exist remotely.
+
+    This is ``delete_destination`` for a ``min_age_days`` target: the aged
+    part of the destination mirrors the aged part of the source, and
+    anything newer than the cutoff is never touched. Directories emptied by
+    the pruning are removed as well. Returns the number of files deleted,
+    or ``None`` when pruning was refused.
+    """
+    # An empty listing means the source is gone or unmounted, not that the
+    # owner deleted everything. Mirroring that would wipe the backup.
+    if not remote_files:
+        log.error("Remote listing is empty; refusing to prune %s.", destination)
+        return None
+
+    removed = 0
+    emptied = set()
+    for root, _dirs, names in os.walk(destination):
+        for name in names:
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, destination).replace(os.sep, "/")
+            if rel in remote_files:
+                continue
+            st = os.lstat(path)
+            if not stat.S_ISREG(st.st_mode) or st.st_mtime >= cutoff:
+                continue
+            os.remove(path)
+            removed += 1
+            emptied.add(root)
+
+    # Deepest first, so a parent emptied by its children goes too.
+    for d in sorted(emptied, key=len, reverse=True):
+        while d != destination and os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+            d = os.path.dirname(d)
+    return removed
+
+
+def _prune(destination, remote_files, cutoff, min_age_days):
+    """Run _prune_aged_orphans and turn its result into a job return code."""
+    removed = _prune_aged_orphans(destination, remote_files, cutoff)
+    if removed is None:
+        return 1
+    log.info("Pruned %d file(s) older than %d days that no longer exist on remote.",
+             removed, min_age_days)
+    return 0
 
 
 def run_rsync_sync(target, logfile_path):
@@ -104,13 +160,19 @@ def run_rsync_sync(target, logfile_path):
 
     # Build file list from remote if min_age_days is set
     filelist_path = None
+    remote_files = None
+    cutoff = None
     if min_age_days:
         host_part, remote_path = source.split(":", 1)
-        files = _find_old_files(host_part, remote_path, min_age_days, ssh_args)
-        if files is None:
+        remote_files = _list_remote_files(host_part, remote_path, ssh_args)
+        if remote_files is None:
             return 1
+        cutoff = time.time() - (min_age_days * 86400)
+        files = [name for name, mtime in remote_files.items() if mtime < cutoff]
         if not files:
             log.info("No files older than %d days found on remote.", min_age_days)
+            if delete:
+                return _prune(destination, remote_files, cutoff, min_age_days)
             return 0
 
         log.info("Found %d file(s) older than %d days.", len(files), min_age_days)
@@ -124,8 +186,10 @@ def run_rsync_sync(target, logfile_path):
             cmd.append("-v")
         cmd += ["-e", ssh_cmd]
         if filelist_path:
+            # --delete against a --files-from list has no sane meaning here;
+            # deletions for min_age_days targets go through _prune instead.
             cmd += ["--files-from", filelist_path]
-        if delete or delete_excluded:
+        elif delete or delete_excluded:
             cmd.append("--delete")
         if delete_excluded:
             # Also purge already-mirrored copies of newly-excluded paths
@@ -141,8 +205,10 @@ def run_rsync_sync(target, logfile_path):
 
         if rc != 0:
             log.error("Rsync failed", extra={"source": source, "elapsed_s": elapsed})
-        else:
-            log.info("Rsync completed", extra={"source": source, "elapsed_s": elapsed})
+            return rc
+        log.info("Rsync completed", extra={"source": source, "elapsed_s": elapsed})
+        if filelist_path and delete:
+            return _prune(destination, remote_files, cutoff, min_age_days)
         return rc
     finally:
         if filelist_path:
