@@ -3,6 +3,7 @@
 import copy
 import json
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from clouddump import log
@@ -37,11 +38,16 @@ def update_last_run(started, finished, succeeded, failed, total):
 
 
 def update_job_metric(job_id, job_type, status, elapsed, rx=None, tx=None):
-    """Record metrics for a single job execution."""
+    """Record metrics for a single job execution, stamped with when it finished.
+
+    Jobs run one after another, so each finishes at its own time; the run's
+    finished_epoch is only the last of them.
+    """
     entry = {
         "type": job_type,
         "status": status,
         "elapsed_seconds": elapsed,
+        "finished_epoch": int(time.time()),
     }
     if rx is not None:
         entry["rx_bytes"] = rx
