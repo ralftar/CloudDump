@@ -261,6 +261,7 @@ CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
       "type": "pgsql",
       "status": "success",
       "elapsed_seconds": 134,
+      "finished_epoch": 1743219000,
       "rx_bytes": 1024000,
       "tx_bytes": 512
     },
@@ -268,6 +269,7 @@ CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
       "type": "azstorage",
       "status": "success",
       "elapsed_seconds": 187,
+      "finished_epoch": 1743219187,
       "rx_bytes": 52428800,
       "tx_bytes": 1024
     }
@@ -281,6 +283,7 @@ CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
 | `last_run.finished_epoch` | Unix timestamp for staleness detection |
 | `jobs` | Per-job metrics from the most recent execution |
 | `jobs.*.elapsed_seconds` | Job duration |
+| `jobs.*.finished_epoch` | Unix timestamp of when the job finished; jobs run one after another, so each has its own |
 | `jobs.*.rx_bytes` / `tx_bytes` | Network I/O (Linux only) |
 
 **Prometheus staleness alert:**

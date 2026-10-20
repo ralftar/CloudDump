@@ -5,6 +5,7 @@ import logging
 import os
 import pathlib
 import sys
+import time
 from datetime import datetime, timezone
 from unittest.mock import patch
 import urllib.error
@@ -1067,11 +1068,13 @@ def test_update_last_run_populates_state():
 def test_update_job_metric():
     old = _state["jobs"].copy()
     try:
+        before = int(time.time())
         update_job_metric("test-pg", "pgsql", "success", 134, rx=1024000, tx=512)
         m = _state["jobs"]["test-pg"]
         assert m["type"] == "pgsql"
         assert m["status"] == "success"
         assert m["elapsed_seconds"] == 134
+        assert before <= m["finished_epoch"] <= int(time.time())
         assert m["rx_bytes"] == 1024000
         assert m["tx_bytes"] == 512
     finally:
