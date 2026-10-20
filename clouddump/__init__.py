@@ -6,6 +6,7 @@ import json as _json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -282,7 +283,27 @@ def run_cmd(cmd, env=None, stdout=None, stderr=None, logfile_path=None):
     if reader:
         reader.join(timeout=5)
     child_proc = None
-    return proc.returncode
+    return _exit_code(cmd, proc.returncode)
+
+
+def _exit_code(cmd, returncode):
+    """Return *returncode* with a death by signal as 128 + its number.
+
+    Popen gives a process ended by a signal a negative return code (-9 for
+    SIGKILL). Callers combine exit codes with max() and test them with > 0,
+    so a negative code would read as success: an OOM-killed tool must fail
+    its target like any other. 128 + N is the shell's convention.
+    """
+    if returncode >= 0:
+        return returncode
+    signum = -returncode
+    try:
+        name = signal.Signals(signum).name
+    except ValueError:
+        name = f"signal {signum}"
+    # SIGKILL from outside the job is most often the kernel's OOM killer.
+    log.error("%s was killed by %s", os.path.basename(str(cmd[0])), name)
+    return 128 + signum
 
 
 _ALLOWED_BACKUP_PREFIXES = ("/backup", "/mnt", "/tmp")

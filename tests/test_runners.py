@@ -1580,6 +1580,22 @@ class TestJobDispatch:
         assert seen == []
         assert rc == 1
 
+    def test_target_killed_by_a_signal_fails_the_job(self, monkeypatch, _tmp_logfile):
+        """A negative code (Popen's death by signal) must not read as success."""
+        from clouddump.jobs import execute_job
+        from clouddump import jobs
+
+        a, b = {"id": "a"}, {"id": "b"}
+        monkeypatch.setattr(jobs, "_RUNNERS", {
+            "azstorage": ("blobstorages", lambda t, lf: -9 if t["id"] == "b" else 0),
+        })
+
+        rc, failed = execute_job(
+            {"type": "azstorage", "blobstorages": [a, b]}, _tmp_logfile)
+
+        assert rc != 0
+        assert failed == [b]
+
     def test_multiple_targets_all_succeed(self, monkeypatch, _tmp_logfile):
         from clouddump.jobs import execute_job
         from clouddump import jobs

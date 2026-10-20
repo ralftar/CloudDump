@@ -1258,3 +1258,26 @@ def test_send_email_starttls_passes_timeout():
     with patch("clouddump.email.smtplib.SMTP", _FakeSTARTTLS):
         send_email(_smtp_config(smtp_security="starttls", smtp_port=587), "subj", "body")
     assert _FakeSMTP.last.init_kwargs.get("timeout") == SMTP_TIMEOUT_SECONDS
+
+
+def test_exit_code_turns_a_signal_into_128_plus_its_number(caplog):
+    from clouddump import _exit_code
+
+    with caplog.at_level(logging.ERROR, logger="clouddump"):
+        assert _exit_code(["/usr/bin/azcopy", "sync"], -9) == 137
+    assert "azcopy was killed by" in caplog.text
+
+
+def test_exit_code_keeps_a_normal_exit():
+    from clouddump import _exit_code
+
+    assert _exit_code(["azcopy"], 0) == 0
+    assert _exit_code(["azcopy"], 1) == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_run_cmd_reports_a_killed_process_as_failed(tmp_path):
+    from clouddump import run_cmd
+
+    rc = run_cmd(["sh", "-c", "kill -9 $$"], logfile_path=str(tmp_path / "job.log"))
+    assert rc == 137

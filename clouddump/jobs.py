@@ -72,7 +72,9 @@ def execute_job(job, logfile_path, targets=None):
         r = runner(target, logfile_path)
         results.append((_target_label(target, job_type), r))
         if r != 0:
-            rc = max(rc, r)
+            # Any non-zero code fails the job, a negative one too: max()
+            # alone would keep 0 over it.
+            rc = max(rc, r if r > 0 else 1)
             failed.append(target)
 
     if len(results) > 1:
