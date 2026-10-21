@@ -35,7 +35,7 @@ _BAD_INFO_DELIMITERS = set('/#*?"<>|' + chr(92))
 # Kept in lockstep with config.schema.json by test_schema_matches_allowed_keys.
 ALLOWED_TOP_LEVEL_KEYS = {
     "host", "crontab", "jobs", "debug", "log_format",
-    "health_port", "health_log",
+    "health_port", "health_log", "heartbeat_url",
     "smtp_server", "smtp_port", "smtp_user", "smtp_pass", "smtp_security",
     "mail_from", "mail_to", "email_log_attached", "email_size_limit_mb",
 }
@@ -145,6 +145,13 @@ def validate_settings(config):
                 raise ValueError("must be 1-65535")
         except (ValueError, TypeError) as exc:
             log.error("Invalid health_port '%s': %s.", health_port, exc)
+            errors += 1
+
+    heartbeat_url = config.get("heartbeat_url")
+    if heartbeat_url is not None:
+        parsed = urllib.parse.urlparse(heartbeat_url) if isinstance(heartbeat_url, str) else None
+        if not parsed or parsed.scheme not in ("http", "https") or not parsed.netloc:
+            log.error("Setting 'heartbeat_url' must be an http(s) URL.")
             errors += 1
 
     size_limit = config.get("email_size_limit_mb")

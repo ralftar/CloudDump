@@ -32,6 +32,11 @@
       "default": false,
       "description": "Log health-check HTTP requests at DEBUG level."
     },
+    "heartbeat_url": {
+      "type": "string",
+      "pattern": "^https?://",
+      "description": "Dead-man-switch ping URL (Healthchecks.io protocol): pinged at /start when a run begins, and at the URL itself or /fail when it ends."
+    },
     "smtp_server": { "type": "string", "description": "SMTP server hostname." },
     "smtp_port": {
       "oneOf": [{ "type": "string" }, { "type": "integer" }],

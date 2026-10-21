@@ -1284,3 +1284,68 @@ def test_run_cmd_reports_a_killed_process_as_failed(tmp_path):
 
     rc = run_cmd(["sh", "-c", "kill -9 $$"], logfile_path=str(tmp_path / "job.log"))
     assert rc == 137
+
+
+# ── heartbeat ────────────────────────────────────────────────────────────────
+
+
+def _ping_server(status=200):
+    """A local endpoint that records each ping's path and body."""
+    import http.server
+    import threading
+
+    received = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            received.append((self.path, self.rfile.read(length).decode()))
+            self.send_response(status)
+            self.end_headers()
+
+        def log_message(self, *_):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/ping/abc", received
+
+
+@pytest.mark.parametrize("signal,path", [("start", "/ping/abc/start"), ("fail", "/ping/abc/fail"), ("", "/ping/abc")])
+def test_heartbeat_ping_paths(signal, path):
+    from clouddump.heartbeat import ping
+    server, url, received = _ping_server()
+    try:
+        assert ping(url, signal, "summary") is True
+        assert received == [(path, "summary")]
+    finally:
+        server.shutdown()
+
+
+def test_heartbeat_unset_url_sends_nothing():
+    from clouddump.heartbeat import ping
+    assert ping("", "start") is None
+    assert ping(None) is None
+
+
+def test_heartbeat_failure_is_logged_without_url(caplog):
+    from clouddump import heartbeat
+    server, url, received = _ping_server(status=500)
+    try:
+        with patch.object(heartbeat.time, "sleep"), caplog.at_level(logging.WARNING):
+            assert heartbeat.ping(url, "fail") is False
+        assert len(received) == heartbeat._ATTEMPTS
+        assert "500" in caplog.text
+        assert "/ping/abc" not in caplog.text
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.parametrize("val", ["https://hc-ping.com/abc", "http://10.0.0.1:8000/ping/x"])
+def test_validate_settings_valid_heartbeat_url(val):
+    assert validate_settings({"crontab": "0 3 * * *", "heartbeat_url": val}) == 0
+
+
+@pytest.mark.parametrize("val", ["hc-ping.com/abc", "ftp://x/y", "https://", 5])
+def test_validate_settings_bad_heartbeat_url(val):
+    assert validate_settings({"crontab": "0 3 * * *", "heartbeat_url": val}) >= 1

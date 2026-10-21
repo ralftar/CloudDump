@@ -71,8 +71,9 @@ A typical DR setup:
 2. **A backup tool** (Restic, Borg, Veeam, etc.) snapshots that copy
    with versioning and retention.
 3. **A dead-man switch** (e.g. [Healthchecks.io](https://healthchecks.io))
-   alerts you when expected emails *stop arriving* — a silent failure is
-   worse than a loud one.
+   that CloudDump pings around every run (`heartbeat_url`): it alerts you
+   when a run fails or *stops arriving* — a silent failure is worse than a
+   loud one.
 4. **Regular restore drills** — periodically verify that you can actually
    restore from the local copy.
 

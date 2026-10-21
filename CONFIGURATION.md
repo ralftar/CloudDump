@@ -50,6 +50,7 @@ All settings are top-level keys in `config.json`, alongside `jobs`.
 | `crontab` | **Yes** | Standard 5-field cron expression — schedule for running all jobs |
 | `health_port` | No | Port for the HTTP health endpoint (`1`–`65535`, default `8080`) |
 | `health_log` | No | Log health-check HTTP requests at DEBUG level (`true`/`false`, default `false`) |
+| `heartbeat_url` | No | Dead-man-switch ping URL in the [Healthchecks.io](https://healthchecks.io) protocol: `<url>/start` when a run begins, `<url>` when every job succeeded, `<url>/fail` otherwise, with a one-line summary as the body. The endpoint alerts when a run is late or fails, also when CloudDump, its host or its mail is down. Kept out of the startup log and email |
 
 
 

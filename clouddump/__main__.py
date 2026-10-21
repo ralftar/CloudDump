@@ -19,6 +19,7 @@ from clouddump.config import load_config, validate_settings, validate_jobs, veri
 from clouddump.cron import should_run
 from clouddump.email import send_email, send_job_report
 from clouddump.health import start_health_server, update_last_run, update_job_metric
+from clouddump.heartbeat import ping
 from clouddump.jobs import execute_job
 
 
@@ -232,6 +233,10 @@ def main():
 
     # Build a settings-only view (exclude jobs — logged separately)
     settings = {k: v for k, v in config.items() if k != "jobs"}
+    # The ping URL is the endpoint's credential; its field name is not one
+    # redact() knows.
+    if "heartbeat_url" in settings:
+        settings["heartbeat_url"] = "REDACTED"
     startup_config = redact(json.dumps(settings, indent=2, default=str))
     jobs_summary = redact(jobs_summary)
 
@@ -278,6 +283,7 @@ def main():
     # Main loop
     log.info("Starting main loop...")
     last_run_ts = 0
+    heartbeat_url = cfg(config, "heartbeat_url")
 
     while not clouddump.shutdown_requested:
         force_run = clouddump.run_now_requested
@@ -293,6 +299,8 @@ def main():
             run_start = datetime.now(timezone.utc)
             succeeded = 0
             failed = 0
+            failed_ids = []
+            ping(heartbeat_url, "start")
 
             for job in jobs:
                 if clouddump.shutdown_requested:
@@ -317,6 +325,7 @@ def main():
                     succeeded += 1
                 else:
                     failed += 1
+                    failed_ids.append(job_id)
 
             if not clouddump.shutdown_requested:
                 run_end = datetime.now(timezone.utc)
@@ -334,6 +343,10 @@ def main():
                     failed=failed,
                     total=len(jobs),
                 )
+                summary = f"{host}: {succeeded} succeeded, {failed} failed of {len(jobs)} in {run_elapsed}s"
+                if failed_ids:
+                    summary += "\nFailed: " + ", ".join(failed_ids)
+                ping(heartbeat_url, "fail" if failed else "", summary)
 
         if clouddump.shutdown_requested:
             log.info("Received shutdown signal, exiting gracefully...")
