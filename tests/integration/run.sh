@@ -151,7 +151,10 @@ echo ""
 echo "  Bundled tools (in Docker image):"
 check "github-backup installed"  docker exec "$CONTAINER" github-backup --help
 check "git installed"            docker exec "$CONTAINER" git --version
-check "azcopy installed"         docker exec "$CONTAINER" azcopy --version
+check "azcopy installed"         docker exec "$CONTAINER" azcopy --version --disable-telemetry
+# Flags are parsed before --help, so an azcopy without the opt-out fails here.
+check "azcopy sync telemetry off" docker exec "$CONTAINER" azcopy sync --disable-telemetry --help
+check "azcopy list telemetry off" docker exec "$CONTAINER" azcopy list --disable-telemetry --help
 check "pg_dump installed"        docker exec "$CONTAINER" pg_dump --version
 check "psql installed"           docker exec "$CONTAINER" psql --version
 

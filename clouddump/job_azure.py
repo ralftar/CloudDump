@@ -99,7 +99,10 @@ def run_az_sync(blobstorage, logfile_path):
     log.info("Syncing blobstorage '%s' → %s", container, destination,
              extra={"container": container, "source": source_stripped, "destination": destination})
 
-    cmd = ["azcopy", "sync", f"--delete-destination={'true' if delete else 'false'}"]
+    # azcopy 10.34+ sends usage telemetry to Microsoft by default, including
+    # storage account names; a backup run has no reason to report them.
+    cmd = ["azcopy", "sync", "--disable-telemetry",
+           f"--delete-destination={'true' if delete else 'false'}"]
     if clouddump.debug:
         # Azcopy log levels: DEBUG (detailed trace, firehose) | INFO (every
         # request/response — a line per blob) | WARNING | ERROR | NONE.
