@@ -901,6 +901,7 @@ def test_verify_az_container_ok(mock_run):
     cmd = mock_run.call_args[0][0]
     assert cmd[0] == "azcopy"
     assert cmd[1] == "list"
+    assert "--disable-telemetry" in cmd
     assert source in cmd
 
 

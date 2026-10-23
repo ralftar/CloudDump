@@ -439,7 +439,7 @@ def _verify_az_container(job, job_id, results):
         # blobs routinely need well over the 15s default. 150s is a practical
         # ceiling that still bounds startup.
         _run_verify(
-            ["azcopy", "list", source, "--output-level=quiet"],
+            ["azcopy", "list", source, "--output-level=quiet", "--disable-telemetry"],
             label, job_id, results, timeout=150,
         )
 
