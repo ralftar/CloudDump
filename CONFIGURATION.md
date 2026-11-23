@@ -291,7 +291,8 @@ via Proton Bridge.
   Bridge. Export it from Bridge's settings and mount it into the container.
 - `delete_destination`: mirror mode — propagate remote deletions to the local
   copy (default: `true`). The remote mailbox is never touched. Set to `false`
-  to keep messages locally after they are deleted on the server.
+  to keep messages locally after they are deleted on the server; a folder
+  deleted on the server is kept locally too, with a warning in the log.
 - `exclude`: IMAP folder names to skip (default: none).
 - `info_delimiter`: single character separating the flag suffix in Maildir
   filenames (default: `:`, the Maildir standard). See the note below.
