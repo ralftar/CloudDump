@@ -47,7 +47,7 @@ Restic, Borg, Veeam, tape, a RAID array in your basement — is up to you.
 - **Cron scheduling** — standard 5-field cron expressions (`0 3 * * *`, `*/15 * * * *`,
   `0 9-17 * * 1-5`, `0,30 * * * *`)
 - **Retry & timeout** — configurable per job (default: 3 attempts, 1-week timeout)
-- **Email reports** — success/failure notifications with log file attached
+- **Email reports** — HTML success/failure reports that lead with what failed and why, with the logs attached
   (SSL, STARTTLS, or plain SMTP)
 - **No special privileges** — runs as non-root, writes to `/backup` and `/mnt`
 - **Credential redaction** — passwords, keys, tokens, PEM keys, and connection strings
@@ -292,10 +292,15 @@ CloudDump exposes `GET /healthz` on port 8080 (configurable via `health_port`).
 time() - clouddump_last_run_finished > 48 * 3600
 ```
 
-### Email subjects
+### Emails
 
-CloudDump sends one startup email and one email per job run. Subject lines
-follow a fixed format so they're easy to filter on:
+CloudDump sends one startup email and one email per job run, as HTML with a
+plain-text alternative. A job report leads with the result of each target
+(account, server, ...) and the error lines from the logs, so what failed and
+why is in the message itself; the full logs are attached with
+`email_log_attached`.
+
+Subject lines follow a fixed format so they're easy to filter on:
 
 | Subject | When |
 |---------|------|
@@ -304,6 +309,9 @@ follow a fixed format so they're easy to filter on:
 | `[Success] CloudDump {host}: {job_id}` | Job succeeded on the first attempt |
 | `[Warning] CloudDump {host}: {job_id}` | Job succeeded, but only after one or more retries |
 | `[Failure] CloudDump {host}: {job_id}` | Job failed after all retry attempts |
+
+A job with more than one target adds how many failed to a failure:
+`[Failure] CloudDump {host}: {job_id} (1 of 2 failed)`.
 
 ## Contributing
 

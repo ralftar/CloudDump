@@ -1285,3 +1285,79 @@ def test_run_cmd_reports_a_killed_process_as_failed(tmp_path):
 
     rc = run_cmd(["sh", "-c", "kill -9 $$"], logfile_path=str(tmp_path / "job.log"))
     assert rc == 137
+
+
+# ── email: HTML reports ──────────────────────────────────────────────────────
+
+
+def _sent_message():
+    """The last message _FakeSMTP sent, parsed."""
+    import email as email_pkg
+    return email_pkg.message_from_string(_FakeSMTP.last.sent[-1][2])
+
+
+def _parts(msg, content_type):
+    return [p for p in msg.walk() if p.get_content_type() == content_type]
+
+
+def test_error_lines_dedupes_across_attempts():
+    from clouddump.report import error_lines
+    attempt = "[2026-11-25 02:35:29] Starting attempt\n[2026-11-25 02:35:33]   Error: box gone\n"
+    lines, more = error_lines([attempt, attempt.replace("02:35", "02:37")])
+    assert lines == ["Error: box gone"]
+    assert more == 0
+
+
+def test_job_report_leads_with_what_failed(tmp_path):
+    """Which target failed, and why, is in the message — not only in a log."""
+    from clouddump.email import send_job_report
+    log_file = tmp_path / "attempt.log"
+    log_file.write_text("[2026-11-25 02:35:33]   Error: far side box INBOX/Gone cannot be opened anymore.\n")
+    a, b = {"user": "a@x", "destination": "/d/a"}, {"user": "b@x", "destination": "/d/b"}
+    job = {"id": "imap-x", "type": "imap", "accounts": [a, b]}
+
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        send_job_report(_smtp_config(email_log_attached=True), "1.0.0", "host", job, 1, 0, 168,
+                        [str(log_file)], status="Failure", attempts_used=3, max_attempts=3,
+                        outcomes=[(a, "a@x", 1, 3), (b, "b@x", 0, 1)])
+
+    msg = _sent_message()
+    assert msg["Subject"] == "[Failure] CloudDump host: imap-x (1 of 2 failed)"
+    html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
+    text = _parts(msg, "text/plain")[0].get_payload(decode=True).decode("utf-8")
+    for body in (html, text):
+        assert "1 of 2 accounts failed after 3 attempts" in body
+        assert "INBOX/Gone cannot be opened anymore" in body
+    assert "FAIL  a@x -> /d/a  (attempt 3)" in text
+    logo = _parts(msg, "image/png")[0]
+    assert logo["Content-ID"] == "<logo>" and 'src="cid:logo"' in html
+    assert [p.get_filename() for p in msg.walk() if p.get_filename() and p.get_filename().endswith(".log")] \
+        == ["clouddump-imap-x-19700101-000000.log"]
+
+
+def test_job_report_success_shows_no_errors(tmp_path):
+    from clouddump.email import send_job_report
+    log_file = tmp_path / "attempt.log"
+    log_file.write_text("[2026-11-25 00:00:01] 0 errors, all good\n")
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        send_job_report(_smtp_config(), "1.0.0", "host", {"id": "pg", "type": "pgsql"}, 0, 0, 5,
+                        [str(log_file)], status="Success", attempts_used=1, max_attempts=3,
+                        outcomes=[({"host": "db"}, "db", 0, 1)])
+    msg = _sent_message()
+    html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
+    assert msg["Subject"] == "[Success] CloudDump host: pg"
+    assert "What went wrong" not in html
+    assert "Destination" not in html, "pgsql targets have no destination column"
+
+
+def test_startup_report_is_degraded_on_a_warning():
+    from clouddump.email import send_startup_report
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        result = send_startup_report(_smtp_config(crontab="0 0 * * *"), "1.0.0", "host", "{}", "- job",
+                                     ["OK: a:993 (job x)", "WARN: b:5432 — timed out (job y)"],
+                                     "- mbsync: isync 1.5.1")
+    msg = _sent_message()
+    assert result is True
+    assert msg["Subject"] == "[Degraded] CloudDump host"
+    html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
+    assert "1 of 2 endpoints unreachable" in html and "isync 1.5.1" in html
