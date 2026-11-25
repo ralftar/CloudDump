@@ -244,6 +244,9 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     its latest result and the attempt that produced it. The email leads with
     them and with the error lines from the logs, so what failed and why is in
     the message, not only in an attachment.
+
+    Returns the job's line in the run summary: a dict with ``job_id``,
+    ``job_type``, ``status``, ``headline``, ``elapsed`` and ``errors``.
     """
     email_log_attached = cfg(config, "email_log_attached", False)
     job_id = cfg(job, "id")
@@ -343,6 +346,54 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         subject += f" ({len(failed)} of {len(outcomes)} failed)"
     if send_email(config, subject, body, attachments, html) is False:
         log.error("Job report email for %s could not be sent.", job_id)
+    return {"job_id": job_id, "job_type": job_type, "status": status,
+            "headline": headline, "elapsed": elapsed,
+            "errors": errors + ([f"… and {more} more in the log"] if more else [])}
+
+
+def send_run_report(config, version, host, records, t_start, t_end):
+    """Send one email for the whole run: every job's result, and why any failed.
+
+    *records* are what send_job_report returned, one per job that ran.
+    """
+    failed = [r for r in records if r["status"] == "Failure"]
+    retried = [r for r in records if r["status"] == "Warning"]
+    total = len(records)
+    status = "Failure" if failed else "Warning" if retried else "Success"
+    if failed:
+        headline = f"{len(failed)} of {total} job{'s' if total != 1 else ''} failed"
+    else:
+        headline = f"{total} of {total} job{'s' if total != 1 else ''} OK"
+        if retried:
+            headline += f", {len(retried)} after a retry"
+    elapsed = _duration(t_end - t_start)
+    pills = {"Success": (True, "OK"), "Warning": (None, "RETRY"), "Failure": (False, "FAIL")}
+
+    sections = [report.section("Run", report.facts([
+        ("Started", _utc(t_start)), ("Finished", _utc(t_end)), ("Duration", elapsed)]))]
+    sections.append(report.section("Jobs", report.table(
+        ["", "Job", "Result", "Duration"],
+        [[report.badge(*pills[r["status"]]), escape(f"{r['job_id']} ({r['job_type']})"),
+          escape(r["headline"].rsplit(" · ", 1)[0]), escape(r["elapsed"])] for r in records])))
+    for r in failed + retried:
+        if r["errors"]:
+            title = f"{r['job_id']}: what went wrong" if r["status"] == "Failure" \
+                else f"{r['job_id']}: errors before the retry succeeded"
+            sections.append(report.section(title, report.pre("\n".join(r["errors"]), "error")))
+    sections.append(report.section("Details", report.note(
+        "Each job's own email has its targets, configuration and logs.")))
+    html = report.page(status, "Backup run", f"{headline} · {elapsed}", host, version, sections)
+
+    lines = [f"CloudDump {host}: backup run — {status}", f"{headline} · {elapsed}", "",
+             f"Started: {_utc(t_start)}", f"Finished: {_utc(t_end)}", "", "JOBS", ""]
+    lines += [f"{pills[r['status']][1]:<5}  {r['job_id']} ({r['job_type']}): {r['headline']}" for r in records]
+    for r in failed + retried:
+        if r["errors"]:
+            lines += ["", f"{r['job_id'].upper()}", ""] + r["errors"]
+    lines += ["", "----", f"CloudDump v{version}", report.REPO_URL, ""]
+
+    if send_email(config, f"[{status}] CloudDump {host}: {headline}", "\n".join(lines), html=html) is False:
+        log.error("Run summary email could not be sent.")
 
 
 def send_startup_report(config, version, host, startup_config, jobs_summary,
