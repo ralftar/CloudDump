@@ -249,7 +249,7 @@ def main():
 
     connectivity = verify_connectivity(jobs)
     result = send_startup_report(config, version, host, startup_config, jobs_summary,
-                                 connectivity, tool_versions)
+                                 connectivity, tool_versions, jobs)
     if result is True:
         log.info("Startup email sent.")
     elif result is None:

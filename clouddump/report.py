@@ -121,6 +121,35 @@ def pre(text, tone="neutral"):
             f'color:{_INK};white-space:pre-wrap;word-break:break-word">{escape(text)}</div>')
 
 
+def _scalar(value):
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return "—" if value in (None, "") else str(value)
+
+
+def config(value):
+    """A configuration value as tables: a dict as key/value rows, a list of
+    dicts (accounts, servers, ...) as one block each, other lists inline.
+    The value must already be redacted."""
+    if isinstance(value, dict):
+        rows = "".join(
+            f'<tr><td style="padding:4px 14px 4px 0;color:{_MUTED};white-space:nowrap;width:1%;'
+            f'vertical-align:top;font-family:{_MONO};font-size:12px">{escape(str(k))}</td>'
+            f'<td style="padding:4px 0;color:{_INK};font-size:13px;word-break:break-word">{config(v)}</td></tr>'
+            for k, v in value.items()
+        )
+        return f'<table role="presentation" cellpadding="0" cellspacing="0" width="100%">{rows}</table>'
+    if isinstance(value, list) and any(isinstance(v, dict) for v in value):
+        return "".join(
+            f'<div style="border-left:3px solid #cbd5e1;padding:2px 0 2px 12px;margin:4px 0 8px 0">'
+            f'{config(v)}</div>'
+            for v in value
+        )
+    if isinstance(value, list):
+        return escape(", ".join(_scalar(v) for v in value)) or "—"
+    return escape(_scalar(value))
+
+
 def note(text):
     return f'<div style="font-size:13px;color:{_MUTED}">{escape(text)}</div>'
 

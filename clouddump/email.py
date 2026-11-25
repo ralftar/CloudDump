@@ -222,6 +222,14 @@ def _utc(t):
     return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
+def _config_html(text):
+    """Redacted JSON as tables; as the text itself if redaction broke the JSON."""
+    try:
+        return report.config(json.loads(text))
+    except ValueError:
+        return report.pre(text)
+
+
 def _read_logs(paths):
     texts = []
     for path in paths:
@@ -300,7 +308,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
             [[report.badge(rc == 0), escape(label)]
              + ([escape(cfg(t, "destination"))] if dest else []) + [str(attempt)]
              for t, label, rc, attempt in outcomes])))
-    sections.append(report.section("Configuration", report.pre(format_job_config(job))))
+    sections.append(report.section("Configuration", _config_html(format_job_config(job))))
     sections.append(report.section("Logs", report.note(
         "The full log of each attempt is attached." if email_log_attached
         else "Set email_log_attached to true to get the logs attached.")))
@@ -397,7 +405,7 @@ def send_run_report(config, version, host, records, t_start, t_end):
 
 
 def send_startup_report(config, version, host, startup_config, jobs_summary,
-                        connectivity, tool_versions):
+                        connectivity, tool_versions, jobs=()):
     """Send the startup email: schedule, connectivity, jobs, tools, settings.
 
     *connectivity* is a list of ``OK: ...`` / ``WARN: ...`` lines; any WARN
@@ -419,10 +427,25 @@ def send_startup_report(config, version, host, startup_config, jobs_summary,
         [("Crontab", cfg(config, "crontab")), ("Version", f"v{version}")]))]
     if checks:
         sections.append(report.section("Connectivity", report.table(["", "Endpoint"], checks)))
-    sections.append(report.section("Jobs", report.pre(jobs_summary)))
+    if jobs:
+        from clouddump.config import JOB_COLLECTIONS
+        from clouddump.jobs import _target_label
+        rows = []
+        for job in jobs:
+            job_type = cfg(job, "type")
+            targets = cfg(job, JOB_COLLECTIONS.get(job_type, ""), [])
+            enabled = cfg(job, "enabled", True)
+            rows.append([
+                report.badge(True, "ON") if enabled else report.badge(None, "OFF"),
+                escape(cfg(job, "id")), escape(job_type),
+                "<br>".join(escape(redact(_target_label(t, job_type))) for t in targets) or "—",
+            ])
+        sections.append(report.section("Jobs", report.table(["", "Job", "Type", "Targets"], rows)))
+    else:
+        sections.append(report.section("Jobs", report.pre(jobs_summary)))
     if tools:
         sections.append(report.section("Tools", report.facts([(t[0], t[-1]) for t in tools])))
-    sections.append(report.section("Configuration", report.pre(startup_config)))
+    sections.append(report.section("Configuration", _config_html(startup_config)))
     html = report.page(status, "CloudDump started", headline, host, version, sections)
 
     connectivity_text = "\n".join(connectivity) if connectivity else "No endpoints to check."
