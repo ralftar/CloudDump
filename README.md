@@ -129,7 +129,7 @@ intentional — it keeps the image deterministic and avoids surprise
 breakage from mid-cycle package updates.
 
 The PostgreSQL client is pinned to a major version in the Dockerfile
-(`postgresql-client-18`). Unlike the other apt packages, it comes from
+(`postgresql-client-19`). Unlike the other apt packages, it comes from
 the PostgreSQL apt repo and does not auto-update with Debian base image
 bumps. A scheduled GitHub Action checks Docker Hub weekly for new major
 versions and opens a PR when one is available.
