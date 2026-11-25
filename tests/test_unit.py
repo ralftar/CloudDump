@@ -1400,3 +1400,17 @@ def test_run_report_all_ok():
     with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
         send_run_report(_smtp_config(), "1.0.0", "host", records, 0, 60)
     assert _sent_message()["Subject"] == "[Success] CloudDump host: 1 of 1 job OK"
+
+
+def test_configuration_is_tables_not_json_and_keeps_secrets_out():
+    from clouddump.email import send_startup_report
+    jobs = [{"id": "imap-x", "type": "imap", "accounts": [{"user": "a@x", "pass": "hunter2"}]},
+            {"id": "old", "type": "rsync", "enabled": False, "targets": [{"source": "u@h:/x/"}]}]
+    settings = json.dumps({"smtp_pass": "hunter2", "debug": False}, indent=2)
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        send_startup_report(_smtp_config(), "1.0.0", "host", redact(settings), "", [], "", jobs)
+    html = _parts(_sent_message(), "text/html")[0].get_payload(decode=True).decode("utf-8")
+    assert "hunter2" not in html
+    assert '"smtp_pass"' not in html, "configuration renders as rows, not JSON"
+    assert ">smtp_pass</td>" in html and ">no</td>" in html
+    assert ">imap-x</td>" in html and ">a@x</td>" in html and ">OFF</span>" in html
