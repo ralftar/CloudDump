@@ -294,8 +294,8 @@ time() - clouddump_last_run_finished > 48 * 3600
 
 ### Emails
 
-CloudDump sends one startup email and one email per job run, as HTML with a
-plain-text alternative. A job report leads with the result of each target
+CloudDump sends one startup email, one email per job, and one summary when
+the whole run is done, as HTML with a plain-text alternative. A job report leads with the result of each target
 (account, server, ...) and the error lines from the logs, so what failed and
 why is in the message itself; the full logs are attached with
 `email_log_attached`.
@@ -309,6 +309,8 @@ Subject lines follow a fixed format so they're easy to filter on:
 | `[Success] CloudDump {host}: {job_id}` | Job succeeded on the first attempt |
 | `[Warning] CloudDump {host}: {job_id}` | Job succeeded, but only after one or more retries |
 | `[Failure] CloudDump {host}: {job_id}` | Job failed after all retry attempts |
+| `[Success] CloudDump {host}: 7 of 7 jobs OK` | Run summary: every job succeeded (`[Warning]` if some only on a retry) |
+| `[Failure] CloudDump {host}: 1 of 7 jobs failed` | Run summary: one or more jobs failed; the summary shows why |
 
 A job with more than one target adds how many failed to a failure:
 `[Failure] CloudDump {host}: {job_id} (1 of 2 failed)`.

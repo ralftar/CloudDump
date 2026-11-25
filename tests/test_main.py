@@ -62,9 +62,9 @@ def _run(job, exec_results, reports, sleepless=True):
     with patch("clouddump.__main__.execute_job", fake_execute):
         if sleepless:
             with patch("clouddump.__main__.time.sleep", lambda _: None):
-                rc = _run_one_job(job, {}, "9.9.9", "testhost")
+                rc, _ = _run_one_job(job, {}, "9.9.9", "testhost")
         else:
-            rc = _run_one_job(job, {}, "9.9.9", "testhost")
+            rc, _ = _run_one_job(job, {}, "9.9.9", "testhost")
     return rc, calls
 
 
@@ -123,7 +123,7 @@ def test_retry_receives_only_the_failed_targets(reports):
         return responses[len(seen) - 1]
 
     with patch("clouddump.__main__.execute_job", fake_execute),          patch("clouddump.__main__.time.sleep", lambda _: None):
-        rc = _run_one_job(_job(retries=3), {}, "9.9.9", "testhost")
+        rc, _ = _run_one_job(_job(retries=3), {}, "9.9.9", "testhost")
 
     assert rc == 0
     assert seen == [None, [b]], "first attempt runs everything, second only 'b'"

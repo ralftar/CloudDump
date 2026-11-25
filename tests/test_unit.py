@@ -1361,3 +1361,42 @@ def test_startup_report_is_degraded_on_a_warning():
     assert msg["Subject"] == "[Degraded] CloudDump host"
     html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
     assert "1 of 2 endpoints unreachable" in html and "isync 1.5.1" in html
+
+
+def test_job_report_returns_its_line_for_the_run_summary(tmp_path):
+    from clouddump.email import send_job_report
+    log_file = tmp_path / "attempt.log"
+    log_file.write_text("[2026-11-25 02:35:33]   Error: box gone\n")
+    record = send_job_report({}, "1.0.0", "host", {"id": "imap-x", "type": "imap"}, 1, 0, 168,
+                             [str(log_file)], status="Failure", attempts_used=3, max_attempts=3,
+                             outcomes=[({}, "a@x", 1, 3)])
+    assert record == {"job_id": "imap-x", "job_type": "imap", "status": "Failure",
+                      "headline": "The account failed after 3 attempts · 2m 48s",
+                      "elapsed": "2m 48s", "errors": ["Error: box gone"]}
+
+
+def test_run_report_counts_jobs_and_shows_why_one_failed():
+    from clouddump.email import send_run_report
+
+    def rec(job_id, status, errors=()):
+        return {"job_id": job_id, "job_type": "pgsql", "status": status,
+                "headline": "x · 1s", "elapsed": "1s", "errors": list(errors)}
+
+    records = [rec("a", "Success"), rec("b", "Warning", ["timeout expired"]),
+               rec("c", "Failure", ["Error: box gone"])]
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        send_run_report(_smtp_config(), "1.0.0", "host", records, 0, 60)
+    msg = _sent_message()
+    assert msg["Subject"] == "[Failure] CloudDump host: 1 of 3 jobs failed"
+    html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
+    assert "c: what went wrong" in html and "Error: box gone" in html
+    assert "b: errors before the retry succeeded" in html and "RETRY" in html
+
+
+def test_run_report_all_ok():
+    from clouddump.email import send_run_report
+    records = [{"job_id": "a", "job_type": "pgsql", "status": "Success",
+                "headline": "Backed up · 1s", "elapsed": "1s", "errors": []}]
+    with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
+        send_run_report(_smtp_config(), "1.0.0", "host", records, 0, 60)
+    assert _sent_message()["Subject"] == "[Success] CloudDump host: 1 of 1 job OK"

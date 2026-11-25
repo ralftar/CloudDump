@@ -58,9 +58,12 @@ def error_lines(texts, limit=15):
     return seen[:limit], max(0, len(seen) - limit)
 
 
-def badge(ok):
-    """A small OK/FAIL pill."""
-    color, text = ("#15803d", "OK") if ok else ("#b91c1c", "FAIL")
+def badge(ok, text=None):
+    """A small pill: green OK, red FAIL, or amber *text* when *ok* is None."""
+    if ok is None:
+        color = STATUS_COLORS["Warning"]
+    else:
+        color, text = ("#15803d", text or "OK") if ok else ("#b91c1c", text or "FAIL")
     return (f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;'
             f'background:{color};color:#ffffff;font-size:11px;font-weight:700;'
             f'letter-spacing:.04em">{text}</span>')

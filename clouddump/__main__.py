@@ -17,7 +17,7 @@ import clouddump
 from clouddump import cfg, net_bytes, redact, log, set_log_format, set_debug, _safe_remove, _LOG_DATEFMT
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
-from clouddump.email import send_job_report, send_startup_report
+from clouddump.email import send_job_report, send_run_report, send_startup_report
 from clouddump.health import start_health_server, update_last_run, update_job_metric
 from clouddump.jobs import execute_job
 
@@ -78,7 +78,8 @@ def _tool_versions():
 def _run_one_job(job, config, version, host):
     """Run one job to completion: retries, per-attempt logging, report, cleanup.
 
-    Returns the job's final exit code. The caller owns the succeeded/failed
+    Returns the job's final exit code and its line for the run summary
+    (send_job_report's record). The caller owns the succeeded/failed
     tally and the run-level summary; everything scoped to a single job lives
     here, so it can be exercised without driving the whole main loop.
     """
@@ -181,7 +182,7 @@ def _run_one_job(job, config, version, host):
         else:
             job_status = "Failure"
 
-        send_job_report(config, version, host, job, result,
+        record = send_job_report(config, version, host, job, result,
                         job_t_start, job_t_end, logfile_paths,
                         status=job_status, attempts_used=final_attempt,
                         max_attempts=max_attempts, outcomes=list(outcomes.values()))
@@ -190,7 +191,7 @@ def _run_one_job(job, config, version, host):
             for sidecar in glob.glob(f"{lf}.*.log"):
                 _safe_remove(sidecar)
             _safe_remove(lf)
-        return result
+        return result, record
     finally:
         clouddump.current_job = ""
 
@@ -281,6 +282,7 @@ def main():
             run_start = datetime.now(timezone.utc)
             succeeded = 0
             failed = 0
+            records = []
 
             for job in jobs:
                 if clouddump.shutdown_requested:
@@ -300,7 +302,9 @@ def main():
                              extra={"job": job_id, "job_type": job_type})
                     continue
 
-                result = _run_one_job(job, config, version, host)
+                result, record = _run_one_job(job, config, version, host)
+                if record:
+                    records.append(record)
                 if result == 0:
                     succeeded += 1
                 else:
@@ -315,6 +319,9 @@ def main():
                     log.warning("Jobs completed with failures", extra=run_extras)
                 else:
                     log.info("All jobs completed", extra=run_extras)
+                if records:
+                    send_run_report(config, version, host, records,
+                                    run_start.timestamp(), run_end.timestamp())
                 update_last_run(
                     started=run_start,
                     finished=run_end,
