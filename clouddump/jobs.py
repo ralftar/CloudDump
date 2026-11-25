@@ -38,7 +38,7 @@ def _target_label(target, job_type):
 
 
 def execute_job(job, logfile_path, targets=None):
-    """Dispatch a job to its runner. Returns ``(exit_code, failed_targets)``.
+    """Dispatch a job to its runner. Returns ``(exit_code, failed_targets, results)``.
 
     Each job type may contain multiple targets (blobstorages, servers, ...).
     All are attempted even if earlier ones fail; the worst exit code wins.
@@ -48,29 +48,30 @@ def execute_job(job, logfile_path, targets=None):
     succeeded — re-syncing a healthy target is wasted work at best, and for a
     pgsql server it is a second full dump.
 
-    The returned list holds the target dicts that failed, ready to be passed back
-    in as *targets* on the next attempt.
+    *failed_targets* holds the target dicts that failed, ready to be passed back
+    in as *targets* on the next attempt. *results* has one ``(target, label,
+    exit_code)`` per target run, for the job report.
     """
     job_type = cfg(job, "type")
 
     entry = _RUNNERS.get(job_type)
     if entry is None:
         log.error("Unknown job type %s.", job_type)
-        return 1, []
+        return 1, [], []
 
     key, runner = entry
     if targets is None:
         targets = cfg(job, key, [])
     if not targets:
         log.error("No %s configured.", key)
-        return 1, []
+        return 1, [], []
 
     rc = 0
     results = []
     failed = []
     for target in targets:
         r = runner(target, logfile_path)
-        results.append((_target_label(target, job_type), r))
+        results.append((target, _target_label(target, job_type), r))
         if r != 0:
             # Any non-zero code fails the job, a negative one too: max()
             # alone would keep 0 over it.
@@ -78,7 +79,7 @@ def execute_job(job, logfile_path, targets=None):
             failed.append(target)
 
     if len(results) > 1:
-        lines = [f"  {'OK  ' if r == 0 else 'FAIL'}  {label}" for label, r in results]
-        ok = sum(1 for _, r in results if r == 0)
+        lines = [f"  {'OK  ' if r == 0 else 'FAIL'}  {label}" for _, label, r in results]
+        ok = sum(1 for _, _, r in results if r == 0)
         log.info("Job summary (%d/%d OK):\n%s", ok, len(results), "\n".join(lines))
-    return rc, failed
+    return rc, failed, results

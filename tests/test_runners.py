@@ -1470,14 +1470,14 @@ class TestJobDispatch:
     def test_unknown_type_returns_1(self, _tmp_logfile):
         from clouddump.jobs import execute_job
 
-        rc, failed = execute_job({"type": "nonexistent"}, _tmp_logfile)
+        rc, failed, _ = execute_job({"type": "nonexistent"}, _tmp_logfile)
         assert rc == 1
         assert failed == []
 
     def test_empty_targets_returns_1(self, _tmp_logfile):
         from clouddump.jobs import execute_job
 
-        rc, failed = execute_job({"type": "azstorage", "blobstorages": []}, _tmp_logfile)
+        rc, failed, _ = execute_job({"type": "azstorage", "blobstorages": []}, _tmp_logfile)
         assert rc == 1
         assert failed == []
 
@@ -1491,7 +1491,7 @@ class TestJobDispatch:
         })
 
         job = {"type": "azstorage", "blobstorages": [{"source": "https://b"}]}
-        rc, _ = execute_job(job, _tmp_logfile)
+        rc, _, _ = execute_job(job, _tmp_logfile)
 
         assert rc == 0
         assert called_with == [{"source": "https://b"}]
@@ -1506,7 +1506,7 @@ class TestJobDispatch:
         })
 
         job = {"type": "github", "organizations": [{"name": "org1"}]}
-        rc, _ = execute_job(job, _tmp_logfile)
+        rc, _, _ = execute_job(job, _tmp_logfile)
 
         assert rc == 0
         assert called_with == [{"name": "org1"}]
@@ -1528,7 +1528,7 @@ class TestJobDispatch:
         })
 
         job = {"type": "azstorage", "blobstorages": [{"id": "a"}, {"id": "b"}]}
-        rc, _ = execute_job(job, _tmp_logfile)
+        rc, _, _ = execute_job(job, _tmp_logfile)
 
         assert rc == 1  # worst exit code
         assert called == ["a", "b"]  # both attempted
@@ -1543,11 +1543,12 @@ class TestJobDispatch:
             "azstorage": ("blobstorages", lambda t, lf: 0 if t["id"] == "b" else 1),
         })
 
-        rc, failed = execute_job(
+        rc, failed, results = execute_job(
             {"type": "azstorage", "blobstorages": [a, b, c]}, _tmp_logfile)
 
         assert rc == 1
         assert failed == [a, c], "the succeeding target must not be retried"
+        assert [(t, r) for t, _, r in results] == [(a, 1), (b, 0), (c, 1)],             "every target's result goes to the report"
 
     def test_targets_override_replaces_the_job_list(self, monkeypatch, _tmp_logfile):
         """A retry runs only the subset it is given."""
@@ -1560,7 +1561,7 @@ class TestJobDispatch:
             "azstorage": ("blobstorages", lambda t, lf: (seen.append(t["id"]), 0)[1]),
         })
 
-        rc, failed = execute_job(
+        rc, failed, _ = execute_job(
             {"type": "azstorage", "blobstorages": [a, b, c]}, _tmp_logfile, targets=[c])
 
         assert rc == 0
@@ -1577,7 +1578,7 @@ class TestJobDispatch:
             "azstorage": ("blobstorages", lambda t, lf: (seen.append(t), 0)[1]),
         })
 
-        rc, _ = execute_job(
+        rc, _, _ = execute_job(
             {"type": "azstorage", "blobstorages": [{"id": "a"}]}, _tmp_logfile, targets=[])
 
         assert seen == []
@@ -1593,7 +1594,7 @@ class TestJobDispatch:
             "azstorage": ("blobstorages", lambda t, lf: -9 if t["id"] == "b" else 0),
         })
 
-        rc, failed = execute_job(
+        rc, failed, _ = execute_job(
             {"type": "azstorage", "blobstorages": [a, b]}, _tmp_logfile)
 
         assert rc != 0
@@ -1608,5 +1609,5 @@ class TestJobDispatch:
         })
 
         job = {"type": "azstorage", "blobstorages": [{"id": "a"}, {"id": "b"}]}
-        rc, _ = execute_job(job, _tmp_logfile)
+        rc, _, _ = execute_job(job, _tmp_logfile)
         assert rc == 0

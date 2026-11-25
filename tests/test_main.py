@@ -54,10 +54,10 @@ def _run(job, exec_results, reports, sleepless=True):
         r = next(seq)
         if isinstance(r, Exception):
             raise r
-        # execute_job returns (exit_code, failed_targets); the retry loop feeds
+        # execute_job returns (exit_code, failed_targets, results); the retry loop feeds
         # that list back in. A non-empty list here would make the fake look like
         # a partial failure, which these tests do not model.
-        return r, []
+        return r, [], []
 
     with patch("clouddump.__main__.execute_job", fake_execute):
         if sleepless:
@@ -116,7 +116,7 @@ def test_retry_receives_only_the_failed_targets(reports):
     """The whole point: a healthy target is not re-run on the next attempt."""
     b = {"id": "b"}
     seen = []
-    responses = [(1, [b]), (0, [])]
+    responses = [(1, [b], []), (0, [], [])]
 
     def fake_execute(job, logfile_path, targets=None):
         seen.append(targets)
@@ -134,7 +134,7 @@ def test_first_attempt_passes_none_so_the_job_list_is_used(reports):
 
     def fake_execute(job, logfile_path, targets=None):
         seen.append(targets)
-        return 0, []
+        return 0, [], []
 
     with patch("clouddump.__main__.execute_job", fake_execute):
         _run_one_job(_job(), {}, "9.9.9", "testhost")
@@ -151,10 +151,10 @@ def test_crash_resets_to_the_full_target_list(reports):
         seen.append(targets)
         calls["n"] += 1
         if calls["n"] == 1:
-            return 1, [{"id": "b"}]
+            return 1, [{"id": "b"}], []
         if calls["n"] == 2:
             raise RuntimeError("boom")
-        return 0, []
+        return 0, [], []
 
     with patch("clouddump.__main__.execute_job", fake_execute),          patch("clouddump.__main__.time.sleep", lambda _: None):
         _run_one_job(_job(retries=3), {}, "9.9.9", "testhost")
@@ -164,7 +164,7 @@ def test_crash_resets_to_the_full_target_list(reports):
 
 def test_logfile_count_still_matches_attempts(reports):
     """Retrying a subset must not change how many logs the report carries."""
-    responses = [(1, [{"id": "b"}]), (1, [{"id": "b"}]), (0, [])]
+    responses = [(1, [{"id": "b"}], []), (1, [{"id": "b"}], []), (0, [], [])]
     n = {"i": 0}
 
     def fake_execute(job, logfile_path, targets=None):
@@ -225,7 +225,7 @@ def test_current_job_is_set_during_and_cleared_after(reports):
 
     def fake_execute(j, logfile_path, targets=None):
         seen.append(clouddump.current_job)
-        return 0, []
+        return 0, [], []
 
     with patch("clouddump.__main__.execute_job", fake_execute):
         _run_one_job(_job(), {}, "9.9.9", "testhost")
@@ -238,7 +238,7 @@ def test_current_job_cleared_even_when_reporting_raises():
     def boom(*a, **k):
         raise RuntimeError("smtp exploded")
 
-    with patch("clouddump.__main__.execute_job", lambda j, p, t=None: (0, [])), \
+    with patch("clouddump.__main__.execute_job", lambda j, p, t=None: (0, [], [])), \
          patch("clouddump.__main__.send_job_report", boom):
         with pytest.raises(RuntimeError):
             _run_one_job(_job(), {}, "9.9.9", "testhost")
@@ -251,7 +251,7 @@ def test_deadline_is_set_per_attempt_and_cleared(reports):
 
     def fake_execute(j, logfile_path, targets=None):
         seen.append(clouddump.job_deadline)
-        return 0, []
+        return 0, [], []
 
     with patch("clouddump.__main__.execute_job", fake_execute):
         _run_one_job(_job(timeout=1234), {}, "9.9.9", "testhost")

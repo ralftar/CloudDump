@@ -17,7 +17,7 @@ import clouddump
 from clouddump import cfg, net_bytes, redact, log, set_log_format, set_debug, _safe_remove, _LOG_DATEFMT
 from clouddump.config import load_config, validate_settings, validate_jobs, verify_connectivity
 from clouddump.cron import should_run
-from clouddump.email import send_email, send_job_report
+from clouddump.email import send_job_report, send_startup_report
 from clouddump.health import start_health_server, update_last_run, update_job_metric
 from clouddump.jobs import execute_job
 
@@ -101,6 +101,9 @@ def _run_one_job(job, config, version, host):
         # only what failed, so a healthy target is not re-synced — and for a
         # pgsql server, not dumped a second time.
         pending = None
+        # Each target's latest result, keyed by the target dict itself (a
+        # retry passes the same dicts back), in the job's own order.
+        outcomes = {}
 
         for attempt in range(1, max_attempts + 1):
             final_attempt = attempt
@@ -117,8 +120,10 @@ def _run_one_job(job, config, version, host):
             net_before = net_bytes()
 
             try:
-                result, pending = execute_job(job, logfile_path, pending)
+                result, pending, results = execute_job(job, logfile_path, pending)
                 t_end = time.time()
+                for target, label, rc in results:
+                    outcomes[id(target)] = (target, label, rc, attempt)
             except Exception:
                 t_end = time.time()
                 tb = traceback.format_exc()
@@ -179,7 +184,7 @@ def _run_one_job(job, config, version, host):
         send_job_report(config, version, host, job, result,
                         job_t_start, job_t_end, logfile_paths,
                         status=job_status, attempts_used=final_attempt,
-                        max_attempts=max_attempts)
+                        max_attempts=max_attempts, outcomes=list(outcomes.values()))
 
         for lf in logfile_paths:
             for sidecar in glob.glob(f"{lf}.*.log"):
@@ -242,25 +247,8 @@ def main():
     log.info("Jobs:\n%s", jobs_summary)
 
     connectivity = verify_connectivity(jobs)
-    connectivity_text = "\n".join(connectivity) if connectivity else "No endpoints to check."
-
-    startup_body = (
-        f"CloudDump at {host} has started!\n\n"
-        f"CONFIGURATION\n\n"
-        f"{startup_config}\n\n"
-        f"JOBS\n\n"
-        f"{jobs_summary}\n\n"
-        f"CONNECTIVITY\n\n"
-        f"{connectivity_text}\n\n"
-        f"TOOLS\n\n"
-        f"{tool_versions}\n\n"
-        f"----\n"
-        f"CloudDump v{version}\n"
-        f"https://github.com/ralftar/CloudDump"
-    )
-    has_warnings = any(line.startswith("WARN:") for line in connectivity)
-    subject_tag = "Degraded" if has_warnings else "Started"
-    result = send_email(config, f"[{subject_tag}] CloudDump {host}", startup_body)
+    result = send_startup_report(config, version, host, startup_config, jobs_summary,
+                                 connectivity, tool_versions)
     if result is True:
         log.info("Startup email sent.")
     elif result is None:
