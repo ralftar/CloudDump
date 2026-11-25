@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  # Dispatched by check-azcopy on its PR branch: PRs opened with GITHUB_TOKEN
+  # Dispatched by check-azcopy and check-postgresql on their PR branches: PRs opened with GITHUB_TOKEN
   # never trigger pull_request workflows, but workflow_dispatch is exempt.
   workflow_dispatch:
     inputs:

@@ -22,7 +22,7 @@ RUN apt-get update && \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-    postgresql-client-18 \
+    postgresql-client-19 \
     rsync \
     isync \
     procps \

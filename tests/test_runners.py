@@ -1248,7 +1248,9 @@ class TestImapRunner:
         config = calls[0]["config"]
         assert "PullNew" in config
         assert "Expunge Near" not in config
-        assert "Remove Near" not in config
+        # A folder deleted on the server must not fail the run; mbsync keeps
+        # a local folder that still holds messages
+        assert "Remove Near" in config
         # 'ReNew' was renamed to 'Upgrade' in isync 1.5.0 — the old keyword
         # would be rejected by the parser, breaking keep-mode entirely.
         assert "PullReNew" not in config
