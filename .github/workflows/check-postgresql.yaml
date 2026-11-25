@@ -2,12 +2,13 @@ name: Check PostgreSQL client
 
 on:
   schedule:
-    - cron: "0 7 * * 1"
+    - cron: "0 7 * * 1" # weekly, Monday 07:00 UTC
   workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   check:
@@ -15,45 +16,60 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check for new PostgreSQL major version
+      - name: Bump the PostgreSQL client if a newer major exists
+        id: bump
+        run: |
+          current=$(grep -oP 'postgresql-client-\K\d+' Dockerfile)
+          latest=$(curl -fsS 'https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&ordering=last_updated' \
+            | python3 -c "import json, sys; print(max(int(t['name']) for t in json.load(sys.stdin)['results'] if t['name'].isdigit()))")
+          echo "current=$current latest=$latest"
+
+          if [ "$latest" -le "$current" ]; then
+            echo "Already on the latest PostgreSQL client ($current)."
+            exit 0
+          fi
+
+          # Only bump once pgdg ships the client for the image's Debian release.
+          codename=$(docker run --rm "$(grep -oP '^FROM \K\S+' Dockerfile)" sh -c '. /etc/os-release && echo $VERSION_CODENAME')
+          if ! curl -fsS "https://apt.postgresql.org/pub/repos/apt/dists/${codename}-pgdg/main/binary-amd64/Packages.gz" \
+              | gunzip | grep -qx "Package: postgresql-client-$latest"; then
+            echo "postgresql-client-$latest not in ${codename}-pgdg yet; skipping."
+            exit 0
+          fi
+
+          sed -i "s/postgresql-client-$current/postgresql-client-$latest/" Dockerfile
+          {
+            echo "current=$current"
+            echo "latest=$latest"
+            echo "changed=true"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open PR
+        id: cpr
+        if: steps.bump.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automated/postgresql-client-update
+          delete-branch: true
+          commit-message: "chore: bump the PostgreSQL client to ${{ steps.bump.outputs.latest }}"
+          title: "chore: bump the PostgreSQL client ${{ steps.bump.outputs.current }} → ${{ steps.bump.outputs.latest }}"
+          labels: dependencies
+          body: |
+            PostgreSQL ${{ steps.bump.outputs.latest }} is out; the image has client ${{ steps.bump.outputs.current }}.
+
+            pg_dump refuses a server newer than itself, and dumps older servers fine,
+            so the newest client is the one that dumps them all. The integration tests
+            on this PR run it against the latest `postgres` image.
+
+            Opened automatically by the `check-postgresql` workflow.
+
+      # PRs opened with GITHUB_TOKEN don't trigger pull_request workflows,
+      # so dispatch CI explicitly on the PR branch.
+      - name: Trigger CI on the PR branch
+        if: steps.bump.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          current=$(grep -oP 'postgresql-client-\K\d+' Dockerfile)
-          latest=$(curl -s 'https://registry.hub.docker.com/v2/repositories/library/postgres/tags/?page_size=100&ordering=last_updated' \
-            | python3 -c "
-          import json, sys
-          tags = json.load(sys.stdin)['results']
-          majors = set()
-          for t in tags:
-              name = t['name']
-              if name.isdigit():
-                  majors.add(int(name))
-          print(max(majors))
-          ")
-
-          echo "Current: $current, Latest: $latest"
-
-          if [ "$latest" -le "$current" ]; then
-            echo "Up to date."
-            exit 0
-          fi
-
-          branch="deps/postgresql-client-$latest"
-          if gh pr list --state open --head "$branch" --json number --jq 'length' | grep -q '^[1-9]'; then
-            echo "PR already exists."
-            exit 0
-          fi
-
-          git checkout -b "$branch"
-          sed -i "s/postgresql-client-$current/postgresql-client-$latest/" Dockerfile
-          git add Dockerfile
-          git commit -m "Update PostgreSQL client to $latest"
-          git push -u origin "$branch"
-
-          gh pr create \
-            --title "Update PostgreSQL client to $latest" \
-            --label dependencies \
-            --body "PostgreSQL $latest is available (currently on $current).
-
-          Verify that your PostgreSQL servers are compatible with client version $latest before merging."
+          gh workflow run ci.yaml --ref automated/postgresql-client-update \
+            -f pr_number="${{ steps.cpr.outputs.pull-request-number }}"
