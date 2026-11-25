@@ -64,7 +64,7 @@ def badge(ok, text=None):
         color = STATUS_COLORS["Warning"]
     else:
         color, text = ("#15803d", text or "OK") if ok else ("#b91c1c", text or "FAIL")
-    return (f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;'
+    return (f'<span style="display:inline-block;white-space:nowrap;padding:2px 8px;border-radius:10px;'
             f'background:{color};color:#ffffff;font-size:11px;font-weight:700;'
             f'letter-spacing:.04em">{text}</span>')
 
@@ -88,6 +88,12 @@ def facts(rows):
     return f'<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px">{cells}</table>'
 
 
+def _fit(cell):
+    # A pill never wraps, and its column takes only the room the pill needs;
+    # other text may break anywhere, so a long path cannot widen the card.
+    return "white-space:nowrap;width:1%" if cell.startswith("<span") else "word-break:break-word"
+
+
 def table(header, rows):
     """A ruled table. Cells are raw HTML: escape text before passing it in."""
     th = "".join(
@@ -98,7 +104,7 @@ def table(header, rows):
     body = "".join(
         "<tr>" + "".join(
             f'<td style="padding:8px 12px 8px 0;font-size:13px;color:{_INK};'
-            f'border-bottom:1px solid {_LINE};vertical-align:top;word-break:break-word">{c}</td>'
+            f'border-bottom:1px solid {_LINE};vertical-align:top;{_fit(c)}">{c}</td>'
             for c in row
         ) + "</tr>"
         for row in rows
