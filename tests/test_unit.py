@@ -916,6 +916,59 @@ def test_verify_connectivity_db_connection_failure(mock_run):
 
 
 
+_KOPIA_REPO = {"source": "/data", "endpoint": "s3.example.com", "bucket": "backups",
+               "prefix": "host1/", "access_key": "AKIA", "secret_key": "sk-x", "password": "pw-x"}
+
+
+@pytest.fixture
+def _kopia_state(monkeypatch, tmp_path):
+    from clouddump import job_kopia
+    monkeypatch.setattr(job_kopia, "_STATE_ROOT", str(tmp_path / "state"))
+
+
+def test_kopia_target_label_names_endpoint_bucket_and_prefix():
+    from clouddump.jobs import _target_label
+    assert _target_label(_KOPIA_REPO, "kopia") == "s3.example.com/backups/host1"
+    assert _target_label({**_KOPIA_REPO, "prefix": ""}, "kopia") == "s3.example.com/backups"
+
+
+@pytest.mark.usefixtures("_kopia_state")
+@patch("subprocess.run")
+def test_verify_kopia_ok(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+    results = verify_connectivity([_job(type="kopia", repositories=[_KOPIA_REPO])])
+    assert results == ["OK: Kopia repository s3.example.com/backups/host1 (job backup1)"]
+    cmd = mock_run.call_args[0][0]
+    assert cmd[:3] == ["kopia", "repository", "connect"]
+    assert "--readonly" in cmd
+    # Secrets go through the environment, never the command line.
+    assert not any(secret in a for a in cmd for secret in ("AKIA", "sk-x", "pw-x"))
+    assert mock_run.call_args[1]["env"]["KOPIA_PASSWORD"] == "pw-x"
+
+
+@pytest.mark.usefixtures("_kopia_state")
+@patch("subprocess.run")
+def test_verify_kopia_without_repository_is_ok(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "ERROR repository not initialized in the provided storage\n"
+    results = verify_connectivity([_job(type="kopia", repositories=[_KOPIA_REPO])])
+    assert len(results) == 1 and results[0].startswith("OK:")
+
+
+@pytest.mark.usefixtures("_kopia_state")
+@patch("subprocess.run")
+def test_verify_kopia_wrong_password_warns(mock_run):
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "ERROR error connecting to repository: invalid repository password\n"
+    results = verify_connectivity([_job(type="kopia", repositories=[_KOPIA_REPO])])
+    assert len(results) == 1 and results[0].startswith("WARN:")
+    assert "invalid repository password" in results[0]
+
+
 @patch("subprocess.run")
 def test_verify_az_container_ok(mock_run):
     mock_run.return_value.returncode = 0

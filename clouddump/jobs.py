@@ -6,7 +6,7 @@ from clouddump.job_pgsql import run_pg_dump
 from clouddump.job_github import run_github_backup
 from clouddump.job_rsync import run_rsync_sync
 from clouddump.job_imap import run_imap_sync
-from clouddump.job_kopia import run_kopia_snapshot
+from clouddump.job_kopia import repository_label, run_kopia_snapshot
 
 _RUNNERS = {
     "azstorage": ("blobstorages", run_az_sync),
@@ -25,11 +25,12 @@ _TARGET_LABEL_FIELDS = {
     "github": "name",
     "rsync": "source",
     "imap": "user",
-    "kopia": "bucket",
 }
 
 
 def _target_label(target, job_type):
+    if job_type == "kopia":
+        return repository_label(target)
     field = _TARGET_LABEL_FIELDS.get(job_type)
     if not field:
         return "?"
