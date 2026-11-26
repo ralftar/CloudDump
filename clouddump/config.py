@@ -9,6 +9,7 @@ import urllib.parse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
+from clouddump.job_kopia import KEEP_KEYS
 
 
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
@@ -17,7 +18,7 @@ VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
 VALID_SMTP_SECURITY = {"ssl", "starttls", "none"}
 VALID_LOG_FORMATS = {"text", "json"}
 CONFIG_FILE = "/config/config.json"
-VALID_JOB_TYPES = {"azstorage", "pgsql", "github", "rsync", "imap"}
+VALID_JOB_TYPES = {"azstorage", "pgsql", "github", "rsync", "imap", "kopia"}
 _VALID_TABLE_FILTER_KEYS = {"tables_included", "tables_excluded"}
 VALID_IMAP_TLS = {"ssl", "starttls", "none"}
 
@@ -49,6 +50,7 @@ JOB_COLLECTIONS = {
     "github": "organizations",
     "rsync": "targets",
     "imap": "accounts",
+    "kopia": "repositories",
 }
 
 TARGET_KEYS = {
@@ -63,6 +65,9 @@ TARGET_KEYS = {
               "delete_excluded", "exclude", "min_age_days"},
     "imap": {"host", "port", "user", "pass", "destination", "tls", "cert_file",
              "delete_destination", "exclude", "info_delimiter"},
+    "kopia": {"source", "endpoint", "bucket", "prefix", "region", "disable_tls",
+              "access_key", "secret_key", "password",
+              "keep_latest", "keep_daily", "keep_weekly", "keep_monthly", "keep_annual"},
 }
 
 
@@ -90,6 +95,7 @@ TOOL_REQUIREMENTS = {
     "github": ["github-backup", "git", "curl"],
     "rsync": ["rsync", "ssh"],
     "imap": ["mbsync", "curl"],
+    "kopia": ["kopia"],
 }
 
 
@@ -237,11 +243,14 @@ def validate_jobs(jobs):
             ]),
             "rsync": ("targets", ["delete_destination", "delete_excluded"]),
             "imap": ("accounts", ["delete_destination"]),
+            "kopia": ("repositories", ["disable_tls"]),
         }
         _TARGET_INTS = {
             "pgsql": ("servers", ["port", "db_retries"]),
             "rsync": ("targets", ["ssh_port", "min_age_days"]),
             "imap": ("accounts", ["port"]),
+            "kopia": ("repositories", ["keep_latest", "keep_daily",
+                                       "keep_weekly", "keep_monthly", "keep_annual"]),
         }
         if job_type in _TARGET_BOOLS:
             coll, fields = _TARGET_BOOLS[job_type]
@@ -386,6 +395,23 @@ def validate_jobs(jobs):
                     log.error("Invalid tls '%s' for '%s' in job ID %s. Must be one of: %s.",
                               tls, cfg(account, "user"), job_id, ", ".join(sorted(VALID_IMAP_TLS)))
                     errors += 1
+
+        # Kopia reads a keep_* of 0 as "keep none", so each must be positive.
+        if job_type == "kopia":
+            for repo in cfg(job, "repositories", []):
+                bucket = cfg(repo, "bucket")
+                source = cfg(repo, "source")
+                # The container is Linux; os.path.isabs would judge by the host running the tests.
+                if source and not source.startswith("/"):
+                    log.error("Source '%s' for repository '%s' in job ID %s must be an "
+                              "absolute path.", source, bucket, job_id)
+                    errors += 1
+                for key in KEEP_KEYS:
+                    val = repo.get(key)
+                    if isinstance(val, int) and not isinstance(val, bool) and val < 1:
+                        log.error("Field '%s' for repository '%s' in job ID %s must be at "
+                                  "least 1, got %d.", key, bucket, job_id, val)
+                        errors += 1
 
         disabled_tag = "" if cfg(job, "enabled", True) else " (DISABLED)"
         summaries.append(f"ID: {job_id}{disabled_tag}\nType: {job_type}")

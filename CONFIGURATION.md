@@ -85,7 +85,7 @@ kubectl exec deploy/clouddump -- kill -USR1 1
 | Key | Required | Default | Description |
 |-----|----------|---------|-------------|
 | `id` | Yes | — | Unique job identifier |
-| `type` | Yes | — | `azstorage`, `pgsql`, `github`, `rsync`, or `imap` |
+| `type` | Yes | — | `azstorage`, `pgsql`, `github`, `rsync`, `imap`, or `kopia` |
 | `enabled` | No | `true` | Skip the job when `false`. Still validated at startup. |
 | `timeout` | No | `604800` (7 days) | Job timeout in seconds |
 | `retries` | No | `3` | Number of attempts on failure |
@@ -97,7 +97,7 @@ again. A crash (as opposed to a target reporting failure) says nothing about
 what got through, so it retries the whole job.
 
 Plus type-specific fields (`blobstorages`, `servers`, `organizations`,
-`targets`, `accounts`) — see below.
+`targets`, `accounts`, `repositories`) — see below.
 
 ## Azure Blob Storage
 
@@ -370,6 +370,53 @@ docker exec -it protonmail-bridge protonmail-bridge --cli
 After that the session is cached in the `bridge-data` volume and survives
 restarts — all subsequent syncs run unattended. Proton Bridge requires a paid
 Proton plan.
+
+## Kopia repository in S3
+
+```json
+{
+  "type": "kopia",
+  "id": "my-kopia-job",
+
+  "repositories": [
+    {
+      "source": "/mnt/clouddump",
+      "endpoint": "s3.example.com",
+      "bucket": "my-bucket",
+      "access_key": "...",
+      "secret_key": "...",
+      "password": "...",
+      "keep_daily": 14,
+      "keep_monthly": 12
+    }
+  ]
+}
+```
+
+- `source`: local directory to snapshot, as an absolute path (required).
+- `endpoint`: S3 endpoint host, without `https://` (required).
+- `bucket`: S3 bucket (required).
+- `prefix`, `region`: key prefix inside the bucket, and region, where needed.
+- `access_key`, `secret_key`: S3 credentials (required).
+- `password`: Kopia repository password (required). Kopia encrypts the
+  repository with a key derived from it; without it the repository cannot be read.
+- `keep_latest`, `keep_daily`, `keep_weekly`, `keep_monthly`, `keep_annual`:
+  how many snapshots Kopia keeps (Kopia's defaults: 10, 7, 4, 24 and 3).
+- `disable_tls`: plain HTTP to the endpoint, for a local test server only (default: `false`).
+
+Each run connects to the repository, or creates it when the bucket holds none.
+Kopia refuses to create a repository over existing data, so a wrong password or
+key fails the job instead of starting a second repository. A repository created
+beforehand with the Kopia CLI, with whatever options it needs, is used as it is.
+The run then applies the `keep_*` policy, takes the snapshot, and runs Kopia's
+full maintenance.
+
+Jobs run in config order, so a `kopia` job listed after other jobs snapshots
+what they wrote in the same run.
+
+To restore, connect Kopia to the same bucket with the same password
+(`kopia repository connect s3 ...`), then `kopia snapshot list` and
+`kopia restore`.
 
 ## Storage
 

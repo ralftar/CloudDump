@@ -34,6 +34,7 @@ you get an email.
 | GitHub (org or user) | `github` | [github-backup](https://github.com/josegonzalez/python-github-backup) | Personal access token |
 | Remote server (SSH) | `rsync` | [rsync](https://rsync.samba.org/) | SSH private key |
 | IMAP mailbox (Proton Bridge, Gmail, etc.) | `imap` | [mbsync](https://isync.sourceforge.io/) | Host, port, user, password |
+| Local directory, to an S3 Kopia repository | `kopia` | [Kopia](https://kopia.io) | S3 access key, repository password |
 
 ## Not a backup system
 
@@ -86,6 +87,7 @@ config.json ──> [Orchestrator] ──> azcopy sync
                      │          ──> github-backup
                      │          ──> rsync
                      │          ──> mbsync (IMAP → Maildir)
+                     │          ──> kopia (local directory → S3)
                      │
                      ├── cron scheduler (check every 60s)
                      ├── sequential job execution

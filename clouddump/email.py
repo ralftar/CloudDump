@@ -206,6 +206,7 @@ _TARGET_NOUNS = {
     "github": "organization",
     "rsync": "target",
     "azstorage": "storage account",
+    "kopia": "repository",
 }
 
 

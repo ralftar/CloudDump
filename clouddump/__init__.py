@@ -1,4 +1,4 @@
-"""CloudDump - Backup orchestrator for Azure Storage, PostgreSQL, GitHub, rsync, and IMAP."""
+"""CloudDump - Backup orchestrator for Azure Storage, PostgreSQL, GitHub, rsync, IMAP and Kopia."""
 
 __version__ = "0.0.0"  # patched by CI/release pipeline
 

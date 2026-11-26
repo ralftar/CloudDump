@@ -157,6 +157,7 @@ check "azcopy sync telemetry off" docker exec "$CONTAINER" azcopy sync --disable
 check "azcopy list telemetry off" docker exec "$CONTAINER" azcopy list --disable-telemetry --help
 check "pg_dump installed"        docker exec "$CONTAINER" pg_dump --version
 check "psql installed"           docker exec "$CONTAINER" psql --version
+check "kopia installed"          docker exec "$CONTAINER" kopia --version
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 

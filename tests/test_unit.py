@@ -675,7 +675,7 @@ def test_schema_matches_allowed_keys():
 
     ref_for = {
         "azstorage": "azure_blob", "pgsql": "db_server", "github": "github_org",
-        "rsync": "rsync_target", "imap": "imap_account",
+        "rsync": "rsync_target", "imap": "imap_account", "kopia": "kopia_repository",
     }
     for job_type, def_name in ref_for.items():
         assert set(defs[def_name]["properties"]) == TARGET_KEYS[job_type], job_type
@@ -726,6 +726,33 @@ def test_delete_destination_allowed_without_min_age(caplog):
     with caplog.at_level(logging.ERROR, logger="clouddump"):
         validate_jobs([_rsync_job(delete_destination=True)])
     assert not _has_min_age_error(caplog)
+
+
+def _kopia_job(**repo_over):
+    repo = {"source": "/mnt/clouddump", "endpoint": "s3.example.com", "bucket": "b",
+            "access_key": "a", "secret_key": "s", "password": "p"}
+    repo.update(repo_over)
+    return _job(type="kopia", repositories=[repo])
+
+
+def test_kopia_job_valid():
+    errors, _ = validate_jobs([_kopia_job(keep_daily=14)])
+    assert errors == 0
+
+
+def test_kopia_keep_zero_rejected():
+    errors, _ = validate_jobs([_kopia_job(keep_daily=0)])
+    assert errors == 1
+
+
+def test_kopia_relative_source_rejected():
+    errors, _ = validate_jobs([_kopia_job(source="clouddump")])
+    assert errors == 1
+
+
+def test_kopia_unknown_key_rejected():
+    errors, _ = validate_jobs([_kopia_job(retention="7d")])
+    assert errors == 1
 
 
 def test_validate_jobs_duplicate_id():

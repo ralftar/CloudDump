@@ -86,7 +86,7 @@
         "id": { "type": "string", "minLength": 1, "description": "Unique job identifier." },
         "type": {
           "type": "string",
-          "enum": ["azstorage", "pgsql", "github", "rsync", "imap"],
+          "enum": ["azstorage", "pgsql", "github", "rsync", "imap", "kopia"],
           "description": "Job type."
         },
         "enabled": { "type": "boolean", "default": true, "description": "Skip the job when false. Still validated at startup." },
@@ -99,14 +99,16 @@
         },
         "organizations": { "type": "array", "items": { "$ref": "#/$defs/github_org" } },
         "targets": { "type": "array", "items": { "$ref": "#/$defs/rsync_target" } },
-        "accounts": { "type": "array", "items": { "$ref": "#/$defs/imap_account" } }
+        "accounts": { "type": "array", "items": { "$ref": "#/$defs/imap_account" } },
+        "repositories": { "type": "array", "items": { "$ref": "#/$defs/kopia_repository" } }
       },
       "allOf": [
         { "if": { "properties": { "type": { "const": "azstorage" } } }, "then": { "required": ["blobstorages"] } },
         { "if": { "properties": { "type": { "const": "pgsql" } } }, "then": { "required": ["servers"] } },
         { "if": { "properties": { "type": { "const": "github" } } }, "then": { "required": ["organizations"] } },
         { "if": { "properties": { "type": { "const": "rsync" } } }, "then": { "required": ["targets"] } },
-        { "if": { "properties": { "type": { "const": "imap" } } }, "then": { "required": ["accounts"] } }
+        { "if": { "properties": { "type": { "const": "imap" } } }, "then": { "required": ["accounts"] } },
+        { "if": { "properties": { "type": { "const": "kopia" } } }, "then": { "required": ["repositories"] } }
       ]
     },
     "azure_blob": {
@@ -186,6 +188,27 @@
         "delete_destination": { "type": "boolean", "default": true, "description": "Mirror mode — propagate remote deletions to the local copy. The remote mailbox is never modified." },
         "exclude": { "type": "array", "items": { "type": "string" }, "description": "IMAP folder names to skip. Gmail and Proton need \"All Mail\" excluded; providers with plain folders need nothing." },
         "info_delimiter": { "type": "string", "minLength": 1, "maxLength": 1, "description": "Character separating the flag suffix in Maildir filenames. Defaults to \":\", which Windows/NTFS cannot store — use \";\" for a destination on an SMB share. Cannot be changed after the first sync." }
+      },
+      "additionalProperties": false
+    },
+    "kopia_repository": {
+      "type": "object",
+      "required": ["source", "endpoint", "bucket", "access_key", "secret_key", "password"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^/", "description": "Local directory to snapshot." },
+        "endpoint": { "type": "string", "pattern": "^[a-zA-Z0-9.:-]+$", "description": "S3 endpoint host, without scheme (e.g. s3.eu-north-1.amazonaws.com)." },
+        "bucket": { "type": "string", "minLength": 3, "description": "S3 bucket." },
+        "prefix": { "type": "string", "description": "Key prefix for the repository inside the bucket." },
+        "region": { "type": "string", "description": "S3 region, where the provider needs one." },
+        "disable_tls": { "type": "boolean", "default": false, "description": "Plain HTTP to the endpoint. For a local test server only." },
+        "access_key": { "type": "string", "description": "S3 access key ID." },
+        "secret_key": { "type": "string", "description": "S3 secret access key." },
+        "password": { "type": "string", "minLength": 1, "description": "Kopia repository password. Kopia encrypts the repository with a key derived from it." },
+        "keep_latest": { "type": "integer", "minimum": 1, "description": "Snapshots to keep regardless of age (Kopia default: 10)." },
+        "keep_daily": { "type": "integer", "minimum": 1, "description": "Daily snapshots to keep (Kopia default: 7)." },
+        "keep_weekly": { "type": "integer", "minimum": 1, "description": "Weekly snapshots to keep (Kopia default: 4)." },
+        "keep_monthly": { "type": "integer", "minimum": 1, "description": "Monthly snapshots to keep (Kopia default: 24)." },
+        "keep_annual": { "type": "integer", "minimum": 1, "description": "Yearly snapshots to keep (Kopia default: 3)." }
       },
       "additionalProperties": false
     }

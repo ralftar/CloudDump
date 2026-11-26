@@ -51,6 +51,7 @@ def _tool_versions():
         ("rsync", ["rsync", "--version"]),
         ("mbsync", ["mbsync", "--version"]),
         ("git", ["git", "--version"]),
+        ("kopia", ["kopia", "--version"]),
     ]
     versions = []
     for name, cmd in tools:
