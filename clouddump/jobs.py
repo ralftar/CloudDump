@@ -6,6 +6,7 @@ from clouddump.job_pgsql import run_pg_dump
 from clouddump.job_github import run_github_backup
 from clouddump.job_rsync import run_rsync_sync
 from clouddump.job_imap import run_imap_sync
+from clouddump.job_kopia import run_kopia_snapshot
 
 _RUNNERS = {
     "azstorage": ("blobstorages", run_az_sync),
@@ -13,6 +14,7 @@ _RUNNERS = {
     "github": ("organizations", run_github_backup),
     "rsync": ("targets", run_rsync_sync),
     "imap": ("accounts", run_imap_sync),
+    "kopia": ("repositories", run_kopia_snapshot),
 }
 
 # For the per-target summary at the end of each attempt. The field we read is
@@ -23,6 +25,7 @@ _TARGET_LABEL_FIELDS = {
     "github": "name",
     "rsync": "source",
     "imap": "user",
+    "kopia": "bucket",
 }
 
 

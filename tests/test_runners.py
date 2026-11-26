@@ -1152,6 +1152,154 @@ class TestPruneAgedOrphans:
         assert link.is_symlink()
 
 
+# ── Kopia runner ────────────────────────────────────────────────────────────
+
+
+class TestKopiaRunner:
+    """Tests for clouddump.job_kopia.run_kopia_snapshot."""
+
+    @staticmethod
+    def _cfg(source, **overrides):
+        base = {
+            "source": source,
+            "endpoint": "s3.example.com",
+            "bucket": "my-bucket",
+            "access_key": "AKIDEXAMPLE",
+            "secret_key": "s3cr3t",
+            "password": "repo-pass",
+        }
+        base.update(overrides)
+        return base
+
+    @staticmethod
+    def _run(monkeypatch, tmp_path, target, logfile, fail=()):
+        """Run with run_cmd faked; a command whose args start with any of *fail* returns 1."""
+        from clouddump import job_kopia
+
+        monkeypatch.setattr(job_kopia, "_STATE_ROOT", str(tmp_path / "state"))
+        calls = []
+
+        def fake_run_cmd(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            args = cmd[1:]
+            return 1 if any(args[:len(f)] == list(f) for f in fail) else 0
+
+        monkeypatch.setattr(job_kopia, "run_cmd", fake_run_cmd)
+        rc = job_kopia.run_kopia_snapshot(target, logfile)
+        return rc, calls
+
+    def test_connects_snapshots_and_maintains(self, monkeypatch, tmp_path, _tmp_logfile):
+        src = tmp_path / "data"
+        src.mkdir()
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(src)), _tmp_logfile)
+
+        assert rc == 0
+        steps = [c[0][1:3] for c in calls]
+        assert steps == [
+            ["repository", "connect"],
+            ["maintenance", "set"],
+            ["snapshot", "create"],
+            ["maintenance", "run"],
+        ]
+        connect = calls[0][0]
+        assert "--bucket=my-bucket" in connect
+        assert "--endpoint=s3.example.com" in connect
+        assert "--override-hostname=clouddump" in connect
+        assert calls[2][0][-1] == str(src)
+        assert "--full" in calls[3][0]
+
+    def test_secrets_only_in_environment(self, monkeypatch, tmp_path, _tmp_logfile):
+        """Arguments are visible to every process on the host; the environment is not."""
+        src = tmp_path / "data"
+        src.mkdir()
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(src)), _tmp_logfile)
+
+        assert rc == 0
+        for cmd, kwargs in calls:
+            joined = " ".join(cmd)
+            for secret in ("s3cr3t", "repo-pass", "AKIDEXAMPLE"):
+                assert secret not in joined
+            env = kwargs["env"]
+            assert env["KOPIA_PASSWORD"] == "repo-pass"
+            assert env["AWS_ACCESS_KEY_ID"] == "AKIDEXAMPLE"
+            assert env["AWS_SECRET_ACCESS_KEY"] == "s3cr3t"
+            assert env["KOPIA_CONFIG_PATH"].startswith(str(tmp_path / "state"))
+
+    def test_creates_repository_when_none_exists(self, monkeypatch, tmp_path, _tmp_logfile):
+        src = tmp_path / "data"
+        src.mkdir()
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(src)), _tmp_logfile,
+                              fail=[("repository", "connect")])
+
+        assert rc == 0
+        create = calls[1][0]
+        assert create[1:3] == ["repository", "create"]
+        assert "--bucket=my-bucket" in create
+        assert calls[-2][0][1:3] == ["snapshot", "create"]
+
+    def test_fails_when_neither_connect_nor_create_works(self, monkeypatch, tmp_path, _tmp_logfile):
+        """A wrong password: connect fails, and create refuses the existing data."""
+        src = tmp_path / "data"
+        src.mkdir()
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(src)), _tmp_logfile,
+                              fail=[("repository", "connect"), ("repository", "create")])
+
+        assert rc == 1
+        assert not any(c[0][1:3] == ["snapshot", "create"] for c in calls)
+
+    def test_reuses_existing_connection(self, monkeypatch, tmp_path, _tmp_logfile):
+        from clouddump import job_kopia
+
+        src = tmp_path / "data"
+        src.mkdir()
+        target = self._cfg(str(src))
+        monkeypatch.setattr(job_kopia, "_STATE_ROOT", str(tmp_path / "state"))
+        state = job_kopia._state_dir(target)
+        os.makedirs(state)
+        open(os.path.join(state, "repository.config"), "w").close()
+
+        rc, calls = self._run(monkeypatch, tmp_path, target, _tmp_logfile)
+
+        assert rc == 0
+        assert calls[0][0][1:3] == ["repository", "status"]
+        assert not any(c[0][1:3] == ["repository", "connect"] for c in calls)
+
+    def test_keep_policy(self, monkeypatch, tmp_path, _tmp_logfile):
+        src = tmp_path / "data"
+        src.mkdir()
+        target = self._cfg(str(src), keep_daily=14, keep_monthly=12)
+        rc, calls = self._run(monkeypatch, tmp_path, target, _tmp_logfile)
+
+        assert rc == 0
+        policy = next(c[0] for c in calls if c[0][1:3] == ["policy", "set"])
+        assert "--keep-daily=14" in policy
+        assert "--keep-monthly=12" in policy
+        assert not any(a.startswith("--keep-weekly") for a in policy)
+
+    def test_snapshot_failure_stops_before_maintenance(self, monkeypatch, tmp_path, _tmp_logfile):
+        src = tmp_path / "data"
+        src.mkdir()
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(src)), _tmp_logfile,
+                              fail=[("snapshot", "create")])
+
+        assert rc == 1
+        assert not any(c[0][1:3] == ["maintenance", "run"] for c in calls)
+
+    def test_missing_source_directory(self, monkeypatch, tmp_path, _tmp_logfile):
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(tmp_path / "absent")),
+                              _tmp_logfile)
+        assert rc == 1
+        assert calls == []
+
+    def test_missing_password(self, monkeypatch, tmp_path, _tmp_logfile):
+        src = tmp_path / "data"
+        src.mkdir()
+        rc, calls = self._run(monkeypatch, tmp_path, self._cfg(str(src), password=""),
+                              _tmp_logfile)
+        assert rc == 1
+        assert calls == []
+
+
 # ── IMAP runner ─────────────────────────────────────────────────────────────
 
 
