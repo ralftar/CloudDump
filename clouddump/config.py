@@ -9,7 +9,7 @@ import urllib.parse
 
 from clouddump import cfg, log, validate_backup_path
 from clouddump.cron import validate_cron
-from clouddump.job_kopia import KEEP_KEYS
+from clouddump.job_kopia import KEEP_KEYS, readonly_connect, repository_label
 
 
 VALID_GITHUB_ACCOUNT_TYPES = {"org", "user"}
@@ -419,8 +419,13 @@ def validate_jobs(jobs):
     return errors, "\n\n".join(summaries)
 
 
-def _run_verify(cmd, label, job_id, results, env=None, timeout=15):
-    """Run a command and log OK/WARN. Returns the CompletedProcess or None."""
+def _run_verify(cmd, label, job_id, results, env=None, timeout=15, ok_error=None):
+    """Run a command and log OK/WARN. Returns the CompletedProcess or None.
+
+    A failure whose stderr contains *ok_error* counts as OK, with that text
+    as the note: an answer the job itself handles, such as storage that holds
+    no repository yet.
+    """
     import subprocess
     try:
         proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
@@ -439,6 +444,11 @@ def _run_verify(cmd, label, job_id, results, env=None, timeout=15):
     if proc.returncode == 0:
         results.append(f"OK: {label} (job {job_id})")
         log.info("%s verified (job %s).", label, job_id)
+        return proc
+
+    if ok_error and ok_error in proc.stderr:
+        results.append(f"OK: {label}, {ok_error} (job {job_id})")
+        log.info("%s verified, %s (job %s).", label, ok_error, job_id)
         return proc
 
     err = stderr_lines[-1] if stderr_lines else "failed"
@@ -646,6 +656,22 @@ def _verify_pgsql(job, job_id, results):
 
 
 
+def _verify_kopia(job, job_id, results):
+    """Verify each Kopia repository opens with its keys and password (warn only).
+
+    Connects read-only with Kopia itself, so the probe takes the same path as
+    the job and catches a wrong password as well as a wrong key or an
+    unreachable endpoint. Storage that holds no repository yet is OK: the
+    first run creates it.
+    """
+    for target in cfg(job, "repositories", []):
+        if not all(cfg(target, k) for k in ("endpoint", "bucket", "access_key", "secret_key", "password")):
+            continue
+        with readonly_connect(target) as (cmd, env):
+            _run_verify(cmd, f"Kopia repository {repository_label(target)}", job_id, results,
+                        env=env, timeout=60, ok_error="repository not initialized")
+
+
 def verify_connectivity(jobs):
     """Run connectivity checks for all jobs (warn only).
 
@@ -677,5 +703,8 @@ def verify_connectivity(jobs):
 
         if job_type == "imap":
             _verify_imap(job, job_id, results)
+
+        if job_type == "kopia":
+            _verify_kopia(job, job_id, results)
 
     return results

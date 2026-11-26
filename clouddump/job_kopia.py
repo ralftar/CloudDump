@@ -1,7 +1,10 @@
 """Kopia job runner: snapshots of a local directory in an S3 Kopia repository."""
 
+import contextlib
 import hashlib
 import os
+import shutil
+import tempfile
 import time
 
 from clouddump import cfg, log, run_cmd
@@ -20,6 +23,14 @@ _IDENTITY = ["--override-username=clouddump", "--override-hostname=clouddump"]
 # Snapshot retention, as Kopia's own --keep-* policy flags. Unset keys keep
 # Kopia's defaults.
 KEEP_KEYS = ("keep_latest", "keep_daily", "keep_weekly", "keep_monthly", "keep_annual")
+
+
+def repository_label(target):
+    """Where the repository is, as endpoint/bucket[/prefix], for reports."""
+    parts = [cfg(target, "endpoint") or "?", cfg(target, "bucket") or "?"]
+    if cfg(target, "prefix"):
+        parts.append(cfg(target, "prefix").strip("/"))
+    return "/".join(parts)
 
 
 def _state_dir(target):
@@ -54,6 +65,22 @@ def _env(target, state):
     }
 
 
+@contextlib.contextmanager
+def readonly_connect(target):
+    """Yield ``(cmd, env)`` that connects read-only to the repository.
+
+    In a throwaway state directory, removed afterwards with whatever Kopia
+    wrote there, so a probe leaves the job's own connection untouched.
+    """
+    os.makedirs(_STATE_ROOT, mode=0o700, exist_ok=True)
+    state = tempfile.mkdtemp(prefix="probe-", dir=_STATE_ROOT)
+    try:
+        yield (["kopia", "repository", "connect", *_storage_args(target),
+                "--readonly", "--no-persist-credentials"], _env(target, state))
+    finally:
+        shutil.rmtree(state, ignore_errors=True)
+
+
 def run_kopia_snapshot(target, logfile_path):
     """Snapshot *source* into the Kopia repository *target* describes.
 
@@ -77,7 +104,7 @@ def run_kopia_snapshot(target, logfile_path):
     os.makedirs(state, mode=0o700, exist_ok=True)
     env = _env(target, state)
     storage = _storage_args(target)
-    extra = {"source": source, "destination": bucket}
+    extra = {"source": source, "destination": repository_label(target)}
 
     def kopia(*args):
         return run_cmd(["kopia", *args], env=env, logfile_path=logfile_path)
