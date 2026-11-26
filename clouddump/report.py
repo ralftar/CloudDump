@@ -130,11 +130,15 @@ def _scalar(value):
 def config(value):
     """A configuration value as tables: a dict as key/value rows, a list of
     dicts (accounts, servers, ...) as one block each, other lists inline.
-    The value must already be redacted."""
+    The value must already be redacted.
+
+    A key never breaks inside: Outlook on the web drops white-space:nowrap,
+    and a key nested in a value would then inherit that cell's break-word
+    and shrink to one letter a line."""
     if isinstance(value, dict):
         rows = "".join(
-            f'<tr><td style="padding:4px 14px 4px 0;color:{_MUTED};white-space:nowrap;width:1%;'
-            f'vertical-align:top;font-family:{_MONO};font-size:12px">{escape(str(k))}</td>'
+            f'<tr><td style="padding:4px 14px 4px 0;color:{_MUTED};white-space:nowrap;word-break:normal;'
+            f'overflow-wrap:normal;width:1%;vertical-align:top;font-family:{_MONO};font-size:12px">{escape(str(k))}</td>'
             f'<td style="padding:4px 0;color:{_INK};font-size:13px;word-break:break-word">{config(v)}</td></tr>'
             for k, v in value.items()
         )

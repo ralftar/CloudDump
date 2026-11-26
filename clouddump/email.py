@@ -200,13 +200,14 @@ def format_job_config(job):
 
 
 # What a job's targets are called, for "1 of 2 accounts failed".
+# Singular and plural, since not every plural is the singular plus "s".
 _TARGET_NOUNS = {
-    "imap": "account",
-    "pgsql": "server",
-    "github": "organization",
-    "rsync": "target",
-    "azstorage": "storage account",
-    "kopia": "repository",
+    "imap": ("account", "accounts"),
+    "pgsql": ("server", "servers"),
+    "github": ("organization", "organizations"),
+    "rsync": ("target", "targets"),
+    "azstorage": ("storage account", "storage accounts"),
+    "kopia": ("repository", "repositories"),
 }
 
 
@@ -273,16 +274,16 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         summary += f" | attempt {attempts_used}/{max_attempts}"
     log.info("Job report: %s", summary)
 
-    noun = _TARGET_NOUNS.get(job_type, "target")
+    noun, nouns = _TARGET_NOUNS.get(job_type, ("target", "targets"))
     failed = [o for o in outcomes if o[2] != 0]
     if status == "Failure" and len(outcomes) > 1:
-        headline = f"{len(failed)} of {len(outcomes)} {noun}s failed"
+        headline = f"{len(failed)} of {len(outcomes)} {nouns} failed"
     elif status == "Failure":
         headline = f"The {noun} failed" if outcomes else "The job failed"
     elif status == "Warning":
         headline = f"Succeeded on attempt {attempts}"
     else:
-        headline = f"All {len(outcomes)} {noun}s backed up" if len(outcomes) > 1 else "Backed up"
+        headline = f"All {len(outcomes)} {nouns} backed up" if len(outcomes) > 1 else "Backed up"
     if status == "Failure" and attempts_used and attempts_used > 1:
         headline += f" after {attempts_used} attempts"
     headline += f" · {elapsed}"
@@ -304,7 +305,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
     if outcomes:
         # Not every job type has a destination per target (pgsql, github).
         dest = any(cfg(t, "destination") for t, _, _, _ in outcomes)
-        sections.append(report.section(f"{noun}s", report.table(
+        sections.append(report.section(nouns, report.table(
             ["", noun.capitalize()] + (["Destination"] if dest else []) + ["Attempt"],
             [[report.badge(rc == 0), escape(label)]
              + ([escape(cfg(t, "destination"))] if dest else []) + [str(attempt)]
@@ -322,7 +323,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         lines += ["", "WHAT WENT WRONG" if status == "Failure" else "ERRORS BEFORE THE RETRY SUCCEEDED", ""]
         lines += errors + ([f"… and {more} more in the log"] if more else [])
     if outcomes:
-        lines += ["", f"{noun.upper()}S", ""]
+        lines += ["", nouns.upper(), ""]
         for t, label, rc, attempt in outcomes:
             dest = cfg(t, "destination")
             lines.append(f"{'OK  ' if rc == 0 else 'FAIL'}  {label}"
