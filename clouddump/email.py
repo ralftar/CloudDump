@@ -313,9 +313,9 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
         "The full log of each attempt is attached." if email_log_attached
         else "Set email_log_attached to true to get the logs attached.")))
 
-    html = report.page(status, job_id, headline, host, version, sections)
+    html = report.page(status, f"Job: {job_id}", headline, host, version, sections)
 
-    lines = [f"CloudDump {host}: {job_id} — {status}", headline, ""]
+    lines = [f"CloudDump {host}: Job {job_id} — {status}", headline, ""]
     lines += [f"{label}: {value}" for label, value in rows]
     if errors:
         lines += ["", "WHAT WENT WRONG" if status == "Failure" else "ERRORS BEFORE THE RETRY SUCCEEDED", ""]
@@ -349,7 +349,7 @@ def send_job_report(config, version, host, job, exit_code, t_start, t_end, logfi
                     name = f"clouddump-{job_id}-{timestamp}{suffix}-{tag}.log"
                     attachments.append((sidecar, name))
 
-    subject = f"[{status}] CloudDump {host}: {job_id}"
+    subject = f"[{status}] CloudDump {host}: Job {job_id}"
     if failed and len(outcomes) > 1:
         subject += f" ({len(failed)} of {len(outcomes)} failed)"
     if send_email(config, subject, body, attachments, html) is False:
@@ -390,9 +390,9 @@ def send_run_report(config, version, host, records, t_start, t_end):
             sections.append(report.section(title, report.pre("\n".join(r["errors"]), "error")))
     sections.append(report.section("Details", report.note(
         "Each job's own email has its targets, configuration and logs.")))
-    html = report.page(status, "Backup run", f"{headline} · {elapsed}", host, version, sections)
+    html = report.page(status, "Summary", f"{headline} · {elapsed}", host, version, sections)
 
-    lines = [f"CloudDump {host}: backup run — {status}", f"{headline} · {elapsed}", "",
+    lines = [f"CloudDump {host}: Summary — {status}", f"{headline} · {elapsed}", "",
              f"Started: {_utc(t_start)}", f"Finished: {_utc(t_end)}", "", "JOBS", ""]
     lines += [f"{pills[r['status']][1]:<5}  {r['job_id']} ({r['job_type']}): {r['headline']}" for r in records]
     for r in failed + retried:
@@ -400,7 +400,7 @@ def send_run_report(config, version, host, records, t_start, t_end):
             lines += ["", f"{r['job_id'].upper()}", ""] + r["errors"]
     lines += ["", "----", f"CloudDump v{version}", report.REPO_URL, ""]
 
-    if send_email(config, f"[{status}] CloudDump {host}: {headline}", "\n".join(lines), html=html) is False:
+    if send_email(config, f"[{status}] CloudDump {host}: Summary, {headline}", "\n".join(lines), html=html) is False:
         log.error("Run summary email could not be sent.")
 
 
