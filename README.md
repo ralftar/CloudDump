@@ -306,14 +306,14 @@ Subject lines follow a fixed format so they're easy to filter on:
 |---------|------|
 | `[Started] CloudDump {host}` | Process started, all connectivity checks passed |
 | `[Degraded] CloudDump {host}` | Process started, one or more connectivity checks returned a warning |
-| `[Success] CloudDump {host}: {job_id}` | Job succeeded on the first attempt |
-| `[Warning] CloudDump {host}: {job_id}` | Job succeeded, but only after one or more retries |
-| `[Failure] CloudDump {host}: {job_id}` | Job failed after all retry attempts |
-| `[Success] CloudDump {host}: 7 of 7 jobs OK` | Run summary: every job succeeded (`[Warning]` if some only on a retry) |
-| `[Failure] CloudDump {host}: 1 of 7 jobs failed` | Run summary: one or more jobs failed; the summary shows why |
+| `[Success] CloudDump {host}: Job {job_id}` | Job succeeded on the first attempt |
+| `[Warning] CloudDump {host}: Job {job_id}` | Job succeeded, but only after one or more retries |
+| `[Failure] CloudDump {host}: Job {job_id}` | Job failed after all retry attempts |
+| `[Success] CloudDump {host}: Summary, 7 of 7 jobs OK` | Run summary: every job succeeded (`[Warning]` if some only on a retry) |
+| `[Failure] CloudDump {host}: Summary, 1 of 7 jobs failed` | Run summary: one or more jobs failed; the summary shows why |
 
 A job with more than one target adds how many failed to a failure:
-`[Failure] CloudDump {host}: {job_id} (1 of 2 failed)`.
+`[Failure] CloudDump {host}: Job {job_id} (1 of 2 failed)`.
 
 ## Contributing
 

@@ -1322,7 +1322,7 @@ def test_job_report_leads_with_what_failed(tmp_path):
                         outcomes=[(a, "a@x", 1, 3), (b, "b@x", 0, 1)])
 
     msg = _sent_message()
-    assert msg["Subject"] == "[Failure] CloudDump host: imap-x (1 of 2 failed)"
+    assert msg["Subject"] == "[Failure] CloudDump host: Job imap-x (1 of 2 failed)"
     html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
     text = _parts(msg, "text/plain")[0].get_payload(decode=True).decode("utf-8")
     for body in (html, text):
@@ -1345,7 +1345,7 @@ def test_job_report_success_shows_no_errors(tmp_path):
                         outcomes=[({"host": "db"}, "db", 0, 1)])
     msg = _sent_message()
     html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
-    assert msg["Subject"] == "[Success] CloudDump host: pg"
+    assert msg["Subject"] == "[Success] CloudDump host: Job pg"
     assert "What went wrong" not in html
     assert "Destination" not in html, "pgsql targets have no destination column"
 
@@ -1387,7 +1387,7 @@ def test_run_report_counts_jobs_and_shows_why_one_failed():
     with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
         send_run_report(_smtp_config(), "1.0.0", "host", records, 0, 60)
     msg = _sent_message()
-    assert msg["Subject"] == "[Failure] CloudDump host: 1 of 3 jobs failed"
+    assert msg["Subject"] == "[Failure] CloudDump host: Summary, 1 of 3 jobs failed"
     html = _parts(msg, "text/html")[0].get_payload(decode=True).decode("utf-8")
     assert "c: what went wrong" in html and "Error: box gone" in html
     assert "b: errors before the retry succeeded" in html and "RETRY" in html
@@ -1399,7 +1399,7 @@ def test_run_report_all_ok():
                 "headline": "Backed up · 1s", "elapsed": "1s", "errors": []}]
     with patch("clouddump.email.smtplib.SMTP_SSL", _FakeSMTP):
         send_run_report(_smtp_config(), "1.0.0", "host", records, 0, 60)
-    assert _sent_message()["Subject"] == "[Success] CloudDump host: 1 of 1 job OK"
+    assert _sent_message()["Subject"] == "[Success] CloudDump host: Summary, 1 of 1 job OK"
 
 
 def test_configuration_is_tables_not_json_and_keeps_secrets_out():
